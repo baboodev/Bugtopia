@@ -1043,8 +1043,9 @@ Optional hotkeys: toggle auto fish, teleport fishing route (if configured).
 Foraging vehicle settings) instead of teleported. Fishing keeps running on the way — a cast, bite
 or battle stops the walk and it resumes once the session is over; an auto repair on the way (kit
 queued, in use, or its aura running) stops the walk the same way. Aura Farm is stopped when the
-route starts driving the walker. The teleport remains the fallback when the walker is unavailable
-or refuses a route, when a walk fails twice, or after 300 s of travel.
+route starts driving the walker. A spot the walker cannot reach (route refused, walk failed twice,
+300 s of travel) is skipped for the next one on the list; the teleport remains only when the walker
+is not available at all (a boss run) or every spot refused in a row.
 
 **Note:** Startup log explicitly states `AutoFish subsystem disabled` — refers to the **old** `AutoFishLogic` pipeline, not `AutoFishingFarm`.
 

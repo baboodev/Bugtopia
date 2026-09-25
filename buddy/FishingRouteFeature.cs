@@ -491,15 +491,41 @@ namespace HeartopiaMod
             return best;
         }
 
-        // A hop: walk when the walker is available, teleport otherwise.
+        // A hop: walk when the walker is available, teleport otherwise. A spot the walker cannot
+        // route to is SKIPPED for the next one on the list (user rule 2026-09-25) — the teleport is
+        // kept only for a walker that is not ours to drive (a boss run) and for the case where
+        // every spot on the list refused in a row.
         private static void GoToSpot(HeartopiaComplete host, int index)
         {
-            if (host.FishingRouteWalkAvailable && TryBeginTravel(host, index))
+            currentIndex = index;
+            if (!host.FishingRouteWalkAvailable)
             {
+                TeleportToSpot(host, currentIndex);
                 return;
             }
 
-            TeleportToSpot(host, index);
+            if (!host.FishingRoutePrepareWalk(out string why))
+            {
+                ModLogger.Msg("[FishingRoute] walking unavailable (" + why + ") — teleporting to '" + GetSpotName(currentIndex) + "'.");
+                TeleportToSpot(host, currentIndex);
+                return;
+            }
+
+            for (int attempt = 0; attempt < TotalSpotCount; attempt++)
+            {
+                if (TryBeginTravel(host, currentIndex))
+                {
+                    return;
+                }
+
+                int next = (currentIndex + 1) % TotalSpotCount;
+                ModLogger.Msg("[FishingRoute] no route to '" + GetSpotName(currentIndex) + "' — skipping to spot "
+                    + (next + 1) + "/" + TotalSpotCount + " '" + GetSpotName(next) + "'.");
+                currentIndex = next;
+            }
+
+            ModLogger.Msg("[FishingRoute] no route to any spot on the list — teleporting to '" + GetSpotName(currentIndex) + "'.");
+            TeleportToSpot(host, currentIndex);
         }
 
         private static void TeleportToSpot(HeartopiaComplete host, int index)
@@ -524,12 +550,6 @@ namespace HeartopiaMod
 
         private static bool TryBeginTravel(HeartopiaComplete host, int index)
         {
-            if (!host.FishingRoutePrepareWalk(out string why))
-            {
-                ModLogger.Msg("[FishingRoute] walking unavailable (" + why + ") — teleporting to '" + GetSpotName(index) + "'.");
-                return false;
-            }
-
             Vector3 pos = GetSpotPos(index);
             float away = host.FishingRouteDistanceTo(pos);
             if (away >= 0f && away <= TravelArriveDistance)
@@ -559,11 +579,22 @@ namespace HeartopiaMod
             return true;
         }
 
+        // A travel that failed under way: the spot is given up for the next one on the list.
+        private static void SkipToNextSpot(HeartopiaComplete host, string why)
+        {
+            int failed = travelIndex;
+            EndTravel(host, why);
+            int next = (failed + 1) % TotalSpotCount;
+            ModLogger.Msg("[FishingRoute] giving up on '" + GetSpotName(failed) + "' (" + why + ") — next spot "
+                + (next + 1) + "/" + TotalSpotCount + " '" + GetSpotName(next) + "'.");
+            GoToSpot(host, next);
+        }
+
         private static bool StartTravelWalk(HeartopiaComplete host, string why)
         {
             if (!host.FishingRouteBeginWalk(travelTarget, GetSpotName(travelIndex)))
             {
-                ModLogger.Msg("[FishingRoute] the walker refused a route to '" + GetSpotName(travelIndex) + "' (" + why + ") — teleporting.");
+                ModLogger.Msg("[FishingRoute] the walker refused a route to '" + GetSpotName(travelIndex) + "' (" + why + ").");
                 return false;
             }
 
@@ -604,7 +635,7 @@ namespace HeartopiaMod
                 travelPausedForFishing = false;
                 if (!StartTravelWalk(host, "fishing over"))
                 {
-                    TeleportFallback(host, "no route after fishing");
+                    SkipToNextSpot(host, "no route after fishing");
                 }
                 return;
             }
@@ -647,7 +678,7 @@ namespace HeartopiaMod
                 ModLogger.Msg("[FishingRoute] repair " + (repairBusy ? "hold timed out" : "done") + " — walking on to '" + GetSpotName(travelIndex) + "'.");
                 if (!StartTravelWalk(host, "repair over"))
                 {
-                    TeleportFallback(host, "no route after repair");
+                    SkipToNextSpot(host, "no route after repair");
                 }
                 return;
             }
@@ -675,7 +706,7 @@ namespace HeartopiaMod
             {
                 if (!StartTravelWalk(host, "resume"))
                 {
-                    TeleportFallback(host, "no route on resume");
+                    SkipToNextSpot(host, "no route on resume");
                 }
                 return;
             }
@@ -689,7 +720,7 @@ namespace HeartopiaMod
 
             if (now - travelStartedAt > TravelDeadlineSeconds)
             {
-                TeleportFallback(host, "travel deadline (" + TravelDeadlineSeconds.ToString("F0") + "s)");
+                SkipToNextSpot(host, "travel deadline (" + TravelDeadlineSeconds.ToString("F0") + "s)");
                 return;
             }
 
@@ -716,7 +747,7 @@ namespace HeartopiaMod
                     + " from '" + GetSpotName(travelIndex) + "' (" + travelWalkFailures + "/" + TravelMaxWalkFailures + ").");
                 if (travelWalkFailures >= TravelMaxWalkFailures || !StartTravelWalk(host, "retry"))
                 {
-                    TeleportFallback(host, "walk failed");
+                    SkipToNextSpot(host, "walk failed");
                 }
             }
         }
@@ -733,14 +764,6 @@ namespace HeartopiaMod
             MarkArrived(index, "Arriving at spot");
             ModLogger.Msg("[FishingRoute] arrived at spot " + (index + 1) + "/" + TotalSpotCount + " '" + GetSpotName(index)
                 + "' on foot (" + away.ToString("F1") + "m, " + took.ToString("F0") + "s).");
-        }
-
-        private static void TeleportFallback(HeartopiaComplete host, string why)
-        {
-            int index = travelIndex;
-            EndTravel(host, why);
-            ModLogger.Msg("[FishingRoute] falling back to the teleport (" + why + ").");
-            TeleportToSpot(host, index);
         }
 
         private static void EndTravel(HeartopiaComplete host, string why)
