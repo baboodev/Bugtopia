@@ -57,7 +57,8 @@ namespace HeartopiaMod
         {
             get
             {
-                int rows = (ActionPanelRows.Length + UguiActionPanelColumns - 1) / UguiActionPanelColumns;
+                // +1 for the Stop cell after the last action.
+                int rows = (ActionPanelRows.Length + 1 + UguiActionPanelColumns - 1) / UguiActionPanelColumns;
                 return UguiActionPanelTitleH + UguiActionPanelPadBottom
                     + (rows * UguiActionPanelButtonH)
                     + ((rows - 1) * UguiActionPanelGap);
@@ -98,7 +99,7 @@ namespace HeartopiaMod
                     int column = i % UguiActionPanelColumns;
                     int line = i / UguiActionPanelColumns;
 
-                    GameObject button = this.CreateUguiSecondaryButton(panelT, "Action" + row.Id,
+                    GameObject button = this.CreateUguiSecondaryButton(panelT, "Action" + row.Id + "_" + i,
                         row.Label, () => this.CastActionPanelRow(row));
                     PlaceUguiTopLeft(button,
                         UguiActionPanelPadX + (column * (UguiActionPanelButtonW + UguiActionPanelGap)),
@@ -106,6 +107,21 @@ namespace HeartopiaMod
                         UguiActionPanelButtonW,
                         UguiActionPanelButtonH);
                 }
+
+                // Several of these clips HOLD the body — the interaction ones run until something
+                // ends them, and while one is casting every further cast is refused as busy. This
+                // is the way out, and it is in the panel rather than the menu because the panel is
+                // the only thing open when it is needed.
+                int stopIndex = ActionPanelRows.Length;
+                GameObject stopButton = this.CreateUguiSecondaryButton(panelT, "ActionStop",
+                    this.L("Stop"), new System.Action(this.EndActionPanelCasting));
+                PlaceUguiTopLeft(stopButton,
+                    UguiActionPanelPadX
+                        + ((stopIndex % UguiActionPanelColumns) * (UguiActionPanelButtonW + UguiActionPanelGap)),
+                    UguiActionPanelTitleH
+                        + ((stopIndex / UguiActionPanelColumns) * (UguiActionPanelButtonH + UguiActionPanelGap)),
+                    UguiActionPanelButtonW,
+                    UguiActionPanelButtonH);
 
                 handle.LastSyncedUiScale = this.GetUiScale();
                 this.SetUguiWindowScale(handle.Window, handle.LastSyncedUiScale);

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using UnityEngine;
 
 namespace HeartopiaMod
@@ -67,7 +68,7 @@ namespace HeartopiaMod
         internal readonly struct ActionPanelRow
         {
             public ActionPanelRow(int id, string label, string name, string context, string fields,
-                                  int controllerShortName = 0)
+                                  int controllerShortName = 0, string constants = null)
             {
                 this.Id = id;
                 this.Label = label;
@@ -75,6 +76,7 @@ namespace HeartopiaMod
                 this.Context = context;
                 this.Fields = fields;
                 this.ControllerShortName = controllerShortName;
+                this.Constants = constants;
             }
 
             public int Id { get; }
@@ -89,6 +91,14 @@ namespace HeartopiaMod
 
             /// Non-zero only for the rows whose clip family has to be spelled out (the axe swings).
             public int ControllerShortName { get; }
+
+            /// Fixed int field values this row needs, as "name=value|name=value".
+            ///
+            /// The filler below can work out the generic gates (combo count, social type, the
+            /// player's own position), but not a value that IDENTIFIES one particular thing —
+            /// an interaction id, for instance, which is what picks the clip for the whole
+            /// OnceInteract family. Those are spelled out per row.
+            public string Constants { get; }
         }
 
         internal static readonly ActionPanelRow[] ActionPanelRows = new ActionPanelRow[]
@@ -116,6 +126,30 @@ namespace HeartopiaMod
             new ActionPanelRow(283, "Invite", "InitiatorPrepareSocial", "XDTLevelAndEntity.Gameplay.Action.SocialInitiatorPrepareArg", "actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
             new ActionPanelRow(285, "Leave Tub", "PlayTubOff", "XDTLevelAndEntity.Gameplay.Action.PlayerTubOffArg", "targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
             new ActionPanelRow(297, "Reel In", "FishThrowSuccess", "ScriptsRefactory.LevelAndEntity.Gameplay.Action.PlayerFishThrowSuccessParam", "floatTargetPos:Vector3|localRotation:Quaternion|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
+            // ── interaction clips (ActionId 313, OnceInteractConfig) ────────────────────────
+            //
+            // These nine share one ActionId and differ ONLY by interactId, because
+            // PlayerActionOnceInteract does not name its own clip: it asks
+            // InteractionPiplineSystem for the config behind the id, so the id IS the animation
+            // selector. Picked out of the 90 interactions of this shape by casting every one and
+            // reading the animator state back (AnimHashConvert.ToStateName); the state each plays
+            // is noted so a game update that moves them is diffable.
+            //
+            // The labels are what the animation LOOKS like — these clips belong to the
+            // interactions themselves, not to the Singleaction catalogue, so they have no game
+            // name of their own.
+            //
+            // Cast with no target: occupiedLevelObject stays 0, so OnFinishAction finds no
+            // furniture and returns. The clip is all that happens.
+            new ActionPanelRow(313, "Paper Punch", "OnceInteract 707045", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707045"),   // Linkage06
+            new ActionPanelRow(313, "Shower", "OnceInteract 707086", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707086"),        // Petty253
+            new ActionPanelRow(313, "Spoon", "OnceInteract 707087", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707087"),         // Petty254
+            new ActionPanelRow(313, "Sauce", "OnceInteract 707088", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707088"),         // Petty220
+            new ActionPanelRow(313, "Paint", "OnceInteract 707111", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707111"),         // Petty322
+            new ActionPanelRow(313, "Reading", "OnceInteract 707130", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707130"),       // Petty332
+            new ActionPanelRow(313, "Put Lock", "OnceInteract 707193", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707193"),      // Petty355
+            new ActionPanelRow(313, "Air Dance", "OnceInteract 707222", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707222"),     // Petty385
+            new ActionPanelRow(313, "Air Fly", "OnceInteract 707225", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707225"),       // Petty375
             new ActionPanelRow(318, "Open Door", "OpenRotateDoor", "XDTLevelAndEntity.Gameplay.Action.PlayerOpenRotateDoorOnArg", "interactId:int|position:Vector3|faceDir:Vector2|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
             new ActionPanelRow(323, "Tank Dive", "FishTankSwimmingOn", "XDTLevelAndEntity.Gameplay.Action.PlayerSwimInFishTankOnArg", "position:Vector3|rotation:Quaternion|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
             new ActionPanelRow(386, "Take Candy", "PlayerTakeCandyAction", "XDTLevelAndEntity.Gameplay.Action.TakeCandyArg", "targetPoint:Vector3|targetForward:Vector2|poseType:ControllerPoseType|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
@@ -258,6 +292,25 @@ namespace HeartopiaMod
                     }
                 }
 
+                // Row-specific fixed values, applied last so they always win over the generic
+                // filler above.
+                string[] constants = (row.Constants ?? string.Empty).Split('|');
+                for (int i = 0; i < constants.Length; i++)
+                {
+                    int eq = constants[i].IndexOf('=');
+                    if (eq <= 0)
+                    {
+                        continue;
+                    }
+
+                    if (int.TryParse(constants[i].Substring(eq + 1), NumberStyles.Integer,
+                                     CultureInfo.InvariantCulture, out int constantValue))
+                    {
+                        this.SetActionPanelInt(argObj, argClass, constants[i].Substring(0, eq),
+                                               constantValue);
+                    }
+                }
+
                 IntPtr* args = stackalloc IntPtr[1];
                 args[0] = argObj;
                 IntPtr exc = IntPtr.Zero;
@@ -286,6 +339,100 @@ namespace HeartopiaMod
         // A Vector3 that names a PLACE, not a direction. Getting this wrong in either direction is
         // visible: fill a direction and the action aims at the world origin, leave a place empty and
         // the character is teleported under the map.
+        // Ends whatever the body is playing — the lever behind the panel's Stop button.
+        //
+        // The interaction clips (ActionId 313) do not release on their own: one held the character
+        // for minutes in testing, and while it runs every other cast comes back ActionErrorCode 1
+        // (busy). ActorActionGraph.EndCasting is the same lever the craft/dye skip uses.
+        internal void EndActionPanelCasting()
+        {
+            string status = "unavailable";
+            bool ok = false;
+            try
+            {
+                ok = this.TryEndActionPanelCasting(out status);
+            }
+            catch (Exception ex)
+            {
+                status = ex.GetType().Name + ": " + ex.Message;
+            }
+
+            this.actionPanelStatus = ok ? "Stopped the current action." : ("Stop failed: " + status);
+            FeatureLog.Life("ActionPanel", "stop -> " + (ok ? "ok" : ("FAILED (" + status + ")")));
+        }
+
+        private bool TryEndActionPanelCasting(out string status)
+        {
+            status = "unavailable";
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            if (!AuraMonoPinningAvailable)
+            {
+                status = "pinning unavailable";
+                return false;
+            }
+
+            IntPtr playerClass = this.FindAuraMonoClassInAllLoadedImages(
+                "LocalPlayerComponent", "XDTLevelAndEntity.Gameplay.Component.Player");
+            IntPtr graphClass = this.FindAuraMonoClassInAllLoadedImages(
+                "ActorActionGraph", "XDTLevelAndEntity.Gameplay.Playable");
+            IntPtr getGraph = playerClass == IntPtr.Zero
+                ? IntPtr.Zero
+                : this.FindAuraMonoMethodOnHierarchy(playerClass, "get_actionGraph", 0);
+            IntPtr endCasting = graphClass == IntPtr.Zero
+                ? IntPtr.Zero
+                : this.FindAuraMonoMethodOnHierarchy(graphClass, "EndCasting", 0);
+            if (getGraph == IntPtr.Zero || endCasting == IntPtr.Zero)
+            {
+                status = "get_actionGraph=" + (getGraph != IntPtr.Zero)
+                         + " EndCasting=" + (endCasting != IntPtr.Zero);
+                return false;
+            }
+
+            System.Collections.Generic.List<uint> pins = new System.Collections.Generic.List<uint>();
+            try
+            {
+                if (!this.TryAuraMonoGetComponentObjects(playerClass,
+                        out System.Collections.Generic.List<IntPtr> players, pins)
+                    || players == null || players.Count == 0)
+                {
+                    status = "no local player";
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr graph = auraMonoRuntimeInvoke(getGraph, players[0], IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || graph == IntPtr.Zero)
+                {
+                    status = "no action graph";
+                    return false;
+                }
+
+                uint graphPin = AuraMonoPinNew(graph);
+                if (graphPin != 0u)
+                {
+                    pins.Add(graphPin);
+                }
+
+                auraMonoRuntimeInvoke(endCasting, graph, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    status = "EndCasting threw 0x" + exc.ToInt64().ToString("X");
+                    return false;
+                }
+
+                status = "ok";
+                return true;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+        }
+
         private static bool IsActionPanelPositionField(string name)
         {
             return string.Equals(name, "position", StringComparison.Ordinal)
@@ -294,6 +441,9 @@ namespace HeartopiaMod
                 || string.Equals(name, "floatTargetPos", StringComparison.Ordinal)
                 || string.Equals(name, "dstPosition", StringComparison.Ordinal)
                 || string.Equals(name, "endPosition", StringComparison.Ordinal)
+                // IMoveStrideWhenStart reads this one and STEPS THERE on start, so an unfilled
+                // destination walks the character to the world origin.
+                || string.Equals(name, "destination", StringComparison.Ordinal)
                 || string.Equals(name, "playPosition", StringComparison.Ordinal);
         }
 
