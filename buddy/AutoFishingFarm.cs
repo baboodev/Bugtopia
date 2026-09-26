@@ -386,7 +386,7 @@ namespace HeartopiaMod
             else
             {
                 nextAutoBaitAt = now + AutoBaitFailBackoff;
-                Log("Auto Bait: " + kind + " not available in bag; backing off " + AutoBaitFailBackoff + "s");
+                Log("Auto Bait: " + kind + " not thrown; backing off " + AutoBaitFailBackoff + "s");
             }
         }
         public static bool GetInstantCatchEnabled() => instantCatchEnabled;

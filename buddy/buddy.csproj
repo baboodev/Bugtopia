@@ -320,6 +320,7 @@
     <Compile Include="CraftAnimationSkipFeature.cs" />
     <Compile Include="AutoLearnRecipeFeature.cs" />
     <Compile Include="RepairThrowAnimationTrimFeature.cs" />
+    <Compile Include="BaitThrowAnimationTrimFeature.cs" />
     <Compile Include="CraftDirectSendFeature.cs" />
     <Compile Include="FishingCameraHudFeature.cs" />
     <Compile Include="ServerSideFishingFeature.cs" />

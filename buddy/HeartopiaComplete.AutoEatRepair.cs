@@ -2101,7 +2101,8 @@ namespace HeartopiaMod
             }
             else
             {
-                this.AddMenuNotification(this.L("No bait found in bag"), new Color(1f, 0.65f, 0.45f));
+                // The game already showed its own "can't throw here" tip for the no-water case.
+                this.AddMenuNotification(this.L(this.lastBaitThrowNoWater ? "No water ahead to throw at" : "No bait found in bag"), new Color(1f, 0.65f, 0.45f));
             }
         }
 
@@ -2118,7 +2119,7 @@ namespace HeartopiaMod
             }
             else
             {
-                this.AddMenuNotification(this.L("No attractor found in bag"), new Color(1f, 0.65f, 0.45f));
+                this.AddMenuNotification(this.L(this.lastBaitThrowNoWater ? "No water ahead to throw at" : "No attractor found in bag"), new Color(1f, 0.65f, 0.45f));
             }
         }
 
@@ -2127,17 +2128,20 @@ namespace HeartopiaMod
         public bool TryThrowFishBaitForAuto(bool useBait, out string kind)
         {
             kind = useBait ? "bait" : "attractor";
-            return useBait ? this.TryUseBaitFromBag() : this.TryUseAttractorFromBag();
+            bool thrown = useBait ? this.TryUseBaitFromBag() : this.TryUseAttractorFromBag();
+            if (!thrown)
+            {
+                kind += this.lastBaitThrowNoWater ? " (no water ahead)" : " (not in bag or on cooldown)";
+            }
+            return thrown;
         }
 
         // Direct bait/attractor throw without the ~1.5-2s spread animation, same pattern as the direct
         // repair-kit throw: AuraMono-invoke the game's own network sender at the end of its throw chain.
         // Bait  = FishingProtocolManager.CmdScatterBait(uint baitNetId, Vector3 position) -> SpawnFishByBaitCommand.
         // Lure  = FishingProtocolManager.CmdUseFishTrapDevice(uint deviceNetId, Vector3 pos, Quaternion rot) -> SpawnFishRefreshDeviceCommand.
-        // Both are pure WebRequestUtility.SendCommand (no local anim). Position computed ahead of the
-        // player (the game's own CanThrowAutoBait has an out-Vector3 that's unsafe via mono invoke).
-        // 3m matches the game's standard: FishGear searches 3–5m (FishGearMinLength=3), toolRestorerLength=3.
-        private const float BaitThrowDistance = 4f;         // bait / attractor forward throw distance
+        // Both are pure WebRequestUtility.SendCommand (no local anim). The position is the game's own
+        // FishHelper.CanThrowAutoBait target — see TryResolveGameBaitThrowTarget.
         private const float ToolRestorerThrowDistance = 3f; // repair-kit DEFAULT forward throw distance
         // Bound for every repair-kit throw offset axis, applied as +/- this value: the restorer's
         // aura radius, TableBuffConfig.range for the tool-restore buffs 701-706 (5.0 in every row,
@@ -2244,28 +2248,92 @@ namespace HeartopiaMod
                 - sink;
         }
 
-        private bool TryComputeBaitThrowTarget(out Vector3 targetPos)
+        // ----------------------------------------------------------------------------------------
+        // Bait / attractor landing spot
+        //
+        // Asked from the game rather than invented: FishHelper.CanThrowAutoBait(out Vector3) is the
+        // exact call BackpackCmdThrowBait / BackpackFishingLureBall make before casting the throw
+        // clip, and both clips send its result verbatim. It walks the SELF entity's forward from
+        // FishGearMinLength out to +FishGearMaxOffsetLength in 0.1m steps and returns the first
+        // point that is on the water layer (so Y is the water SURFACE, not the player's height), in
+        // a legal fishing area, in line of sight, and clear of the keep-away cylinder. A plain
+        // `playerPos + forward*N` hangs the item in the air above the water from a pier or bank,
+        // and lands it on the shore when the water is further than N.
+        //
+        // The out-Vector3 is safe over raw mono_runtime_invoke because args[0] points at a real
+        // 12-byte Vector3 local — the crash rule is about an IntPtr-sized slot (memory:
+        // auramono-invoke-out-params); TryInvokeNpcSpotPosition uses the same shape. Measured live
+        // 2026-09-27 on a river bank: target 3.6m ahead, 0.99m BELOW the player's feet.
+        //
+        // On "no water" the game shows its own tip (93313 ship can't fish / 93314 illegal area /
+        // 93315 blocked / 4 no water) — the right feedback, and the item is not spent.
+        // ----------------------------------------------------------------------------------------
+        private const int BaitThrowTargetFound = 1;
+        private const int BaitThrowTargetNoWater = 0;
+        private const int BaitThrowTargetUnavailable = -1;
+
+        private IntPtr cachedCanThrowAutoBaitMethod;
+
+        // Set by TryUseBaitFromBag / TryUseAttractorFromBag so the hotkey notification can tell
+        // "nothing in the bag" from "no water ahead".
+        private bool lastBaitThrowNoWater;
+
+        private unsafe int TryResolveGameBaitThrowTarget(out Vector3 targetPos, out string status)
         {
             targetPos = Vector3.zero;
-            if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos) || playerPos == Vector3.zero)
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
             {
-                return false;
+                status = "Mono runtime unavailable";
+                return BaitThrowTargetUnavailable;
             }
 
-            Vector3 forward = Vector3.forward;
-            GameObject pr = this.FindPlayerRoot();
-            if (pr != null)
+            if (this.cachedCanThrowAutoBaitMethod == IntPtr.Zero)
             {
-                forward = pr.transform.forward;
-                forward.y = 0f;
-                forward = forward.sqrMagnitude < 0.0004f ? Vector3.forward : forward.normalized;
+                IntPtr cls = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Gameplay.Component.Fish.FishHelper");
+                if (cls == IntPtr.Zero)
+                {
+                    status = "FishHelper class unavailable";
+                    return BaitThrowTargetUnavailable;
+                }
+
+                // Arity 1 = the public (out Vector3) overload; arity 3 is the private area-tag test.
+                this.cachedCanThrowAutoBaitMethod = this.FindAuraMonoMethodOnHierarchy(cls, "CanThrowAutoBait", 1);
+                if (this.cachedCanThrowAutoBaitMethod == IntPtr.Zero)
+                {
+                    status = "CanThrowAutoBait(1) unavailable";
+                    return BaitThrowTargetUnavailable;
+                }
             }
 
-            targetPos = playerPos + forward * BaitThrowDistance;
-            return true;
+            Vector3 resolved = Vector3.zero;
+            IntPtr exc = IntPtr.Zero;
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = (IntPtr)(&resolved); // out Vector3 -> pointer to real 12-byte storage
+            IntPtr boxed = auraMonoRuntimeInvoke(this.cachedCanThrowAutoBaitMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                status = "CanThrowAutoBait threw";
+                return BaitThrowTargetUnavailable;
+            }
+
+            if (boxed == IntPtr.Zero || !this.TryUnboxMonoBoolean(boxed, out bool canThrow))
+            {
+                status = "CanThrowAutoBait result unreadable";
+                return BaitThrowTargetUnavailable;
+            }
+
+            if (!canThrow)
+            {
+                status = "no legal water ahead";
+                return BaitThrowTargetNoWater;
+            }
+
+            targetPos = resolved;
+            status = "water target " + FormatToolRestorerVec(resolved);
+            return BaitThrowTargetFound;
         }
 
-        private unsafe bool TryScatterBaitDirectMono(uint itemNetId, out string status)
+        private unsafe bool TryScatterBaitDirectMono(uint itemNetId, Vector3 targetPos, out string status)
         {
             status = "direct bait unavailable";
             try
@@ -2281,8 +2349,6 @@ namespace HeartopiaMod
 
                 IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "CmdScatterBait", 2);
                 if (method == IntPtr.Zero) { status = "CmdScatterBait(2) unavailable"; return false; }
-
-                if (!this.TryComputeBaitThrowTarget(out Vector3 targetPos)) { status = "bait target unavailable"; return false; }
 
                 uint netIdArg = itemNetId;
                 Vector3 posArg = targetPos;
@@ -2308,7 +2374,7 @@ namespace HeartopiaMod
             }
         }
 
-        private unsafe bool TryUseAttractorDirectMono(uint itemNetId, out string status)
+        private unsafe bool TryUseAttractorDirectMono(uint itemNetId, Vector3 targetPos, out string status)
         {
             status = "direct attractor unavailable";
             try
@@ -2324,8 +2390,6 @@ namespace HeartopiaMod
 
                 IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "CmdUseFishTrapDevice", 3);
                 if (method == IntPtr.Zero) { status = "CmdUseFishTrapDevice(3) unavailable"; return false; }
-
-                if (!this.TryComputeBaitThrowTarget(out Vector3 targetPos)) { status = "attractor target unavailable"; return false; }
 
                 Quaternion rotation = Quaternion.identity;
                 GameObject pr = this.FindPlayerRoot();
@@ -2359,102 +2423,89 @@ namespace HeartopiaMod
 
         private bool TryUseBaitFromBag()
         {
-            try
-            {
-                if (Time.unscaledTime < this.nextUseBaitAllowedAt)
-                {
-                    return false;
-                }
-
-                if (!this.TryFindDirectBackpackItemByStaticId(BaitStaticId, out uint netId) || netId == 0U)
-                {
-                    this.AutoEatRepairLog("[UseBait] Backpack bait not found for staticId=" + BaitStaticId);
-                    return false;
-                }
-
-                // Skip Bait Animation ON: send SpawnFishByBaitCommand directly; func path is the fallback.
-                bool skipAnim = AutoFishingFarm.GetSkipBaitAnimEnabled();
-                bool sent = false;
-                if (skipAnim)
-                {
-                    if (this.TryScatterBaitDirectMono(netId, out string directStatus))
-                    {
-                        this.AutoEatRepairLog("[UseBait] Direct scatter netId=" + netId + ": " + directStatus);
-                        sent = true;
-                    }
-                    else
-                    {
-                        this.AutoEatRepairLog("[UseBait] Direct scatter failed (" + directStatus + "); falling back to ChumBait function.");
-                    }
-                }
-
-                if (!sent)
-                {
-                    this.AutoEatRepairLog("[UseBait] Matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + "; sending ChumBait function.");
-                    if (!this.TryExecuteDirectBackpackItemFunc(BackpackFuncChumBait, netId))
-                    {
-                        this.AutoEatRepairLog("[UseBait] ExecuteBackpackItemFunc failed for netId=" + netId);
-                        return false;
-                    }
-                }
-
-                this.nextUseBaitAllowedAt = Time.unscaledTime + UseBaitCooldownSeconds;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                this.AutoEatRepairLog("[UseBait] Exception: " + ex.Message);
-                return false;
-            }
+            return this.TryThrowFishBaitItemFromBag(true);
         }
 
         private bool TryUseAttractorFromBag()
         {
+            return this.TryThrowFishBaitItemFromBag(false);
+        }
+
+        // Shared by Use Bait / Use Attractor (hotkeys) and Auto Bait. Order matters:
+        //   1. bag lookup      — no item, nothing to do.
+        //   2. water check     — the game's CanThrowAutoBait. "No water" stops HERE on both paths:
+        //                        the animated path would only show the same tip and throw nothing,
+        //                        and the direct path would spend the item on the shore.
+        //   3. Skip Bait Animation ON  -> direct send at that exact target (no clip, no
+        //                        PlayerState.Free gate — still fires mid-fishing).
+        //      OFF, or the direct send failed -> the game's own item function, whose clip
+        //                        BaitThrowAnimationTrim shortens when its toggle is on.
+        // A target that could not be ASKED for (AuraMono not ready) skips the direct send and lets
+        // the item function resolve it itself, so a bridge hiccup never falls back to guessing.
+        private bool TryThrowFishBaitItemFromBag(bool bait)
+        {
+            string tag = bait ? "[UseBait]" : "[UseAttractor]";
+            this.lastBaitThrowNoWater = false;
             try
             {
-                if (Time.unscaledTime < this.nextUseAttractorAllowedAt)
+                float allowedAt = bait ? this.nextUseBaitAllowedAt : this.nextUseAttractorAllowedAt;
+                if (Time.unscaledTime < allowedAt)
                 {
                     return false;
                 }
 
-                if (!this.TryFindDirectBackpackItemByStaticId(AttractorStaticId, out uint netId) || netId == 0U)
+                int staticId = bait ? BaitStaticId : AttractorStaticId;
+                if (!this.TryFindDirectBackpackItemByStaticId(staticId, out uint netId) || netId == 0U)
                 {
-                    this.AutoEatRepairLog("[UseAttractor] Backpack attractor not found for staticId=" + AttractorStaticId);
+                    this.AutoEatRepairLog(tag + " Backpack item not found for staticId=" + staticId);
                     return false;
                 }
 
-                // Skip Bait Animation ON: send SpawnFishRefreshDeviceCommand directly; func path is the fallback.
-                bool skipAnim = AutoFishingFarm.GetSkipBaitAnimEnabled();
+                int targetState = this.TryResolveGameBaitThrowTarget(out Vector3 targetPos, out string targetStatus);
+                if (targetState == BaitThrowTargetNoWater)
+                {
+                    this.lastBaitThrowNoWater = true;
+                    this.AutoEatRepairLog(tag + " Not thrown: " + targetStatus + " (netId=" + netId + " kept).");
+                    return false;
+                }
+                this.AutoEatRepairLog(tag + " Target: " + targetStatus + ".");
+
                 bool sent = false;
-                if (skipAnim)
+                if (AutoFishingFarm.GetSkipBaitAnimEnabled() && targetState == BaitThrowTargetFound)
                 {
-                    if (this.TryUseAttractorDirectMono(netId, out string directStatus))
-                    {
-                        this.AutoEatRepairLog("[UseAttractor] Direct trap netId=" + netId + ": " + directStatus);
-                        sent = true;
-                    }
-                    else
-                    {
-                        this.AutoEatRepairLog("[UseAttractor] Direct trap failed (" + directStatus + "); falling back to FishingLureBall function.");
-                    }
+                    string directStatus;
+                    sent = bait
+                        ? this.TryScatterBaitDirectMono(netId, targetPos, out directStatus)
+                        : this.TryUseAttractorDirectMono(netId, targetPos, out directStatus);
+                    this.AutoEatRepairLog(tag + (sent ? " Direct send netId=" + netId + ": " : " Direct send failed; using the item function: ") + directStatus);
                 }
 
                 if (!sent)
                 {
-                    this.AutoEatRepairLog("[UseAttractor] Matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + "; sending FishingLureBall function.");
-                    if (!this.TryExecuteDirectBackpackItemFunc(BackpackFuncFishingLureBall, netId))
+                    int function = bait ? BackpackFuncChumBait : BackpackFuncFishingLureBall;
+                    this.AutoEatRepairLog(tag + " Matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + "; sending item function " + function + ".");
+                    // Opens the trim feature's fast poll window (no-op while its toggle is off).
+                    this.NotifyBaitThrowAnimationStarted();
+                    if (!this.TryExecuteDirectBackpackItemFunc(function, netId))
                     {
-                        this.AutoEatRepairLog("[UseAttractor] ExecuteBackpackItemFunc failed for netId=" + netId);
+                        this.AutoEatRepairLog(tag + " ExecuteBackpackItemFunc failed for netId=" + netId);
                         return false;
                     }
                 }
 
-                this.nextUseAttractorAllowedAt = Time.unscaledTime + UseAttractorCooldownSeconds;
+                if (bait)
+                {
+                    this.nextUseBaitAllowedAt = Time.unscaledTime + UseBaitCooldownSeconds;
+                }
+                else
+                {
+                    this.nextUseAttractorAllowedAt = Time.unscaledTime + UseAttractorCooldownSeconds;
+                }
                 return true;
             }
             catch (Exception ex)
             {
-                this.AutoEatRepairLog("[UseAttractor] Exception: " + ex.Message);
+                this.AutoEatRepairLog(tag + " Exception: " + ex.Message);
                 return false;
             }
         }

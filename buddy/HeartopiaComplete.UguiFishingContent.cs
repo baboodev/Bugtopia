@@ -73,6 +73,7 @@ namespace HeartopiaMod
             public Toggle SkipCatchToggle;
             public Toggle SkipCastToggle;
             public Toggle SkipBaitToggle;
+            public Toggle TrimBaitToggle;         // greyed while SkipBaitToggle is on
             public Toggle KeepCameraHudToggle;
             public Toggle ServerSideToggle;
             public GameObject StatusLabel;
@@ -123,10 +124,10 @@ namespace HeartopiaMod
 
         private UguiShellFishingHandle uguiShellFishing;
 
-        // Fixed Part A cursor bottom: 8 header +28, equip +42, seven toggles +30 each (the last two
+        // Fixed Part A cursor bottom: 8 header +28, equip +42, eight toggles +30 each (the last two
         // are Keep Fishing Camera and Server-Side Fishing), status +24, tool +24, target +40,
-        // range label +22, range slider +30, auto-bait toggle +30 → 458.
-        private const float UguiFishingBaitBlockTop = 458f;
+        // range label +22, range slider +30, auto-bait toggle +30 → 488.
+        private const float UguiFishingBaitBlockTop = 488f;
 
         // The IMGUI No-fish slider bounds — mirror AutoFishingFarm.AutoBaitNoFishSecondsMin/Max
         // (private consts 3f/60f; a numeric range, deliberately not exposed for this).
@@ -260,42 +261,50 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiFishingSkipBaitToggled));
             PlaceUguiTopLeft(handle.SkipBaitToggle.gameObject, 16f, 198f, 280f, 25f);
 
+            // Trim Bait Throw Animation (BaitThrowAnimationTrimFeature.cs) — applies to the game's
+            // own throw, so it is greyed while Skip Bait Animation (the direct send) is on.
+            handle.TrimBaitToggle = this.CreateUguiCheckbox(scrollContent, "TrimBaitToggle",
+                this.L("Trim Bait Throw Animation"), this.trimBaitThrowAnimation,
+                new System.Action<bool>(this.OnUguiFishingTrimBaitToggled));
+            PlaceUguiTopLeft(handle.TrimBaitToggle.gameObject, 16f, 228f, 280f, 25f);
+            this.SetUguiToggleInteractable(handle.TrimBaitToggle, !AutoFishingFarm.GetSkipBaitAnimEnabled());
+
             // Keep Fishing Camera (FishingCameraHudFeature.cs) — suppresses the
             // fishing camera pushes and the FishingPanel that covers the HUD.
             handle.KeepCameraHudToggle = this.CreateUguiCheckbox(scrollContent, "KeepCameraHudToggle",
                 this.L("Keep Fishing Camera"), this.GetFishingCameraHudKeepEnabled(),
                 new System.Action<bool>(this.OnUguiFishingKeepCameraHudToggled));
-            PlaceUguiTopLeft(handle.KeepCameraHudToggle.gameObject, 16f, 228f, 280f, 25f);
+            PlaceUguiTopLeft(handle.KeepCameraHudToggle.gameObject, 16f, 258f, 280f, 25f);
 
             // Server-Side Fishing (ServerSideFishingFeature.cs) — EXPERIMENTAL raw-protocol path,
             // no fishing mode and no FSM state.
             handle.ServerSideToggle = this.CreateUguiCheckbox(scrollContent, "ServerSideToggle",
                 this.L("Server-Side Fishing"), this.GetServerSideFishingEnabled(),
                 new System.Action<bool>(this.OnUguiFishingServerSideToggled));
-            PlaceUguiTopLeft(handle.ServerSideToggle.gameObject, 16f, 258f, 280f, 25f);
+            PlaceUguiTopLeft(handle.ServerSideToggle.gameObject, 16f, 288f, 280f, 25f);
 
             // Status readouts — safe to seed at build time (pure formatters, unlike Foraging's
             // stop-cascade conditional). IMGUI `small` style = fontSize 12.
             handle.StatusShown = this.LF("Status: {0}", AutoFishingFarm.GetLastStatus());
             handle.StatusLabel = this.CreateUguiBodyLabel(scrollContent, "StatusLabel", handle.StatusShown, 12f);
-            PlaceUguiTopLeft(handle.StatusLabel, 16f, 288f, 360f, 20f);
+            PlaceUguiTopLeft(handle.StatusLabel, 16f, 318f, 360f, 20f);
 
             handle.ToolShown = this.LF("Tool: {0}", AutoFishingFarm.GetLastToolStatus());
             handle.ToolLabel = this.CreateUguiBodyLabel(scrollContent, "ToolLabel", handle.ToolShown, 12f);
-            PlaceUguiTopLeft(handle.ToolLabel, 16f, 312f, 360f, 20f);
+            PlaceUguiTopLeft(handle.ToolLabel, 16f, 342f, 360f, 20f);
 
             handle.TargetShown = this.LF("Target: {0}", AutoFishingFarm.GetLastTargetStatus());
             handle.TargetLabel = this.CreateUguiBodyLabel(scrollContent, "TargetLabel", handle.TargetShown, 12f);
             this.TrySetUguiLabelWrapped(handle.TargetLabel);
-            PlaceUguiTopLeft(handle.TargetLabel, 16f, 336f, 360f, 36f);
+            PlaceUguiTopLeft(handle.TargetLabel, 16f, 366f, 360f, 36f);
 
             handle.ScanRangeShown = this.LF("Scan Range: {0:F0}m", AutoFishingFarm.GetDetectRange());
             handle.ScanRangeLabel = this.CreateUguiBodyLabel(scrollContent, "ScanRangeLabel", handle.ScanRangeShown, 12f);
-            PlaceUguiTopLeft(handle.ScanRangeLabel, 16f, 376f, 320f, 20f);
+            PlaceUguiTopLeft(handle.ScanRangeLabel, 16f, 406f, 320f, 20f);
             handle.ScanRangeSlider = this.CreateUguiSlider(scrollContent, "ScanRangeSlider",
                 1f, 200f, AutoFishingFarm.GetDetectRange(), true,
                 new System.Action<float>(this.OnUguiFishingScanRangeChanged));
-            PlaceUguiTopLeft(handle.ScanRangeSlider.gameObject, 16f, 398f, 260f, 20f);
+            PlaceUguiTopLeft(handle.ScanRangeSlider.gameObject, 16f, 428f, 260f, 20f);
 
             handle.AutoBaitToggle = this.CreateUguiCheckbox(scrollContent, "AutoBaitToggle",
                 this.L("Auto Bait"), AutoFishingFarm.GetAutoBaitEnabled(),
@@ -571,6 +580,8 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.SkipCatchToggle, AutoFishingFarm.GetSkipCatchAnimEnabled());
                 this.SyncUguiToggleFromField(handle.SkipCastToggle, AutoFishingFarm.GetSkipCastAnimEnabled());
                 this.SyncUguiToggleFromField(handle.SkipBaitToggle, AutoFishingFarm.GetSkipBaitAnimEnabled());
+                this.SyncUguiToggleFromField(handle.TrimBaitToggle, this.trimBaitThrowAnimation);
+                this.SetUguiToggleInteractable(handle.TrimBaitToggle, !AutoFishingFarm.GetSkipBaitAnimEnabled());
                 this.SyncUguiToggleFromField(handle.KeepCameraHudToggle, this.GetFishingCameraHudKeepEnabled());
                 this.SyncUguiToggleFromField(handle.ServerSideToggle, this.GetServerSideFishingEnabled());
                 this.SyncUguiToggleFromField(handle.AutoBaitToggle, AutoFishingFarm.GetAutoBaitEnabled());
@@ -746,6 +757,19 @@ namespace HeartopiaMod
             }
             AutoFishingFarm.SetSkipBaitAnimEnabled(value);
             this.NotifyUguiFishingToggle("Skip Bait Animation", value);
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Cuts the game throw's spread-bait animation while keeping its own water targeting. Inert
+        // (and greyed) while the direct send is selected.
+        private void OnUguiFishingTrimBaitToggled(bool value)
+        {
+            if (value == this.trimBaitThrowAnimation)
+            {
+                return;
+            }
+            this.trimBaitThrowAnimation = value;
+            this.NotifyUguiFishingToggle("Trim Bait Throw Animation", value);
             try { this.SaveKeybinds(false); } catch { }
         }
 

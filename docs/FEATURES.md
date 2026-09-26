@@ -1033,6 +1033,30 @@ Behavior:
 6. State machine with grace timers for stale states, post-catch recast, lost bait recovery.
 7. **Instant Catch** (optional): spoof buoy `successLength` via AuraMono Reliable `SendCommand` — no avatar teleport. See [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md) § 2b.
 
+**Bait / Fish Attractor throws** (Use Bait / Use Attractor hotkeys and Auto Bait — all through
+`TryThrowFishBaitItemFromBag`, `HeartopiaComplete.AutoEatRepair.cs`):
+
+- **Landing spot = the game's own.** Every throw first asks `FishHelper.CanThrowAutoBait(out Vector3)`
+  over AuraMono — the call the game's bag handlers (`BackpackCmdThrowBait` / `BackpackFishingLureBall`)
+  make before casting. It walks the self entity's forward from `FishGearMinLength` and returns the first
+  point on the **water surface** in a legal fishing area, in line of sight and clear of the keep-away
+  cylinder (measured: 3.6 m ahead, 0.99 m below the feet on a river bank). "No water ahead" stops the
+  throw on both paths — the item is kept, the game shows its own tip, the hotkey toasts
+  *No water ahead to throw at* and Auto Bait backs off.
+- **Skip Bait Animation** ON → direct `CmdScatterBait` / `CmdUseFishTrapDevice` at that target: no clip,
+  no `PlayerState.Free` gate, fires mid-fishing. It used to send `playerPos + forward*4` at the
+  player's height, which hung the item in the air from a bank and landed it on the shore when the
+  water was further than 4 m.
+- **Trim Bait Throw Animation** (default **on**; greyed while Skip Bait Animation is on) — the game's
+  own item function (103 / 108) with the animation cut, `buddy/BaitThrowAnimationTrimFeature.cs`.
+  Attractor: `ThrowBall()` at `_state == Start`, `_lureBallComponent.StartShoot(target, 0.01f)` once,
+  `EndCasting()` at `_state == SendCommand` (~0.09 s instead of ~2 s). Bait: `ActionClipBait` sends from
+  `OnBehaveFinish`, which `OnDestroy` runs once `_tPhase == Action`, so a single `EndCasting()` is the
+  send (one frame). Only runs in a 3 s window opened by the mod's own throw; gated on the action
+  context being `PlayerFishingLureBallParaBase` / `PlayerBaitParaBase`. The item function's own gates
+  (Free state, not on a moving platform) still apply — when they refuse, no clip appears and the
+  window expires with a log line.
+
 UI displays user-friendly status:
 
 - Scanning for fish, Waiting for bite, Fish hooked, Reeling, Catch secured, Fish escaped, etc.

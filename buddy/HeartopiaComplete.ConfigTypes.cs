@@ -396,6 +396,8 @@ namespace HeartopiaMod
             public bool autoFishSkipCatchAnim = false;
             public bool autoFishSkipCastAnim = false;
             public bool autoFishSkipBaitAnim = false;
+            // Absent from older configs; XmlSerializer keeps the initializer, so they get it ON.
+            public bool trimBaitThrowAnimation = true;
             public bool autoFishKeepCameraAndHud = false;
             public bool autoFishServerSide = false;
             public bool fishingRouteCustomOnly = false;

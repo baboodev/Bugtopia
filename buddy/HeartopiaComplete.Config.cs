@@ -387,6 +387,7 @@ namespace HeartopiaMod
             data.autoFishSkipCatchAnim = AutoFishingFarm.GetSkipCatchAnimEnabled();
             data.autoFishSkipCastAnim = AutoFishingFarm.GetSkipCastAnimEnabled();
             data.autoFishSkipBaitAnim = AutoFishingFarm.GetSkipBaitAnimEnabled();
+            data.trimBaitThrowAnimation = this.trimBaitThrowAnimation;
             data.autoFishKeepCameraAndHud = this.GetFishingCameraHudKeepEnabled();
             data.autoFishServerSide = this.GetServerSideFishingEnabled();
             data.fishingRouteCustomOnly = FishingRouteFeature.GetCustomSpotsOnly();
@@ -837,6 +838,7 @@ namespace HeartopiaMod
             AutoFishingFarm.SetSkipCatchAnimEnabled(data.autoFishSkipCatchAnim);
             AutoFishingFarm.SetSkipCastAnimEnabled(data.autoFishSkipCastAnim);
             AutoFishingFarm.SetSkipBaitAnimEnabled(data.autoFishSkipBaitAnim);
+            this.trimBaitThrowAnimation = data.trimBaitThrowAnimation;
             this.SetFishingCameraHudKeepEnabled(data.autoFishKeepCameraAndHud);
             this.SetServerSideFishingEnabled(data.autoFishServerSide);
             FishingRouteFeature.SetCustomSpotsOnly(data.fishingRouteCustomOnly);

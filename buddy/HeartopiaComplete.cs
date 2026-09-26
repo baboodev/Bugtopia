@@ -768,6 +768,7 @@ namespace HeartopiaMod
             this.ProcessCraftAnimationSkipOnUpdate();
             this.ProcessTutorialBlockOnUpdate();
             this.ProcessRepairThrowAnimationTrimOnUpdate();
+            this.ProcessBaitThrowAnimationTrimOnUpdate();
             this.ProcessCraftDirectSendOnUpdate();
             this.ProcessInteractObstacleBypassOnUpdate();
             this.ProcessPetHeightLimitBypassOnUpdate();
