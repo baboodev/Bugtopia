@@ -40,18 +40,14 @@ namespace HeartopiaMod
     {
         internal static bool MasterLogActionPanel = false;
 
-        // ControllerShortName ordinals — the clip family a tool swing asks for. Only the axe rows
-        // need one; everything else resolves its clip without help.
-        //
-        // ⚠️ ORDINALS, and they MOVE. ControllerShortName is a plain enum with a single explicit
-        // value, so every name's number is its position — the 2026-08-20 update inserted entries
-        // ahead of these and shifted them by four (lumbering was 159, mining 160). The cast still
-        // returned ActionErrorCode 0 and simply rendered nothing, because the action asks the
-        // animator for a controller family that no longer means what it did.
-        // Re-check against ilspy-dumps/XDTLevelAndEntity/XDTLevelAndEntity.ResHandle.AnimationRes
-        // /ControllerShortName.cs after every game update.
-        private const int ActionPanelShortLumbering = 163;
-        private const int ActionPanelShortMining = 164;
+        // ControllerShortName is resolved BY NAME at cast time (ControllerNameResolver.cs) — the
+        // enum numbers its entries by position, so they move on every big update and a stale one
+        // renders nothing while still returning ActionErrorCode 0. These are only the last-known
+        // values, used if the lookup itself cannot run.
+        private const string ActionPanelShortLumbering = "lumbering";
+        private const string ActionPanelShortMining = "mining";
+        private const int ActionPanelShortLumberingFallback = 200;
+        private const int ActionPanelShortMiningFallback = 201;
 
         // The social clip the two social rows play. 1 is the plain wave.
         private const int ActionPanelSocialType = 1;
@@ -68,7 +64,8 @@ namespace HeartopiaMod
         internal readonly struct ActionPanelRow
         {
             public ActionPanelRow(int id, string label, string name, string context, string fields,
-                                  int controllerShortName = 0, string constants = null)
+                                  string controllerShortName = null, int controllerShortNameFallback = 0,
+                                  string constants = null)
             {
                 this.Id = id;
                 this.Label = label;
@@ -76,6 +73,7 @@ namespace HeartopiaMod
                 this.Context = context;
                 this.Fields = fields;
                 this.ControllerShortName = controllerShortName;
+                this.ControllerShortNameFallback = controllerShortNameFallback;
                 this.Constants = constants;
             }
 
@@ -89,8 +87,12 @@ namespace HeartopiaMod
 
             public string Fields { get; }
 
-            /// Non-zero only for the rows whose clip family has to be spelled out (the axe swings).
-            public int ControllerShortName { get; }
+            /// Set only for the rows whose clip family has to be spelled out (the axe swings).
+            /// A ControllerShortName NAME, resolved against the loaded enum at cast time.
+            public string ControllerShortName { get; }
+
+            /// Last-known ordinal for that name, used only if the runtime lookup cannot run.
+            public int ControllerShortNameFallback { get; }
 
             /// Fixed int field values this row needs, as "name=value|name=value".
             ///
@@ -103,9 +105,9 @@ namespace HeartopiaMod
 
         internal static readonly ActionPanelRow[] ActionPanelRows = new ActionPanelRow[]
         {
-            new ActionPanelRow(200, "Chop", "AxeAttackTree", "ScriptsRefactory.LevelAndEntity.Gameplay.Action.PlayerAxeAttackTree", "levelObjectNetId:ulong|handholdNetId:uint|faceDirection:Vector2|controllerFullName:controller|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", ActionPanelShortLumbering),
+            new ActionPanelRow(200, "Chop", "AxeAttackTree", "ScriptsRefactory.LevelAndEntity.Gameplay.Action.PlayerAxeAttackTree", "levelObjectNetId:ulong|handholdNetId:uint|faceDirection:Vector2|controllerFullName:controller|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", ActionPanelShortLumbering, ActionPanelShortLumberingFallback),
             new ActionPanelRow(203, "Gather", "GatherContinuous", "XDTLevelAndEntity.Gameplay.Action.PlayerGatherContinuous", "levelObjectNetId:ulong|ownerNetId:uint|maxComboTime:int|targetHeight:float|faceDir:Vector2|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
-            new ActionPanelRow(205, "Mine", "AxeAttackStone", "ScriptsRefactory.LevelAndEntity.Gameplay.Action.PlayerAxeAttackStone", "levelObjectNetId:ulong|handholdNetId:uint|faceDirection:Vector2|controllerFullName:controller|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", ActionPanelShortMining),
+            new ActionPanelRow(205, "Mine", "AxeAttackStone", "ScriptsRefactory.LevelAndEntity.Gameplay.Action.PlayerAxeAttackStone", "levelObjectNetId:ulong|handholdNetId:uint|faceDirection:Vector2|controllerFullName:controller|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", ActionPanelShortMining, ActionPanelShortMiningFallback),
             new ActionPanelRow(216, "Salute", "Salute", "XDTLevelAndEntity.Gameplay.Action.PlayerSaluteParam", "staticId:int|actionType:int|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
             new ActionPanelRow(226, "Rainbow", "ThrowRainbowBuff", "XDTLevelAndEntity.Gameplay.Action.PlayerThrowRainbowBuffParam", "staticId:int|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
             new ActionPanelRow(230, "Socialise", "PlaySocial", "XDTLevelAndEntity.Gameplay.Action.PlayerSocialActionArg", "socialType:int|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
@@ -141,15 +143,15 @@ namespace HeartopiaMod
             //
             // Cast with no target: occupiedLevelObject stays 0, so OnFinishAction finds no
             // furniture and returns. The clip is all that happens.
-            new ActionPanelRow(313, "Paper Punch", "OnceInteract 707045", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707045"),   // Linkage06
-            new ActionPanelRow(313, "Shower", "OnceInteract 707086", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707086"),        // Petty253
-            new ActionPanelRow(313, "Spoon", "OnceInteract 707087", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707087"),         // Petty254
-            new ActionPanelRow(313, "Sauce", "OnceInteract 707088", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707088"),         // Petty220
-            new ActionPanelRow(313, "Paint", "OnceInteract 707111", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707111"),         // Petty322
-            new ActionPanelRow(313, "Reading", "OnceInteract 707130", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707130"),       // Petty332
-            new ActionPanelRow(313, "Put Lock", "OnceInteract 707193", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707193"),      // Petty355
-            new ActionPanelRow(313, "Air Dance", "OnceInteract 707222", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707222"),     // Petty385
-            new ActionPanelRow(313, "Air Fly", "OnceInteract 707225", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", 0, "interactId=707225"),       // Petty375
+            new ActionPanelRow(313, "Paper Punch", "OnceInteract 707045", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", null, 0, "interactId=707045"),   // Linkage06
+            new ActionPanelRow(313, "Shower", "OnceInteract 707086", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", null, 0, "interactId=707086"),        // Petty253
+            new ActionPanelRow(313, "Spoon", "OnceInteract 707087", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", null, 0, "interactId=707087"),         // Petty254
+            new ActionPanelRow(313, "Sauce", "OnceInteract 707088", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", null, 0, "interactId=707088"),         // Petty220
+            new ActionPanelRow(313, "Paint", "OnceInteract 707111", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", null, 0, "interactId=707111"),         // Petty322
+            new ActionPanelRow(313, "Reading", "OnceInteract 707130", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", null, 0, "interactId=707130"),       // Petty332
+            new ActionPanelRow(313, "Put Lock", "OnceInteract 707193", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", null, 0, "interactId=707193"),      // Petty355
+            new ActionPanelRow(313, "Air Dance", "OnceInteract 707222", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", null, 0, "interactId=707222"),     // Petty385
+            new ActionPanelRow(313, "Air Fly", "OnceInteract 707225", "XDTLevelAndEntity.Gameplay.Action.PlayerActionOnceInteractArg", "interactId:int|faceDir:Vector2|destination:Vector3|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", null, 0, "interactId=707225"),       // Petty375
             new ActionPanelRow(318, "Open Door", "OpenRotateDoor", "XDTLevelAndEntity.Gameplay.Action.PlayerOpenRotateDoorOnArg", "interactId:int|position:Vector3|faceDir:Vector2|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
             new ActionPanelRow(323, "Tank Dive", "FishTankSwimmingOn", "XDTLevelAndEntity.Gameplay.Action.PlayerSwimInFishTankOnArg", "position:Vector3|rotation:Quaternion|targetDirection:TargetDirection|target:ulong|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
             new ActionPanelRow(386, "Take Candy", "PlayerTakeCandyAction", "XDTLevelAndEntity.Gameplay.Action.TakeCandyArg", "targetPoint:Vector3|targetForward:Vector2|poseType:ControllerPoseType|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
@@ -276,13 +278,14 @@ namespace HeartopiaMod
                         this.SetActionPanelInt(argObj, argClass, name, ActionPanelSocialType);
                     }
                     else if (string.Equals(name, "controllerFullName", StringComparison.Ordinal)
-                             && row.ControllerShortName > 0)
+                             && !string.IsNullOrEmpty(row.ControllerShortName))
                     {
-                        controllerSent = (1 << 24) | (1 << 14) | (overrideType << 9) | row.ControllerShortName;
+                        int shortName = this.ResolveControllerShortName(row.ControllerShortName,
+                                                                        row.ControllerShortNameFallback);
+                        controllerSent = (1 << 24) | (1 << 14) | (overrideType << 9) | shortName;
                         // (charType << 24) | (poseType << 14) | (override << 9) | shortName, with the
                         // override read live so whatever is actually in hand is honoured.
-                        this.SetActionPanelInt(argObj, argClass, name,
-                            (1 << 24) | (1 << 14) | (overrideType << 9) | row.ControllerShortName);
+                        this.SetActionPanelInt(argObj, argClass, name, controllerSent);
                     }
                     else if (havePos
                              && parts[i].EndsWith(":Vector3", StringComparison.Ordinal)

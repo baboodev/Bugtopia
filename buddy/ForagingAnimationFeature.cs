@@ -80,16 +80,15 @@ namespace HeartopiaMod
         private const float ForagingAnimHoldBudget = 6f;
         private const float ForagingAnimNodeMatchRadius = 4f;
 
-        // ControllerShortName ordinals; the override comes from whatever is actually in hand.
-        // ⚠️ ORDINALS, and they MOVE. ControllerShortName is a plain enum with a single explicit
-        // value, so every name's number is its position — the 2026-08-20 update inserted entries
-        // ahead of these and shifted them by four (lumbering was 159, mining 160). The cast still
-        // returned ActionErrorCode 0 and simply rendered nothing, because the action asks the
-        // animator for a controller family that no longer means what it did.
-        // Re-check against ilspy-dumps/XDTLevelAndEntity/XDTLevelAndEntity.ResHandle.AnimationRes
-        // /ControllerShortName.cs after every game update.
-        private const int ForagingAnimShortLumbering = 163;
-        private const int ForagingAnimShortMining = 164;
+        // ControllerShortName is resolved BY NAME at cast time (ControllerNameResolver.cs); the
+        // override comes from whatever is actually in hand. The enum numbers its entries by
+        // position, so hard-coded ordinals go stale on every big update and fail silently — the
+        // cast still returns ActionErrorCode 0 and simply renders nothing. These are only the
+        // last-known values, used if the lookup itself cannot run.
+        private const string ForagingAnimShortLumbering = "lumbering";
+        private const string ForagingAnimShortMining = "mining";
+        private const int ForagingAnimShortLumberingFallback = 200;
+        private const int ForagingAnimShortMiningFallback = 201;
 
         private const int ForagingAnimResTree = 1;
         private const int ForagingAnimResStone = 2;
@@ -611,9 +610,10 @@ namespace HeartopiaMod
                 }
                 else
                 {
-                    int shortName = resType == ForagingAnimResTree
-                        ? ForagingAnimShortLumbering
-                        : ForagingAnimShortMining;
+                    bool tree = resType == ForagingAnimResTree;
+                    int shortName = this.ResolveControllerShortName(
+                        tree ? ForagingAnimShortLumbering : ForagingAnimShortMining,
+                        tree ? ForagingAnimShortLumberingFallback : ForagingAnimShortMiningFallback);
                     this.SetForagingAnimInt(argObj, argClass, "controllerFullName",
                         ForagingAnimControllerId(this.ReadForagingAnimOverride(playerClass, players[0]), shortName));
                     this.SetForagingAnimVector2(argObj, argClass, "faceDirection", face);
