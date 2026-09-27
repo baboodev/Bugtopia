@@ -205,6 +205,7 @@ namespace HeartopiaMod
             public bool gameLodFurnitureEnabled;
             public int gameLodFurnitureMaxObjects;
             public int gameLodFurnitureDistance;
+            public int gameLodFurnitureOwnHomeDistance;
             public int gameLodFurnitureMeshDistance;
             // NOTE: gameLodForceLod0Enabled was removed 2026-07-27 (the flag blanked every UGC
             // texture). Old Config.xml files still carrying the element deserialize fine — the XML

@@ -210,6 +210,7 @@ namespace HeartopiaMod
             data.gameLodFurnitureEnabled = this.gameLodFurnitureEnabled;
             data.gameLodFurnitureMaxObjects = this.gameLodFurnitureMaxObjects;
             data.gameLodFurnitureDistance = this.gameLodFurnitureDistance;
+            data.gameLodFurnitureOwnHomeDistance = this.gameLodFurnitureOwnHomeDistance;
             data.gameLodFurnitureMeshDistance = this.gameLodFurnitureMeshDistance;
             data.gameLodBrgBiasEnabled = this.gameLodBrgBiasEnabled;
             data.gameLodBrgBias = this.gameLodBrgBias;
@@ -618,6 +619,7 @@ namespace HeartopiaMod
             this.gameLodFurnitureEnabled = data.gameLodFurnitureEnabled;
             this.gameLodFurnitureMaxObjects = data.gameLodFurnitureMaxObjects;
             this.gameLodFurnitureDistance = data.gameLodFurnitureDistance;
+            this.gameLodFurnitureOwnHomeDistance = data.gameLodFurnitureOwnHomeDistance;
             this.gameLodFurnitureMeshDistance = data.gameLodFurnitureMeshDistance;
             this.gameLodBrgBiasEnabled = data.gameLodBrgBiasEnabled;
             this.gameLodBrgBias = data.gameLodBrgBias;
@@ -1316,7 +1318,8 @@ namespace HeartopiaMod
             this.ugcCacheTargetCapacity = 500;
             this.nextUgcCacheApplyAt = 0f;
             this.gameLodFurnitureMaxObjects = 1500;
-            this.gameLodFurnitureDistance = 9999;
+            this.gameLodFurnitureDistance = 150;
+            this.gameLodFurnitureOwnHomeDistance = 9999;
             this.gameLodFurnitureMeshDistance = 1000;
             this.gameLodBrgBias = 2f;
             this.gameLodVegetationPref = 5;

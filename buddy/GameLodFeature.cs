@@ -51,7 +51,8 @@ namespace HeartopiaMod
         // ----------------------------------------------------------------------------------------
         internal bool gameLodFurnitureEnabled = false;
         internal int gameLodFurnitureMaxObjects = 1500;    // 60..5000 (game default 60)
-        internal int gameLodFurnitureDistance = 9999;      // 100..9999 m (game default 80/30/30/24)
+        internal int gameLodFurnitureDistance = 150;       // 100..300 m, other homes + town (game default 80/30/30/24)
+        internal int gameLodFurnitureOwnHomeDistance = 9999; // 100..9999 m, own home only (LoaderManager.mydis)
         internal int gameLodFurnitureMeshDistance = 1000;  // 100..2000 m (game default 100)
 
         internal bool gameLodBrgBiasEnabled = false;
@@ -1200,7 +1201,11 @@ namespace HeartopiaMod
                 {
                     this.GameLodLogOnce("furniture: LoaderManager instance ok ("
                         + this.GetAuraMonoClassDisplayName(auraMonoObjectGetClass(loaderObj)) + ")");
-                    int dist = Mathf.Clamp(this.gameLodFurnitureDistance, 100, 9999);
+                    // Capped at 300 m: LoaderManager.CalLoad walks every area serially and each voxel
+                    // BFS advances one ring per frame (tiers serialized), so the pass length grows
+                    // linearly with distance (Global/Season areas x2 on top). 800+ m took tens of
+                    // seconds before the own home was even reached.
+                    int dist = Mathf.Clamp(this.gameLodFurnitureDistance, 100, 300);
                     if (!this.TryCreateGameLodIntArray(new[] { dist, dist, dist, dist }, out IntPtr otherDisArr)
                         || otherDisArr == IntPtr.Zero)
                     {
@@ -1211,7 +1216,10 @@ namespace HeartopiaMod
                     uint otherPin = AuraMonoPinNew(otherDisArr);
                     try
                     {
-                        if (!this.TryCreateGameLodIntArray(new[] { dist, dist, dist, dist }, out IntPtr myDisArr)
+                        // Own home gets its own distance: SetParam routes mydis to the area whose key is
+                        // PlayerDataCenter.homeNetId and otherDis to every other home and town area.
+                        int ownDist = Mathf.Clamp(this.gameLodFurnitureOwnHomeDistance, 100, 9999);
+                        if (!this.TryCreateGameLodIntArray(new[] { ownDist, ownDist, ownDist, ownDist }, out IntPtr myDisArr)
                             || myDisArr == IntPtr.Zero)
                         {
                             status = "int[] build failed";
@@ -1229,26 +1237,13 @@ namespace HeartopiaMod
                                 return false;
                             }
 
-                            // Pacing: FIXED at the game's own vanilla per-frame rate (3 objects/frame,
-                            // same as ObserverPanel's default), deliberately NOT scaled up with `max`
-                            // anymore (2026-07-26). It used to scale (max/500, up to 10/frame) so a
-                            // big raised cap would visually fill in within a few seconds instead of
-                            // ~28s — see git history — but that meant a high max+distance dumped
-                            // hundreds of new furniture instances into the scene within a couple of
-                            // seconds after a teleport/town-entry. A meaningful fraction of "furniture"
-                            // is UGC-photo-bearing (frames/screens/puzzles), and each one kicks off its
-                            // own texture download the instant it's created — so a fast fill-in meant a
-                            // burst of simultaneous downloads far beyond what the base game (capped at
-                            // 60 objects total) ever has to handle at once, which is the confirmed cause
-                            // of the blank/white UGC textures (see ugc-texture-cache-blank-fix project
-                            // memory: purge + raising the LRU cache to 2000 did NOT fix it; disabling
-                            // this draw-distance extension did). Keeping the per-frame rate at the
-                            // vanilla constant instead trades faster pop-in (now spread over more
-                            // seconds at a high max/distance) for not overwhelming the download
-                            // pipeline — max object count and distance are UNCHANGED, only how fast the
-                            // client walks up to that ceiling.
+                            // Pacing: 12 activations/frame (vanilla 3). The activation queue is FIFO and
+                            // shared by every area, so at 3/frame a raised cap took tens of seconds to
+                            // fill in. The 2026-07-26 cut back to 3 was aimed at blank UGC photos, whose
+                            // real cause later turned out to be BrgManager.ForeceLOD0 (removed; see
+                            // project memory brg-forcelod0-destroys-material-override), not the rate.
                             int max = Mathf.Clamp(this.gameLodFurnitureMaxObjects, 60, 5000);
-                            int loadNum = 3;
+                            int loadNum = 12;
                             int unloadNum = 20;
                             int strucLoadNum = 20;
                             int meshDis = Mathf.Clamp(this.gameLodFurnitureMeshDistance, 100, 2000);
@@ -3098,7 +3093,8 @@ namespace HeartopiaMod
         private void SyncGameLodAfterConfigLoad()
         {
             this.gameLodFurnitureMaxObjects = Mathf.Clamp(this.gameLodFurnitureMaxObjects <= 0 ? 1500 : this.gameLodFurnitureMaxObjects, 60, 5000);
-            this.gameLodFurnitureDistance = Mathf.Clamp(this.gameLodFurnitureDistance <= 0 ? 9999 : this.gameLodFurnitureDistance, 100, 9999);
+            this.gameLodFurnitureDistance = Mathf.Clamp(this.gameLodFurnitureDistance <= 0 ? 150 : this.gameLodFurnitureDistance, 100, 300);
+            this.gameLodFurnitureOwnHomeDistance = Mathf.Clamp(this.gameLodFurnitureOwnHomeDistance <= 0 ? 9999 : this.gameLodFurnitureOwnHomeDistance, 100, 9999);
             this.gameLodFurnitureMeshDistance = Mathf.Clamp(this.gameLodFurnitureMeshDistance <= 0 ? 1000 : this.gameLodFurnitureMeshDistance, 100, 2000);
             this.gameLodBrgBias = Mathf.Clamp(this.gameLodBrgBias <= 0f ? 2f : this.gameLodBrgBias, 1f, 4f);
             // Legacy configs stored a raw PC_LODBIAS pref (1..10); migrate it to the multiplier.

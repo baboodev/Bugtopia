@@ -33,6 +33,9 @@ namespace HeartopiaMod
             public GameObject FurnitureDistLabel;
             public string FurnitureDistShown;
             public Slider FurnitureDistSlider;
+            public GameObject FurnitureOwnDistLabel;
+            public string FurnitureOwnDistShown;
+            public Slider FurnitureOwnDistSlider;
             public GameObject FurnitureMeshLabel;
             public string FurnitureMeshShown;
             public Slider FurnitureMeshSlider;
@@ -162,9 +165,19 @@ namespace HeartopiaMod
                 handle.FurnitureDistShown, 13f);
             PlaceUguiTopLeft(handle.FurnitureDistLabel, pad, yCur + 2f, labelW, 20f);
             handle.FurnitureDistSlider = this.CreateUguiSlider(scrollContent, "FurnitureDistSlider",
-                100f, 9999f, this.gameLodFurnitureDistance, true,
+                100f, 300f, this.gameLodFurnitureDistance, true,
                 new System.Action<float>(this.OnUguiGameLodFurnitureDistChanged));
             PlaceUguiTopLeft(handle.FurnitureDistSlider.gameObject, sliderX, yCur + 3f, sliderW, 20f);
+            yCur += 28f;
+
+            handle.FurnitureOwnDistShown = this.LF("Own home distance: {0} m", this.gameLodFurnitureOwnHomeDistance);
+            handle.FurnitureOwnDistLabel = this.CreateUguiBodyLabel(scrollContent, "FurnitureOwnDistLabel",
+                handle.FurnitureOwnDistShown, 13f);
+            PlaceUguiTopLeft(handle.FurnitureOwnDistLabel, pad, yCur + 2f, labelW, 20f);
+            handle.FurnitureOwnDistSlider = this.CreateUguiSlider(scrollContent, "FurnitureOwnDistSlider",
+                100f, 9999f, this.gameLodFurnitureOwnHomeDistance, true,
+                new System.Action<float>(this.OnUguiGameLodFurnitureOwnDistChanged));
+            PlaceUguiTopLeft(handle.FurnitureOwnDistSlider.gameObject, sliderX, yCur + 3f, sliderW, 20f);
             yCur += 28f;
 
             handle.FurnitureMeshShown = this.LF("Mesh detail distance: {0} m", this.gameLodFurnitureMeshDistance);
@@ -577,6 +590,14 @@ namespace HeartopiaMod
                 this.SyncUguiSelfLabelText(handle.FurnitureDistLabel, ref handle.FurnitureDistShown,
                     this.LF("Draw distance: {0} m", this.gameLodFurnitureDistance));
 
+                if (handle.FurnitureOwnDistSlider != null
+                    && Mathf.Abs(handle.FurnitureOwnDistSlider.value - this.gameLodFurnitureOwnHomeDistance) > 0.5f)
+                {
+                    handle.FurnitureOwnDistSlider.SetValueWithoutNotify(this.gameLodFurnitureOwnHomeDistance);
+                }
+                this.SyncUguiSelfLabelText(handle.FurnitureOwnDistLabel, ref handle.FurnitureOwnDistShown,
+                    this.LF("Own home distance: {0} m", this.gameLodFurnitureOwnHomeDistance));
+
                 if (handle.FurnitureMeshSlider != null
                     && Mathf.Abs(handle.FurnitureMeshSlider.value - this.gameLodFurnitureMeshDistance) > 0.5f)
                 {
@@ -701,16 +722,28 @@ namespace HeartopiaMod
 
         private void OnUguiGameLodFurnitureDistChanged(float value)
         {
-            int rounded = Mathf.Clamp(Mathf.RoundToInt(value / 50f) * 50, 100, 9999);
-            if (Mathf.RoundToInt(value) >= 9950)
-            {
-                rounded = 9999;
-            }
+            int rounded = Mathf.Clamp(Mathf.RoundToInt(value / 10f) * 10, 100, 300);
             if (rounded == this.gameLodFurnitureDistance)
             {
                 return;
             }
             this.gameLodFurnitureDistance = rounded;
+            this.nextGameLodApplyAt = 0f;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiGameLodFurnitureOwnDistChanged(float value)
+        {
+            int rounded = Mathf.Clamp(Mathf.RoundToInt(value / 50f) * 50, 100, 9999);
+            if (Mathf.RoundToInt(value) >= 9950)
+            {
+                rounded = 9999;
+            }
+            if (rounded == this.gameLodFurnitureOwnHomeDistance)
+            {
+                return;
+            }
+            this.gameLodFurnitureOwnHomeDistance = rounded;
             this.nextGameLodApplyAt = 0f;
             try { this.SaveKeybinds(false); } catch { }
         }
