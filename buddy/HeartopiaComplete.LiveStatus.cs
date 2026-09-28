@@ -327,16 +327,6 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Persistent HUD", this.persistentHudLastStatus));
             }
 
-            if (this.forceSkateEnabled)
-            {
-                entries.Add(this.CreateLiveFeatureEntry("Force Skate", "Active"));
-            }
-
-            if (this.forceSwimEnabled)
-            {
-                entries.Add(this.CreateLiveFeatureEntry("Force Swim", "Active"));
-            }
-
             if (this.strangerChatBypassEnabled)
             {
                 string strangerChatSummary = strangerChatFriendVisibleTrampoline != null

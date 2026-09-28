@@ -75,7 +75,6 @@ namespace HeartopiaMod
             public Toggle InstantTeleportToggle;
             public Toggle InstantTeleportWaitFieldToggle;
             public Toggle VehicleBypassToggle;
-            public Toggle VehicleBypassServerToggle;
             public GameObject NoclipSpeedLabel; // only visible while Noclip is on
             public string NoclipSpeedShown;
             public Slider NoclipSpeedSlider;
@@ -127,10 +126,6 @@ namespace HeartopiaMod
         private sealed class UguiShellSelfFunHandle
         {
             public GameObject Root;
-            public Toggle ForceSkateToggle;
-            public Toggle ForceSwimToggle;
-            public GameObject LocomotionStatusLabel;   // live (forceLocomotionLastStatus)
-            public string LocomotionStatusShown;
             public Toggle SwimSprintToggle;
             public GameObject SprintDurationLabel;     // "∞" display rule at the max
             public string SprintDurationShown;
@@ -288,9 +283,6 @@ namespace HeartopiaMod
             handle.VehicleBypassToggle = this.CreateUguiCheckbox(scrollContent, "VehicleBypassToggle",
                 this.L("Vehicle Bypass"), this.vehicleBypassEnabled,
                 new System.Action<bool>(this.OnUguiSelfVehicleBypassToggled));
-            handle.VehicleBypassServerToggle = this.CreateUguiCheckbox(scrollContent, "VehicleBypassServerToggle",
-                this.L("Vehicle Bypass Server Events"), this.vehicleBypassServerEventsEnabled,
-                new System.Action<bool>(this.OnUguiSelfVehicleBypassServerToggled));
 
             handle.NoclipSpeedShown = this.LF("Noclip Speed: {0:F1}", this.noclipSpeed);
             handle.NoclipSpeedLabel = this.CreateUguiBodyLabel(scrollContent, "NoclipSpeedLabel", handle.NoclipSpeedShown, 13f);
@@ -536,11 +528,6 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.VehicleBypassToggle.gameObject, rowX, yCur, rowW, 24f);
             }
             yCur += 30f;
-            if (handle.VehicleBypassServerToggle != null)
-            {
-                PlaceUguiTopLeft(handle.VehicleBypassServerToggle.gameObject, rowX, yCur, rowW, 24f);
-            }
-            yCur += 30f;
 
             if (handle.AntiAfkToggle != null)
             {
@@ -775,7 +762,6 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.InstantTeleportToggle, this.instantTeleportEnabled);
                 this.SyncUguiToggleFromField(handle.InstantTeleportWaitFieldToggle, this.instantTeleportWaitFieldLoaded);
                 this.SyncUguiToggleFromField(handle.VehicleBypassToggle, this.vehicleBypassEnabled);
-                this.SyncUguiToggleFromField(handle.VehicleBypassServerToggle, this.vehicleBypassServerEventsEnabled);
                 this.SyncUguiToggleFromField(handle.AntiAfkToggle, this.antiAfkEnabled);
                 this.SyncUguiToggleFromField(handle.WarehouseToggle, this.warehouseBypassEnabled);
                 this.SyncUguiToggleFromField(handle.StrangerChatToggle, this.strangerChatBypassEnabled);
@@ -976,19 +962,6 @@ namespace HeartopiaMod
             this.AddMenuNotification(
                 "Vehicle Bypass " + (this.vehicleBypassEnabled ? "Enabled" : "Disabled"),
                 this.vehicleBypassEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
-        }
-
-        // Gui.cs:1633-1643.
-        private void OnUguiSelfVehicleBypassServerToggled(bool value)
-        {
-            if (value == this.vehicleBypassServerEventsEnabled)
-            {
-                return;
-            }
-            this.vehicleBypassServerEventsEnabled = value;
-            this.AddMenuNotification(
-                "Vehicle Bypass Server Events " + (this.vehicleBypassServerEventsEnabled ? "Enabled" : "Disabled"),
-                this.vehicleBypassServerEventsEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
         }
 
         // Gui.cs:1650-1655 — try/catch-wrapped save, no notification.
@@ -1388,11 +1361,6 @@ namespace HeartopiaMod
         // cell without scrolling; no conditional layout (every control is always visible).
         // ----------------------------------------------------------------------------------------
 
-        private string BuildUguiSelfFunLocomotionStatusText()
-        {
-            return "Swim/Skate on land (others see it). Status: " + this.forceLocomotionLastStatus;
-        }
-
         private string BuildUguiSelfFunSprintDurationText()
         {
             // The "∞" display rule, verbatim from DrawSelfFunTab:1978-1982: the slider max IS the
@@ -1451,25 +1419,6 @@ namespace HeartopiaMod
             Color muted = this.UguiKitMutedColor();
             Color hintColor = new Color(muted.r, muted.g, muted.b, 0.85f);
             float yCur = 12f;
-
-            handle.ForceSkateToggle = this.CreateUguiCheckbox(block.transform, "ForceSkateToggle",
-                this.L("Force Skate (skate on land)"), this.forceSkateEnabled,
-                new System.Action<bool>(this.OnUguiSelfForceSkateToggled));
-            PlaceUguiTopLeft(handle.ForceSkateToggle.gameObject, pad, yCur, rowW, 24f);
-            yCur += 30f;
-
-            handle.ForceSwimToggle = this.CreateUguiCheckbox(block.transform, "ForceSwimToggle",
-                this.L("Force Swim (swim on land)"), this.forceSwimEnabled,
-                new System.Action<bool>(this.OnUguiSelfForceSwimToggled));
-            PlaceUguiTopLeft(handle.ForceSwimToggle.gameObject, pad, yCur, rowW, 24f);
-            yCur += 30f;
-
-            handle.LocomotionStatusShown = this.BuildUguiSelfFunLocomotionStatusText();
-            handle.LocomotionStatusLabel = this.CreateUguiLabel(block.transform, "LocomotionStatus",
-                handle.LocomotionStatusShown, 11f, hintColor, false);
-            this.TrySetUguiLabelWrapped(handle.LocomotionStatusLabel);
-            PlaceUguiTopLeft(handle.LocomotionStatusLabel, pad, yCur, rowW, 32f);
-            yCur += 40f;
 
             handle.SwimSprintToggle = this.CreateUguiCheckbox(block.transform, "SwimSprintToggle",
                 this.L("Custom Swim Sprint"), this.swimSprintTweakEnabled,
@@ -1582,8 +1531,6 @@ namespace HeartopiaMod
 
             try
             {
-                this.SyncUguiToggleFromField(handle.ForceSkateToggle, this.forceSkateEnabled);
-                this.SyncUguiToggleFromField(handle.ForceSwimToggle, this.forceSwimEnabled);
                 this.SyncUguiToggleFromField(handle.SwimSprintToggle, this.swimSprintTweakEnabled);
                 this.SyncUguiToggleFromField(handle.VerticalGuardToggle, this.swimSprintVerticalGuardEnabled);
                 this.SyncUguiToggleFromField(handle.JumpTuningToggle, this.jumpTuningEnabled);
@@ -1608,8 +1555,6 @@ namespace HeartopiaMod
                 if (Time.unscaledTime >= handle.NextSlowSyncAt)
                 {
                     handle.NextSlowSyncAt = Time.unscaledTime + 0.5f;
-                    this.SyncUguiSelfLabelText(handle.LocomotionStatusLabel, ref handle.LocomotionStatusShown,
-                        this.BuildUguiSelfFunLocomotionStatusText());
                     this.SyncUguiSelfLabelText(handle.SprintStatusLabel, ref handle.SprintStatusShown,
                         this.BuildUguiSelfFunSprintStatusText());
                     this.SyncUguiSelfLabelText(handle.JumpStatusLabel, ref handle.JumpStatusShown,
@@ -1637,31 +1582,7 @@ namespace HeartopiaMod
         }
 
         // --- Fun change handlers (DrawSelfFunTab verbatim: notification colors differ per
-        // toggle; Force Skate/Swim have NO save; the sprint pair notifies THEN saves). ----------
-
-        // Gui.cs:1937-1940 — notification only (single green shade both directions), no save.
-        private void OnUguiSelfForceSkateToggled(bool value)
-        {
-            if (value == this.forceSkateEnabled)
-            {
-                return;
-            }
-            this.forceSkateEnabled = value;
-            this.AddMenuNotification(this.forceSkateEnabled ? "Force Skate on" : "Force Skate off",
-                new Color(0.55f, 1f, 0.65f));
-        }
-
-        // Gui.cs:1951-1954 — its own (cyan) color, no save.
-        private void OnUguiSelfForceSwimToggled(bool value)
-        {
-            if (value == this.forceSwimEnabled)
-            {
-                return;
-            }
-            this.forceSwimEnabled = value;
-            this.AddMenuNotification(this.forceSwimEnabled ? "Force Swim on" : "Force Swim off",
-                new Color(0.45f, 0.85f, 1f));
-        }
+        // toggle; the sprint pair notifies THEN saves). ----------
 
         // Gui.cs:1969-1975 — notify FIRST, then try/catch-wrapped save (source order).
         private void OnUguiSelfSwimSprintToggled(bool value)

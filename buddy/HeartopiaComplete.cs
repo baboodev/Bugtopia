@@ -745,8 +745,6 @@ namespace HeartopiaMod
             this.ProcessNoCollisionOnUpdate();
             this.ProcessColdLedgerOnUpdate();
             this.ProcessBunnyHopOnUpdate();
-            this.ProcessForceLocomotionOnUpdate();
-            this.ProcessForceSwimInputOnUpdate();
             this.ProcessSwimSprintTweakOnUpdate();
             this.ProcessJumpTuningOnUpdate();
             this.ProcessGameUiTimingsOnUpdate();

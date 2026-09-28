@@ -483,7 +483,6 @@
     <Compile Include="StealthBlockFeature.Mono.cs" />
     <Compile Include="BuildingFreeRotateFeature.cs" />
     <Compile Include="BunnyHopFeature.cs" />
-    <Compile Include="ForceLocomotionFeature.cs" />
     <Compile Include="SwimSprintTweakFeature.cs" />
     <Compile Include="JumpTuningFeature.cs" />
     <Compile Include="GameUiTimingsFeature.cs" />

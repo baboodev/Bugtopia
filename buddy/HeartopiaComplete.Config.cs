@@ -261,7 +261,6 @@ namespace HeartopiaMod
             data.petHeightLimitBypassEnabled = this.petHeightLimitBypassEnabled;
             data.persistentHudEnabled = this.persistentHudEnabled;
             data.vehicleBypassEnabled = this.vehicleBypassEnabled;
-            data.vehicleBypassServerEventsEnabled = this.vehicleBypassServerEventsEnabled;
             data.warehouseBypassEnabled = this.warehouseBypassEnabled;
             data.strangerChatBypassEnabled = this.strangerChatBypassEnabled;
             data.chatForceTranslateEnabled = this.chatForceTranslateEnabled;
@@ -676,7 +675,6 @@ namespace HeartopiaMod
             // freshly-constructed value and the per-feature OnUpdate gates pick the flags up from
             // there. The install work itself is deferred to the world-ready gate.
             this.vehicleBypassEnabled = data.vehicleBypassEnabled;
-            this.vehicleBypassServerEventsEnabled = data.vehicleBypassServerEventsEnabled;
             this.warehouseBypassEnabled = data.warehouseBypassEnabled;
             this.strangerChatBypassEnabled = data.strangerChatBypassEnabled;
             this.chatForceTranslateEnabled = data.chatForceTranslateEnabled;

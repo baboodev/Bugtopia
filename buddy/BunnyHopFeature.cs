@@ -402,5 +402,20 @@ namespace HeartopiaMod
             return this.TryInvokeAuraMonoBool1(move, method, false)
                 && this.TryInvokeAuraMonoBool1(move, method, true);
         }
+
+        // Shared by every feature that reads input outside Unity's focus-aware path (GetAsyncKeyState,
+        // XInput): bunny hop, the analog move bridge.
+        internal static bool IsGameWindowFocused()
+        {
+            try
+            {
+                return Application.isFocused;
+            }
+            catch
+            {
+                // Interop hiccup — fail open so the feature keeps working in the foreground case.
+                return true;
+            }
+        }
     }
 }
