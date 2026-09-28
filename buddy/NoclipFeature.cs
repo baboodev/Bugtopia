@@ -10,6 +10,10 @@ namespace HeartopiaMod
         public static Vector3 OverrideVehicleTarget;
         public const float DefaultVehicleSpeedCap = 9f;
         public static float VehicleSpeedCap = DefaultVehicleSpeedCap;
+
+        // MovementAntiCheating.SpeedThresholdWalk: the server flags on-foot movement above this
+        // (m/s). The Self tab marks the noclip toggle red while speed x boost exceeds it.
+        public const float WalkSpeedThreshold = 4.3f;
     }
 
     public partial class HeartopiaComplete

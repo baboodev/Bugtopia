@@ -179,6 +179,7 @@ namespace HeartopiaMod
             // PRIVACY PAUSE card — same three-field shape; 0 shows as "Off".
             public Slider PrivacySlider;
             public GameObject PrivacyValueLabel;
+            public UguiLabelRiskMark PrivacyRiskMark; // trails the card title while the radius is under 10 m
             public string PrivacyValueShown;
 
             // CROPS card
@@ -575,6 +576,11 @@ namespace HeartopiaMod
             GameObject privacyCard = this.CreateUguiSettingsMainPanel(scrollContent, "PrivacyPanel",
                 this.L("homeland_farm.privacy_section"));
             PlaceUguiTopLeft(privacyCard, 8f, 296f, panelW, 88f);
+            // Under 10 m (0 = off) the farm keeps running with a player practically on the plot.
+            Transform privacyHeader = privacyCard.transform.Find("Header");
+            handle.PrivacyRiskMark = privacyHeader != null
+                ? this.CreateUguiRiskMarkAfterLabel(privacyHeader.gameObject)
+                : null;
 
             GameObject privacyName = this.CreateUguiLabel(privacyCard.transform, "SliderLabel",
                 this.L("homeland_farm.privacy_slider_label"), 11f,
@@ -894,6 +900,7 @@ namespace HeartopiaMod
                 this.homelandFarmPrivacyRadius < 1f
                     ? this.L("homeland_farm.privacy_off")
                     : $"{this.homelandFarmPrivacyRadius:F0}m");
+            this.SyncUguiRiskMarkAfterLabel(handle.PrivacyRiskMark, this.homelandFarmPrivacyRadius < 10f);
 
             // -------- CROPS --------
             if (handle.SeedSegments != null && handle.SeedSegments.Length == 3)

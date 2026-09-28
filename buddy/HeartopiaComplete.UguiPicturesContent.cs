@@ -30,28 +30,19 @@ namespace HeartopiaMod
     //    pictures.paths, pictures.draw_hint, pictures.decrypt_all, pictures.encrypt_changed,
     //    pictures.scan_changed, pictures.changed_count, pictures.manifest_missing) — passed
     //    through this.L/this.LF untouched, never substituted with literal English. The
-    //    "Extract open drawing" / "Upload drawing.png" buttons (:175/:182) are localized; the
-    //    two slider label prefixes "Upload chunk budget: {N} runs" / "Upload chunk delay:
-    //    {N:0.00}s" (:193/:201) remain unlocalized source literals.
+    //    "Extract open drawing" / "Upload drawing.png" buttons (:175/:182) are localized.
     //  - TWO INDEPENDENT BUSY FLAGS with the source's exact GUI.enabled scoping (:145-187):
     //    busy = picturesTaskCoroutine != null gates decrypt_all, encrypt_changed, scan_changed
     //    AND "Extract open drawing" (all four sit inside the :147 GUI.enabled = !busy scope);
     //    "Upload drawing.png" alone gets !busy && !chunkSendBusy (chunkSendBusy =
-    //    drawUploadChunkCoroutine != null, set at :181 AFTER Extract is drawn). The sliders are
-    //    drawn after :187 GUI.enabled = true — NEVER gated. Both are live coroutine-reference
-    //    checks recomputed EVERY gated frame (Animal Care's live-gate idiom, null-check-only
+    //    drawUploadChunkCoroutine != null, set at :181 AFTER Extract is drawn). Both are live
+    //    coroutine-reference checks recomputed EVERY gated frame (Animal Care's live-gate idiom, null-check-only
     //    flavor); SetUguiButtonInteractable self-diffs so the per-frame call is a cheap compare.
     //  - Buttons: decrypt/encrypt use themePrimaryButtonStyle (:148/:153) → kit Primary tier;
     //    scan/extract/upload use plain GUI.skin.button (:160/:175/:182) → kit Secondary tier
     //    (the established mapping, UguiShell.cs:443).
-    //  - Sliders: budget is UI_DrawAccentIntSlider (UiKit.cs:562-566 — whole-number track +
-    //    Clamp(RoundToInt)) → wholeNumbers=true and the same clamp in the handler, range
-    //    [DrawUploadRunsPerChunkMin..Max] = [32..256]; delay is a plain accent slider whose
-    //    committed value snaps to the nearest 0.05s — Clamp(Round(raw*20)/20, min, max)
-    //    (:207-210, the migration's FOURTH distinct rounding granularity), range
-    //    [DrawUploadChunkDelayMin..Max] = [0.05..1]. Both handlers write the field directly —
-    //    no method call, no save, no notification (verified: plain assignments in the source).
-    //    Per-frame epsilon re-syncs pull the handles onto the snapped fields (sprint idiom).
+    //  - The two chunk sliders (budget, delay) were removed 2026-09-29; the chunked upload now
+    //    uses their former maximums, fixed in DrawUploadFeature.cs.
     //
     // NEW mechanic 1 — TEXT-DRIVEN heights (Phase 2e toast spike, reused not reimplemented):
     //    the source computes pathsH/hintH per frame via bodyStyle.CalcHeight(text, innerW)+4
@@ -160,14 +151,6 @@ namespace HeartopiaMod
             public GameObject ExtractButton;      // !busy (drawn BEFORE :181 re-scopes)
             public GameObject UploadButton;       // !busy && !chunkSendBusy
 
-            // Slider rows (unlocalized label prefixes — source literals)
-            public GameObject BudgetLabel;
-            public string BudgetShown;
-            public Slider BudgetSlider;           // wholeNumbers, [32..256]
-            public GameObject DelayLabel;
-            public string DelayShown;
-            public Slider DelaySlider;            // [0.05..1], commit snaps to 0.05s
-
             // Changed-files header + nested list + status
             public GameObject HeaderLabel;
             public string HeaderShown;
@@ -216,18 +199,6 @@ namespace HeartopiaMod
         // ----------------------------------------------------------------------------------------
         // Live text builders (shared by builder + processor so both surfaces render one truth)
         // ----------------------------------------------------------------------------------------
-
-        // :193 — UNLOCALIZED source literal, exact concatenation.
-        private string BuildUguiPicturesBudgetText()
-        {
-            return "Upload chunk budget: " + this.drawUploadRunsPerChunk + " runs";
-        }
-
-        // :201 — UNLOCALIZED source literal, exact "0.00" format.
-        private string BuildUguiPicturesDelayText()
-        {
-            return "Upload chunk delay: " + this.drawUploadChunkDelaySeconds.ToString("0.00") + "s";
-        }
 
         // :213-215 — live list count + the cached manifest snapshot (file header refresh policy).
         private string BuildUguiPicturesHeaderText(bool hasManifest)
@@ -413,21 +384,6 @@ namespace HeartopiaMod
             this.SetUguiButtonInteractable(handle.ExtractButton, !busy);
             this.SetUguiButtonInteractable(handle.UploadButton, !busy && !chunkSendBusy);
 
-            // -------- Slider rows (:193-211 — labels 220x20, sliders at +228, innerW-228) -----
-            handle.BudgetShown = this.BuildUguiPicturesBudgetText();
-            handle.BudgetLabel = this.CreateUguiLabel(card.transform, "BudgetLabel",
-                handle.BudgetShown, 11f, textColor, false);
-            handle.BudgetSlider = this.CreateUguiSlider(card.transform, "BudgetSlider",
-                DrawUploadRunsPerChunkMin, DrawUploadRunsPerChunkMax, this.drawUploadRunsPerChunk,
-                true, new System.Action<float>(this.OnUguiPicturesBudgetChanged));
-
-            handle.DelayShown = this.BuildUguiPicturesDelayText();
-            handle.DelayLabel = this.CreateUguiLabel(card.transform, "DelayLabel",
-                handle.DelayShown, 11f, textColor, false);
-            handle.DelaySlider = this.CreateUguiSlider(card.transform, "DelaySlider",
-                DrawUploadChunkDelayMin, DrawUploadChunkDelayMax, this.drawUploadChunkDelaySeconds,
-                false, new System.Action<float>(this.OnUguiPicturesDelayChanged));
-
             // -------- Changed-count header (:213-216) --------
             handle.HeaderShown = this.BuildUguiPicturesHeaderText(handle.HasManifest);
             handle.HeaderLabel = this.CreateUguiLabel(card.transform, "ChangedHeader",
@@ -491,7 +447,6 @@ namespace HeartopiaMod
             const float statusH = 56f;  // :113
             const float btnH = 32f;     // :81
             const float btnGap = 8f;    // :81
-            const float sliderRowH = 20f; // :114
 
             float innerW = handle.InnerW;
             float btnW = handle.BtnW;
@@ -504,7 +459,6 @@ namespace HeartopiaMod
             float cardH = 10f + 22f + handle.PathsH + rowGap
                 + handle.HintH + rowGap
                 + btnH + rowGap + btnH + rowGap + btnH + rowGap
-                + sliderRowH + rowGap + sliderRowH + rowGap
                 + 20f + scrollH + 8f + statusH + 16f;
 
             PlaceUguiTopLeft(handle.Card, 8f, 8f, handle.PanelW, cardH);
@@ -527,16 +481,6 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.ExtractButton, 16f, cy, btnW, btnH);
             PlaceUguiTopLeft(handle.UploadButton, 16f + btnW + btnGap, cy, btnW, btnH);
             cy += btnH + rowGap;
-
-            // Slider rows (:193-211): label at cy, slider at cy+2 h=16 in the source; the kit
-            // handle is 18px, so it sits at cy+1 h=18 — same visual center, handle fully inside.
-            PlaceUguiTopLeft(handle.BudgetLabel, 16f, cy, 220f, sliderRowH);
-            PlaceUguiTopLeft(handle.BudgetSlider.gameObject, 16f + 228f, cy + 1f, innerW - 228f, 18f);
-            cy += sliderRowH + rowGap;
-
-            PlaceUguiTopLeft(handle.DelayLabel, 16f, cy, 220f, sliderRowH);
-            PlaceUguiTopLeft(handle.DelaySlider.gameObject, 16f + 228f, cy + 1f, innerW - 228f, 18f);
-            cy += sliderRowH + rowGap;
 
             PlaceUguiTopLeft(handle.HeaderLabel, 16f, cy, innerW, 20f);
             cy += 20f;
@@ -639,25 +583,6 @@ namespace HeartopiaMod
                 this.SetUguiButtonInteractable(handle.ScanButton, !busy);
                 this.SetUguiButtonInteractable(handle.ExtractButton, !busy);
                 this.SetUguiButtonInteractable(handle.UploadButton, !busy && !chunkSendBusy);
-
-                // Slider re-syncs: pull the handles onto the committed fields after a drag AND
-                // mirror external IMGUI edits (sprint idiom — epsilon diff, WithoutNotify), plus
-                // their live value labels (Sand Sculpture's DelayLabel per-frame precedent).
-                if (handle.BudgetSlider != null
-                    && Mathf.Abs(handle.BudgetSlider.value - this.drawUploadRunsPerChunk) > 0.0005f)
-                {
-                    handle.BudgetSlider.SetValueWithoutNotify(this.drawUploadRunsPerChunk);
-                }
-                this.SyncUguiSelfLabelText(handle.BudgetLabel, ref handle.BudgetShown,
-                    this.BuildUguiPicturesBudgetText());
-
-                if (handle.DelaySlider != null
-                    && Mathf.Abs(handle.DelaySlider.value - this.drawUploadChunkDelaySeconds) > 0.0005f)
-                {
-                    handle.DelaySlider.SetValueWithoutNotify(this.drawUploadChunkDelaySeconds);
-                }
-                this.SyncUguiSelfLabelText(handle.DelayLabel, ref handle.DelayShown,
-                    this.BuildUguiPicturesDelayText());
 
                 // Status — background coroutines rewrite picturesLastStatus; cached-string diff.
                 this.SyncUguiSelfLabelText(handle.StatusLabel, ref handle.StatusShown,
@@ -790,23 +715,6 @@ namespace HeartopiaMod
         private void OnUguiPicturesUploadClicked()
         {
             this.DrawUploadSendForOpenDrawing();
-        }
-
-        // :194-198 — UI_DrawAccentIntSlider semantics (UiKit.cs:562-566): whole-number track,
-        // Clamp(RoundToInt) committed straight to the field. Plain assignment — no save, no
-        // notification (verified against the source).
-        private void OnUguiPicturesBudgetChanged(float value)
-        {
-            this.drawUploadRunsPerChunk = Mathf.Clamp(Mathf.RoundToInt(value),
-                DrawUploadRunsPerChunkMin, DrawUploadRunsPerChunkMax);
-        }
-
-        // :202-210 — the EXACT source snap: Clamp(Round(raw*20)/20, min, max) — nearest 0.05s
-        // (the migration's fourth distinct rounding granularity). Plain assignment.
-        private void OnUguiPicturesDelayChanged(float value)
-        {
-            this.drawUploadChunkDelaySeconds = Mathf.Clamp(Mathf.Round(value * 20f) / 20f,
-                DrawUploadChunkDelayMin, DrawUploadChunkDelayMax);
         }
     }
 }

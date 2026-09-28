@@ -57,6 +57,17 @@ namespace HeartopiaMod
     // ============================================================================================
     public partial class HeartopiaComplete
     {
+        // Noclip speed slider floor: below the server's 4.3 m/s on-foot threshold, so an on-foot
+        // flight can stay under it (the Noclip row shows a red "!" while speed x boost is above it).
+        private const float SelfNoclipSpeedMin = 3f;
+
+        // The fastest the on-foot flight can go: speed x boost (the boost applies while Shift / a
+        // shoulder button is held — NoclipFeature.GetNoclipSpeed). Drives the Noclip row's "!".
+        private bool IsNoclipOverWalkThreshold()
+        {
+            return this.noclipSpeed * Mathf.Max(1f, this.noclipBoostMultiplier) > NoclipFeature.WalkSpeedThreshold;
+        }
+
         // ----------------------------------------------------------------------------------------
         // Handles (per-instance state — assigned LAST in each builder, Research idiom)
         // ----------------------------------------------------------------------------------------
@@ -70,6 +81,8 @@ namespace HeartopiaMod
             public Toggle CameraToggle;
             public Toggle CrosshairToggle;      // only visible while Camera Toggle is on
             public Toggle NoclipToggle;
+            public GameObject NoclipRiskMark;   // shown while speed x boost > the server walk threshold
+            public float NoclipRowY;            // content-space top of the Noclip row (set by the relayout)
             public Toggle NoclipSyncToggle;     // sits directly under Noclip
             public Toggle DisableOobToggle;
             public Toggle InstantTeleportToggle;
@@ -93,6 +106,7 @@ namespace HeartopiaMod
             public GameObject GameSpeedLabel;   // unconditional
             public string GameSpeedShown;
             public Slider GameSpeedSlider;
+            public UguiLabelRiskMark GameSpeedRiskMark; // shown while game speed is above 1x
             public Toggle CustomFovToggle;
             public GameObject FovLabel;         // unconditional (value only APPLIES while toggle on)
             public string FovShown;
@@ -137,6 +151,7 @@ namespace HeartopiaMod
             public string SprintStatusShown;
             public Toggle VerticalGuardToggle;
             public Toggle JumpTuningToggle;
+            public GameObject JumpTuningRiskMark; // shown while Custom Jump is on
             // Custom Jump: four numeric InputFields (JumpTuningFeature.cs). "Seen" mirrors the
             // Auto-Buy idiom — external edits are pushed in on the 0.5s tick, our own writeback
             // updates it in the handler so the tick does not fight the caret.
@@ -268,6 +283,9 @@ namespace HeartopiaMod
             handle.NoclipToggle = this.CreateUguiCheckbox(scrollContent, "NoclipToggle",
                 this.L("Noclip"), this.noclipEnabled,
                 new System.Action<bool>(this.OnUguiSelfNoclipToggled));
+            handle.NoclipRiskMark = this.CreateUguiRiskMark(handle.NoclipToggle);
+            SyncUguiRiskMark(handle.NoclipRiskMark, null, 0f, 0f,
+                this.IsNoclipOverWalkThreshold());
             handle.NoclipSyncToggle = this.CreateUguiCheckbox(scrollContent, "NoclipSyncToggle",
                 this.L("Noclip: Sync Position To Server"), this.noclipSyncPositionEnabled,
                 new System.Action<bool>(this.OnUguiSelfNoclipSyncToggled));
@@ -287,7 +305,7 @@ namespace HeartopiaMod
             handle.NoclipSpeedShown = this.LF("Noclip Speed: {0:F1}", this.noclipSpeed);
             handle.NoclipSpeedLabel = this.CreateUguiBodyLabel(scrollContent, "NoclipSpeedLabel", handle.NoclipSpeedShown, 13f);
             handle.NoclipSpeedSlider = this.CreateUguiSlider(scrollContent, "NoclipSpeedSlider",
-                5f, 50f, this.noclipSpeed, false,
+                SelfNoclipSpeedMin, 50f, this.noclipSpeed, false,
                 new System.Action<float>(this.OnUguiSelfNoclipSpeedChanged));
             handle.NoclipBoostShown = this.LF("Noclip Boost: {0:F1}x", this.noclipBoostMultiplier);
             handle.NoclipBoostLabel = this.CreateUguiBodyLabel(scrollContent, "NoclipBoostLabel", handle.NoclipBoostShown, 13f);
@@ -325,6 +343,8 @@ namespace HeartopiaMod
             handle.GameSpeedSlider = this.CreateUguiSlider(scrollContent, "GameSpeedSlider",
                 1f, 10f, this.gameSpeed, false,
                 new System.Action<float>(this.OnUguiSelfGameSpeedChanged));
+            // The server measures real time, so anything above 1x speeds up synced movement.
+            handle.GameSpeedRiskMark = this.CreateUguiRiskMarkAfterLabel(handle.GameSpeedLabel);
 
             handle.CustomFovToggle = this.CreateUguiCheckbox(scrollContent, "CustomFovToggle",
                 this.L("Custom Camera FOV"), this.customCameraFOVEnabled,
@@ -471,6 +491,7 @@ namespace HeartopiaMod
             {
                 PlaceUguiTopLeft(handle.NoclipToggle.gameObject, rowX, yCur, rowW, 24f);
             }
+            handle.NoclipRowY = yCur;
             yCur += 30f;
             // Server-sync switch for the noclip drive: always visible (so it can be set before
             // engaging noclip), directly under the toggle it belongs to.
@@ -757,6 +778,8 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.CameraToggle, this.mouseLookEnabled);
                 this.SyncUguiToggleFromField(handle.CrosshairToggle, this.showMouseLookCrosshair);
                 this.SyncUguiToggleFromField(handle.NoclipToggle, this.noclipEnabled);
+                SyncUguiRiskMark(handle.NoclipRiskMark, handle.ScrollContent, handle.NoclipRowY, 24f,
+                    this.IsNoclipOverWalkThreshold());
                 this.SyncUguiToggleFromField(handle.NoclipSyncToggle, this.noclipSyncPositionEnabled);
                 this.SyncUguiToggleFromField(handle.DisableOobToggle, this.disableOobTeleportEnabled);
                 this.SyncUguiToggleFromField(handle.InstantTeleportToggle, this.instantTeleportEnabled);
@@ -812,6 +835,8 @@ namespace HeartopiaMod
                 }
                 this.SyncUguiSelfLabelText(handle.GameSpeedLabel, ref handle.GameSpeedShown,
                     this.LF("Game Speed: {0:F1}x", this.gameSpeed));
+                // Compared against the value the label shows (F1), so "1.0x" never carries the mark.
+                this.SyncUguiRiskMarkAfterLabel(handle.GameSpeedRiskMark, this.gameSpeed >= 1.05f);
                 if (handle.FovSlider != null && Mathf.Abs(handle.FovSlider.value - this.cameraFOV) > 0.0005f)
                 {
                     handle.FovSlider.SetValueWithoutNotify(this.cameraFOV);
@@ -1463,6 +1488,9 @@ namespace HeartopiaMod
             handle.JumpTuningToggle = this.CreateUguiCheckbox(block.transform, "JumpTuningToggle",
                 this.L("Custom Jump"), this.jumpTuningEnabled,
                 new System.Action<bool>(this.OnUguiSelfJumpTuningToggled));
+            // No scroll view on this tab, so the mark needs no viewport check (scrollContent null).
+            handle.JumpTuningRiskMark = this.CreateUguiRiskMark(handle.JumpTuningToggle);
+            SyncUguiRiskMark(handle.JumpTuningRiskMark, null, 0f, 0f, this.jumpTuningEnabled);
             // Narrower than the other rows on purpose: CreateUguiCheckbox lays a full-width
             // transparent raycast strip over its row, so a rowW-wide toggle would sit under the
             // reset button and catch every near-miss click.
@@ -1534,6 +1562,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.SwimSprintToggle, this.swimSprintTweakEnabled);
                 this.SyncUguiToggleFromField(handle.VerticalGuardToggle, this.swimSprintVerticalGuardEnabled);
                 this.SyncUguiToggleFromField(handle.JumpTuningToggle, this.jumpTuningEnabled);
+                SyncUguiRiskMark(handle.JumpTuningRiskMark, null, 0f, 0f, this.jumpTuningEnabled);
 
                 if (handle.SprintDurationSlider != null
                     && Mathf.Abs(handle.SprintDurationSlider.value - this.swimSprintDurationSeconds) > 0.0005f)

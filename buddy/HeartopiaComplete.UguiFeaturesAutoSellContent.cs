@@ -195,6 +195,7 @@ namespace HeartopiaMod
             public GameObject IntervalLabel;
             public string IntervalShown;
             public Slider IntervalSlider;
+            public UguiLabelRiskMark IntervalRiskMark; // shown while the interval is under 60 s
             public Toggle FestivalToggle;
             public GameObject StarInfoLabel;
             public string StarInfoShown;
@@ -415,6 +416,8 @@ namespace HeartopiaMod
                 handle.IntervalShown, 12f, textColor, false);
             this.TrySetUguiLabelBold(handle.IntervalLabel);
             PlaceUguiTopLeft(handle.IntervalLabel, 12f, 91f, colW, 18f);
+            // A headless sell loop faster than once a minute is an easy pattern to spot.
+            handle.IntervalRiskMark = this.CreateUguiRiskMarkAfterLabel(handle.IntervalLabel);
             handle.IntervalSlider = this.CreateUguiSlider(setCard.transform, "IntervalSlider",
                 1f, 120f, this.autoSellInterval, false,
                 new System.Action<float>(this.OnUguiFeaturesAutoSellIntervalChanged));
@@ -749,6 +752,8 @@ namespace HeartopiaMod
                 // the 0.25s tick (Food & Repair slider-label precedent).
                 this.SyncUguiSelfLabelText(handle.IntervalLabel, ref handle.IntervalShown,
                     this.LF("Interval: {0:F0}s", this.autoSellInterval));
+                // Compared against the value the label shows (F0), so "60s" never carries the mark.
+                this.SyncUguiRiskMarkAfterLabel(handle.IntervalRiskMark, this.autoSellInterval < 59.5f);
                 this.SyncUguiSelfLabelText(handle.CapLabel, ref handle.CapShown,
                     this.autoSellFullStack ? "Cap: ignored" : this.LF("Cap: {0}", this.autoSellMaxPerStack));
                 this.SyncUguiSelfLabelText(handle.KeepLabel, ref handle.KeepShown,

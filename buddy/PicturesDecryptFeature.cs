@@ -35,11 +35,6 @@ namespace HeartopiaMod
 
         private object picturesTaskCoroutine = null;
         private string picturesLastStatus = "Idle.";
-
-        // Chunked Draw upload tuning (consumed by DrawUploadSendForOpenDrawing; ranges/defaults in
-        // DrawUploadFeature.cs). Session-only for now — not persisted to Config.xml.
-        private int drawUploadRunsPerChunk = DrawUploadRunsPerChunkDefault;
-        private float drawUploadChunkDelaySeconds = DrawUploadChunkDelayDefault;
         private readonly List<string> picturesChangedRelativePaths = new List<string>();
         private bool picturesChangedListDirty = true;
 

@@ -78,6 +78,7 @@ namespace HeartopiaMod
             public GameObject CaughtLabel;
             public string CaughtShown;
             public Toggle TeleportToggle;
+            public GameObject TeleportRiskMark;   // shown while Teleport is on
             public Toggle PauseTriggersToggle;
 
             // Slider block — parallel lists in binding order (Game-UI round idiom).
@@ -253,6 +254,10 @@ namespace HeartopiaMod
                 this.L("Teleport"), InsectNetFarm.GetTeleportEnabled(),
                 new System.Action<bool>(this.OnUguiInsectsTeleportToggled));
             PlaceUguiTopLeft(handle.TeleportToggle.gameObject, 16f, 180f, 280f, 25f);
+            // Warp-then-catch: flagged while on. The 16px gutter keeps the mark inside the viewport,
+            // so it stays masked and needs no scroll check.
+            handle.TeleportRiskMark = this.CreateUguiRiskMark(handle.TeleportToggle, -12f, false);
+            SyncUguiRiskMark(handle.TeleportRiskMark, null, 0f, 0f, InsectNetFarm.GetTeleportEnabled());
 
             // InsectNetFarm.cs:271-280.
             handle.PauseTriggersToggle = this.CreateUguiCheckbox(scrollContent, "PauseTriggersToggle",
@@ -314,6 +319,7 @@ namespace HeartopiaMod
                 // tool and resets sessionCatchCount on disable).
                 this.SyncUguiToggleFromField(handle.EnabledToggle, InsectNetFarm.IsEnabled);
                 this.SyncUguiToggleFromField(handle.TeleportToggle, InsectNetFarm.GetTeleportEnabled());
+                SyncUguiRiskMark(handle.TeleportRiskMark, null, 0f, 0f, InsectNetFarm.GetTeleportEnabled());
                 this.SyncUguiToggleFromField(handle.PauseTriggersToggle, InsectNetFarm.GetPauseTeleportOnTriggersEnabled());
 
                 // Status readouts — every gated frame like the IMGUI drawer (background farm

@@ -29,13 +29,10 @@ namespace HeartopiaMod
         // ---- Chunked upload (split the canvas across several DrawingOperation commands) ----
         // A single whole-canvas op is protocol-valid (verified in-game); chunking exists for
         // behavioral plausibility vs the game's natural delta-save cadence and to bound the network
-        // frame size on busy canvases. Slider fields live in PicturesDecryptFeature.cs (same class).
-        private const int DrawUploadRunsPerChunkMin = 32;
-        private const int DrawUploadRunsPerChunkMax = 256;
-        private const int DrawUploadRunsPerChunkDefault = 160;
-        private const float DrawUploadChunkDelayMin = 0.05f;
-        private const float DrawUploadChunkDelayMax = 1f;
-        private const float DrawUploadChunkDelayDefault = 0.25f;
+        // frame size on busy canvases. Fixed at what used to be the two sliders' maximums: the
+        // biggest chunk (fewest commands) and the slowest cadence.
+        private const int DrawUploadRunsPerChunk = 256;
+        private const float DrawUploadChunkDelaySeconds = 1f;
 
         // Handle of the in-flight chunked send (ModCoroutines token); null when idle.
         private object drawUploadChunkCoroutine = null;
@@ -745,7 +742,7 @@ namespace HeartopiaMod
                 totalRuns += colorRuns != null ? colorRuns.Count : 0;
             }
 
-            int budget = UnityEngine.Mathf.Clamp(this.drawUploadRunsPerChunk, DrawUploadRunsPerChunkMin, DrawUploadRunsPerChunkMax);
+            int budget = DrawUploadRunsPerChunk;
             if (totalRuns <= budget)
             {
                 // Fits in one command: keep the proven single-op path (one DrawingOperation, step 1).
@@ -774,7 +771,7 @@ namespace HeartopiaMod
             // Continue the canvas's natural step sequence when the live DrawStep is readable;
             // otherwise start at 1 (both accepted by the server — steps only need to increment).
             int stepBase = this.TryReadOpenCanvasDrawStep(out int liveStep) && liveStep >= 0 ? liveStep + 1 : 1;
-            float delay = UnityEngine.Mathf.Clamp(this.drawUploadChunkDelaySeconds, DrawUploadChunkDelayMin, DrawUploadChunkDelayMax);
+            float delay = DrawUploadChunkDelaySeconds;
             ModLogger.Msg("[DrawUpload] chunked upload start: drawing.png " + fw + "x" + fh + ", " + totalRuns
                 + " runs -> " + chunks.Count + " chunks (budget " + budget + ", delay " + delay.ToString("0.00")
                 + "s, stepBase " + stepBase + ")");

@@ -89,6 +89,8 @@ namespace HeartopiaMod
 
             public Toggle BubbleSpawnAtPlayerToggle;
             public Toggle AutoBubbleCollectToggle;
+            public GameObject AutoBubbleCollectRiskMark; // on + radius > 3 m (or unlimited); unmasked, hidden while scrolled out
+            public float AutoBubbleCollectRowY;         // content-space top of the row (set by the relayout)
 
             public GameObject CollectRadiusLabel; // conditional row (autoBubbleCollectEnabled)
             public string CollectRadiusShown;
@@ -144,6 +146,14 @@ namespace HeartopiaMod
         {
             // Gui.cs:498.
             return string.Format("Bubbles per minute: {0:F0}", this.bubbleBubblesPerMinute);
+        }
+
+        // The Auto Collect Bubbles "!": on, and claiming from further than 3 m — 0 is unlimited.
+        // Compared against the value the radius label shows (F0), so "3 m" never carries the mark.
+        private bool IsAutoBubbleCollectRadiusRisky()
+        {
+            return this.autoBubbleCollectEnabled
+                && (this.autoBubbleCollectRadius <= 0.01f || this.autoBubbleCollectRadius >= 3.5f);
         }
 
         private string BuildUguiFeaturesMainCollectRadiusText()
@@ -244,6 +254,8 @@ namespace HeartopiaMod
             handle.AutoBubbleCollectToggle = this.CreateUguiCheckbox(scrollContent, "AutoBubbleCollectToggle",
                 this.L("Auto Collect Bubbles"), this.autoBubbleCollectEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesMainAutoBubbleCollectToggled));
+            handle.AutoBubbleCollectRiskMark = this.CreateUguiRiskMark(handle.AutoBubbleCollectToggle);
+            SyncUguiRiskMark(handle.AutoBubbleCollectRiskMark, null, 0f, 0f, this.IsAutoBubbleCollectRadiusRisky());
 
             handle.CollectRadiusShown = this.BuildUguiFeaturesMainCollectRadiusText();
             handle.CollectRadiusLabel = this.CreateUguiBodyLabel(scrollContent, "CollectRadiusLabel",
@@ -356,6 +368,7 @@ namespace HeartopiaMod
             {
                 PlaceUguiTopLeft(handle.AutoBubbleCollectToggle.gameObject, rowX, yCur, rowW, 24f);
             }
+            handle.AutoBubbleCollectRowY = yCur;
             yCur += 30f;
 
             SetUguiGoActive(handle.CollectRadiusLabel, autoBubbleCollect);
@@ -431,6 +444,8 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.PlayerAvatarsToggle, this.radarPlayerAvatarsAll);
                 this.SyncUguiToggleFromField(handle.PlayerNamesToggle, this.radarPlayerNamesAll);
                 this.SyncUguiToggleFromField(handle.MapRevealToggle, this.mapRevealBlockedPlayers);
+                SyncUguiRiskMark(handle.AutoBubbleCollectRiskMark, handle.ScrollContent,
+                    handle.AutoBubbleCollectRowY, 24f, this.IsAutoBubbleCollectRadiusRisky());
 
                 if (handle.BubbleRateSlider != null
                     && Mathf.Abs(handle.BubbleRateSlider.value - this.bubbleBubblesPerMinute) > 0.0005f)

@@ -1953,6 +1953,183 @@ namespace HeartopiaMod
             return tog;
         }
 
+        private static readonly Color UguiKitRiskMarkColor = new Color(1f, 0.3f, 0.35f, 1f);
+
+        // Box height for the 19pt mark. Must stay above its ~22px line height: kit labels wrap and
+        // ellipsize, and a line that does not fit vertically is not drawn at all.
+        private const float UguiRiskMarkBoxHeight = 28f;
+
+        // A red "!" left of a checkbox, flagging a toggle with a high detection risk. It is a child
+        // of the row, so a relayout moves it along; kit labels never raycast, so it takes no clicks.
+        //
+        // Scroll-view rows start only 8px inside the viewport's RectMask2D, which is too little
+        // room, so the mark sits centred at row x -14 — past the mask edge, over the viewport's
+        // 4px inset and the container's 16px margin — and opts out of the mask
+        // (maskable = false). The price is that it no longer clips vertically: the owning tab
+        // must call SyncUguiRiskMark every frame so the mark hides while its row is scrolled out.
+        // The rect is wider than the glyph because kit labels wrap + ellipsize and a tight box can
+        // drop it.
+        //
+        // Rows with a wider gutter (a checkbox inside a card) pass their own centerX and
+        // ignoreMask = false: the mark then stays inside the viewport, keeps the mask, and needs
+        // no scroll check.
+        private GameObject CreateUguiRiskMark(Toggle toggle, float centerX = -14f, bool ignoreMask = true)
+        {
+            if (toggle == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                GameObject mark = this.CreateUguiLabel(toggle.transform, "RiskMark", "!", 19f,
+                    UguiKitRiskMarkColor, true);
+                this.TrySetUguiLabelBold(mark);
+                // Centred on the 24px checkbox row.
+                PlaceUguiTopLeft(mark, centerX - 10f, (24f - UguiRiskMarkBoxHeight) * 0.5f, 20f, UguiRiskMarkBoxHeight);
+                MaskableGraphic graphic = ignoreMask ? mark.GetComponent<MaskableGraphic>() : null;
+                if (graphic != null)
+                {
+                    graphic.maskable = false;
+                }
+                return mark;
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiKit] risk mark failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        // Shows the mark only while `wanted` holds AND its whole row (content-space top rowY,
+        // height rowH) is inside the scroll viewport — the mark ignores the viewport mask.
+        // Content is top-pivoted, so anchoredPosition.y is the scroll offset.
+        private static void SyncUguiRiskMark(GameObject mark, Transform scrollContent, float rowY, float rowH, bool wanted)
+        {
+            if (mark == null)
+            {
+                return;
+            }
+
+            bool show = wanted;
+            if (show && scrollContent != null)
+            {
+                RectTransform contentRt = scrollContent.GetComponent<RectTransform>();
+                RectTransform viewportRt = contentRt != null && contentRt.parent != null
+                    ? contentRt.parent.GetComponent<RectTransform>()
+                    : null;
+                if (viewportRt != null)
+                {
+                    float top = rowY - contentRt.anchoredPosition.y;
+                    show = top >= 0f && top + rowH <= viewportRt.rect.height;
+                }
+            }
+
+            if (mark.activeSelf != show)
+            {
+                mark.SetActive(show);
+            }
+        }
+
+        // The same red "!", trailing a slider's caption instead of sitting in a checkbox gutter:
+        // it is a child of the label and is re-placed just past the end of the label's current
+        // text whenever that text changes ("Game Speed: 2.0x !"). It stays inside the label's
+        // row, so it keeps the viewport mask and needs no scroll check.
+        private sealed class UguiLabelRiskMark
+        {
+            public GameObject Mark;
+            public GameObject Label;
+            public string LaidOutText; // text the mark was last placed against
+        }
+
+        private UguiLabelRiskMark CreateUguiRiskMarkAfterLabel(GameObject label)
+        {
+            if (label == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                GameObject mark = this.CreateUguiLabel(label.transform, "RiskMark", "!", 19f,
+                    UguiKitRiskMarkColor, true);
+                this.TrySetUguiLabelBold(mark);
+                mark.SetActive(false);
+                return new UguiLabelRiskMark { Mark = mark, Label = label };
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiKit] label risk mark failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        private void SyncUguiRiskMarkAfterLabel(UguiLabelRiskMark risk, bool wanted)
+        {
+            if (risk == null || risk.Mark == null || risk.Label == null)
+            {
+                return;
+            }
+
+            if (!wanted)
+            {
+                if (risk.Mark.activeSelf)
+                {
+                    risk.Mark.SetActive(false);
+                }
+                return;
+            }
+
+            if (this.TryGetUguiLabelTextAndWidth(risk.Label, out string text, out float width)
+                && text != risk.LaidOutText)
+            {
+                risk.LaidOutText = text;
+                RectTransform labelRt = risk.Label.GetComponent<RectTransform>();
+                float labelH = labelRt != null ? labelRt.rect.height : 20f;
+                // 14px box starting 2px past the text: the centred glyph lands ~6px after it.
+                // Height is the mark's OWN, centred on the label row: a 19pt line needs ~22px, and
+                // kit labels ellipsize — squeezed into an 18-20px caption box, TMP drew nothing.
+                PlaceUguiTopLeft(risk.Mark, width + 2f, (labelH - UguiRiskMarkBoxHeight) * 0.5f,
+                    14f, UguiRiskMarkBoxHeight);
+            }
+
+            if (!risk.Mark.activeSelf)
+            {
+                risk.Mark.SetActive(true);
+            }
+        }
+
+        private bool TryGetUguiLabelTextAndWidth(GameObject label, out string text, out float width)
+        {
+            text = null;
+            width = 0f;
+            if (UguiTmpTypesLoadable())
+            {
+                try
+                {
+                    if (this.UguiKitTmpTryGetText(label, out text)
+                        && this.UguiKitTmpTryGetPreferredTextWidth(label, out width))
+                    {
+                        return true;
+                    }
+                }
+                catch { }
+            }
+
+            try
+            {
+                Text txt = label.GetComponent<Text>();
+                if (txt != null)
+                {
+                    text = txt.text;
+                    width = txt.preferredWidth;
+                    return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+
         // Give ONE checkbox row a taller caption so a long label wraps onto a second line instead
         // of being trimmed with "…".
         //

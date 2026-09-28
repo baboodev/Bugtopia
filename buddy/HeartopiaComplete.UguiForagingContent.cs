@@ -97,7 +97,9 @@ namespace HeartopiaMod
             public GameObject TeleportDelayLabel; // aura-only row
             public string TeleportDelayShown;
             public Slider TeleportDelaySlider;
-            public Toggle StealthToggle;          // Stealth Foraging (always visible)
+            public Toggle StealthToggle;          // Stealth Foraging (hidden while Walk to Nodes is on)
+            public GameObject StealthRiskMark;    // shown while Stealth Foraging is on
+            public GameObject WalkRiskMark;       // shown while Walk to Nodes is OFF (teleport hops)
             public Toggle WalkToggle;             // Walk to Nodes (always visible)
             public Toggle ForagingAnimToggle;     // Play animations when watched (walk mode only)
             public Toggle NoRegrowthToggle;       // Don't Wait for Regrowth (mushroom spots picked once per run)
@@ -344,6 +346,8 @@ namespace HeartopiaMod
             try { this.SaveKeybinds(false); } catch { }
         }
 
+        private const float ForagingRiskMarkCenterX = -5f;
+
         private int ComputeUguiForagingLayoutSignature()
         {
             return (this.auraFarmEnabled ? 1 : 0)
@@ -502,12 +506,16 @@ namespace HeartopiaMod
                 new System.Action<float>(this.OnUguiForagingTeleportDelayChanged));
             PlaceUguiTopLeft(handle.TeleportDelaySlider.gameObject, 192f, 145f, panelW - 220f, 20f);
 
-            // Stealth Foraging (StealthForagingFeature.cs) — always visible; the relayout owns its
-            // row because the aura block above it moves. Hint label mirrors the Resolver row shape
-            // (wrapped, muted, right of the checkbox).
+            // Stealth Foraging (StealthForagingFeature.cs) — hidden while Walk to Nodes is on (the
+            // two are mutually exclusive); the relayout owns its row because the aura block above
+            // it moves.
             handle.StealthToggle = this.CreateUguiCheckbox(settings.transform, "StealthToggle",
                 this.L("Stealth Foraging"), this.stealthForagingEnabled,
                 new System.Action<bool>(this.OnUguiForagingStealthToggled));
+            // Risk marks for rows inside the SETTINGS card: its 14px gutter keeps them inside the
+            // viewport, so they stay masked. -5 keeps the glyph off the card's left border line.
+            handle.StealthRiskMark = this.CreateUguiRiskMark(handle.StealthToggle, ForagingRiskMarkCenterX, false);
+            SyncUguiRiskMark(handle.StealthRiskMark, null, 0f, 0f, this.stealthForagingEnabled);
             Color stealthMuted = this.UguiKitMutedColor();
 
             // Walk to Nodes (FarmWalkFeature.cs) — mutually exclusive with Stealth Foraging above,
@@ -526,6 +534,8 @@ namespace HeartopiaMod
             handle.WalkToggle = this.CreateUguiCheckbox(settings.transform, "WalkToggle",
                 this.L("Walk to Nodes"), this.farmWalkToNodeEnabled,
                 new System.Action<bool>(this.OnUguiForagingWalkToggled));
+            handle.WalkRiskMark = this.CreateUguiRiskMark(handle.WalkToggle, ForagingRiskMarkCenterX, false);
+            SyncUguiRiskMark(handle.WalkRiskMark, null, 0f, 0f, !this.farmWalkToNodeEnabled);
 
             // Zone travel, two independent switches under Walk to Nodes. Kept separate on request:
             // walking between areas is useful on its own, and the vehicle is a second decision with
@@ -707,12 +717,21 @@ namespace HeartopiaMod
             SetUguiGoActive(handle.TeleportDelaySlider != null ? handle.TeleportDelaySlider.gameObject : null, aura);
 
             float rowY = aura ? 178f : 110f; // after 42 (area load) + 76 (aura toggle) [+ 110/144]
-            if (handle.StealthToggle != null)
+
+            // Stealth Foraging cannot run with Walk to Nodes (the handlers clear it), so its row is
+            // hidden rather than left as a dead switch, and Walk to Nodes moves up into its place.
+            bool stealthRow = !this.farmWalkToNodeEnabled;
+            SetUguiGoActive(handle.StealthToggle != null ? handle.StealthToggle.gameObject : null, stealthRow);
+            if (stealthRow)
             {
-                PlaceUguiTopLeft(handle.StealthToggle.gameObject, 14f, rowY, 250f, 24f);
+                if (handle.StealthToggle != null)
+                {
+                    PlaceUguiTopLeft(handle.StealthToggle.gameObject, 14f, rowY, 250f, 24f);
+                }
+
+                rowY += 34f;
             }
 
-            rowY += 34f;
             if (handle.WalkToggle != null)
             {
                 PlaceUguiTopLeft(handle.WalkToggle.gameObject, 14f, rowY, 250f, 24f);
@@ -978,6 +997,8 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.AuraFarmToggle, this.auraFarmEnabled);
                 this.SyncUguiToggleFromField(handle.StealthToggle, this.stealthForagingEnabled);
                 this.SyncUguiToggleFromField(handle.WalkToggle, this.farmWalkToNodeEnabled);
+                SyncUguiRiskMark(handle.StealthRiskMark, null, 0f, 0f, this.stealthForagingEnabled);
+                SyncUguiRiskMark(handle.WalkRiskMark, null, 0f, 0f, !this.farmWalkToNodeEnabled);
                 this.SyncUguiToggleFromField(handle.ForagingAnimToggle, this.foragingAnimEnabled);
                 this.SyncUguiToggleFromField(handle.NoRegrowthToggle, this.farmNoRegrowthWait);
                 this.SyncUguiToggleFromField(handle.WalkToAreaToggle, this.farmWalkToAreaEnabled);

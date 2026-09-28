@@ -122,6 +122,7 @@ namespace HeartopiaMod
             public GameObject RadiusLabel;
             public float RadiusShownValue;    // float cache gating the label rebuild
             public Slider RadiusSlider;
+            public UguiLabelRiskMark RadiusRiskMark; // shown while the clean radius is above 7 m
 
             // The three flag+save toggles
             public Toggle NoDelayToggle;
@@ -276,6 +277,8 @@ namespace HeartopiaMod
             handle.RadiusSlider = this.CreateUguiSlider(scrollContent, "RadiusSlider",
                 SeaCleanAutoRadiusMin, SeaCleanAutoRadiusMax, this.seaCleanAutoRadius, false,
                 new System.Action<float>(this.OnUguiSeaCleanRadiusChanged));
+            // Vanilla cleaning reaches ~5 m plus the target's radius; kills from further out stand out.
+            handle.RadiusRiskMark = this.CreateUguiRiskMarkAfterLabel(handle.RadiusLabel);
 
             // -------- The three flag+save toggles (:936-960) --------
             handle.NoDelayToggle = this.CreateUguiCheckbox(scrollContent, "CleanNoDelay",
@@ -475,6 +478,7 @@ namespace HeartopiaMod
                     this.SetUguiLabelText(handle.RadiusLabel,
                         this.LF("Clean radius: {0:F1}m", this.seaCleanAutoRadius));
                 }
+                this.SyncUguiRiskMarkAfterLabel(handle.RadiusRiskMark, this.seaCleanAutoRadius > 7f);
 
                 // Cleansing label — LIVE re-read every gated frame while visible (:1013-1016);
                 // the raw-ref cache keeps unchanged frames alloc-free.

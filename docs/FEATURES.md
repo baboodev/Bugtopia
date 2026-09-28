@@ -91,6 +91,16 @@ Inventory scan / sort / filter rules for these (and Auto Sell, Bag transfer, pet
 - **Status overlay:** Optional HUD showing active features and farm states.
 - **Notifications:** Toast-style messages inside the mod UI (position configurable).
 
+### Risk marks
+
+A red **!** next to a row flags a setting with a high detection risk (see the menu risk review).
+Conditional: Auto Collect Bubbles (on, with a collect radius above 3 m or unlimited), Insects →
+Teleport (on), Noclip (speed × boost above 4.3 m/s,
+the server's on-foot threshold), Custom Jump (on), Game Speed (above 1x), Stealth Foraging (on),
+Walk to Nodes (off), Auto Sell Interval (under 60 s), Homeland Farm Privacy Pause (under 10 m),
+Sea Clean radius (above 7 m). Kit helpers: `CreateUguiRiskMark` (checkbox gutter) and
+`CreateUguiRiskMarkAfterLabel` (trails a slider caption), both in `HeartopiaComplete.UguiKit.cs`.
+
 ### Game speed
 
 Hotkeys (all rebindable, default unbound):
@@ -160,9 +170,12 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
   - *on foot*: nothing parks the game's poster, so the mod drives the game's **own** conditional
     sender (`BasePlayerComponent.TrySendSelfTransform(false)`) — it posts only on a real change, so
     there are no duplicate packets when the player tick already sent this frame, plus one forced post
-    on release. Note the server's on-foot threshold is `SpeedThresholdWalk` (**4.3**), below the
-    noclip speed slider's minimum (5).
-  - Off = the mod posts nothing while noclip drives.
+    on release. Note the server's on-foot threshold is `SpeedThresholdWalk` (**4.3**). The speed
+    slider goes down to 3, and the Noclip row shows a red **!** while speed × boost is above 4.3
+    (the boost multiplier applies while Shift / a gamepad shoulder button is held).
+  - Off = the mod posts nothing extra while noclip drives. On foot the game's own poster still
+    sends the driven position, so the server sees the flight either way; only in a vehicle is the
+    poster parked, and there the position arrives as one jump on release.
 
 ### Disable OOB Teleport
 
@@ -866,6 +879,9 @@ Status strings: `IDLE`, `TELEPORTING...`, `GATHERING...`, etc.
 
 Optional companion toggle in **Foraging → SETTINGS** (persisted, default off, `StealthForagingFeature.cs`).
 It only does anything **while the farm is actually running** — configuring it on an idle farm changes nothing.
+The row is **hidden while Walk to Nodes is on** (the two are mutually exclusive — each clears the
+other), and carries a red **!** while it is on; Walk to Nodes carries one while it is *off*,
+since the farm then teleports between nodes.
 
 While engaged:
 
@@ -1658,7 +1674,7 @@ Decrypts `persistentDataPath/ScreenCapture` to `ScreenCaptureDecrypted` (AES, sa
 
 Palette comes from the in-game `drawing_lut` texture (128 colors; cached as `ScreenCaptureDecrypted/.drawing_color_lut.png`). Edited colors outside the palette are quantized to the nearest entry on re-encrypt.
 
-**Upload edited drawing to the server** (open the drawing at your easel first): **Extract open drawing** dumps the live canvas to `ScreenCaptureDecrypted/drawing.png`; edit it; **Upload drawing.png** pushes the pixels to the server (DrawBoard protocol) and refreshes the in-game preview/thumbnail. This is server-authoritative — editing the local cache alone does **not** change the drawing in-game.
+**Upload edited drawing to the server** (open the drawing at your easel first): **Extract open drawing** dumps the live canvas to `ScreenCaptureDecrypted/drawing.png`; edit it; **Upload drawing.png** pushes the pixels to the server (DrawBoard protocol) and refreshes the in-game preview/thumbnail. This is server-authoritative — editing the local cache alone does **not** change the drawing in-game. A drawing with more than 256 colour runs goes out in chunks of 256 runs, one command per second (fixed values — the budget and delay sliders were removed 2026-09-29).
 
 CLI parity: `tools/screen_capture_crypto.py` (`decrypt` / `encrypt-changed` / `decode-draw` / `encode-draw`; `pip install pycryptodome pillow`). Palette files: `tools/gen_drawing_palette.py`.
 

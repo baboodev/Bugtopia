@@ -382,6 +382,20 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Single-line width of the label's CURRENT text (the risk mark that trails a label).
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private bool UguiKitTmpTryGetPreferredTextWidth(GameObject label, out float width)
+        {
+            width = 0f;
+            TextMeshProUGUI tmp = label.GetComponent<TextMeshProUGUI>();
+            if (tmp == null)
+            {
+                return false;
+            }
+            width = tmp.GetPreferredValues(tmp.text).x;
+            return true;
+        }
+
         // Read-back for the CJK checks that run AFTER construction (the bold gate).
         [MethodImpl(MethodImplOptions.NoInlining)]
         private bool UguiKitTmpTryGetText(GameObject label, out string text)
