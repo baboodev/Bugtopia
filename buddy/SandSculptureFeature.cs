@@ -243,6 +243,8 @@ namespace HeartopiaMod
 
             this.autoSandWasEnabled = this.autoSandEnabled;
 
+            this.ProcessSandRoughSelectHookOnUpdate();
+
             if (this.autoSandEnabled)
             {
                 this.RunAutoSandSculptureApi();
@@ -621,7 +623,17 @@ namespace HeartopiaMod
                         this.AddMenuNotification(this.L("Sand sculpture complete"), new Color(0.45f, 1f, 0.55f));
                         this.sandTargetBaseNetId = 0;
                         this.sandTargetRoughStaticId = 0;
-                        // The rough spawned next to the player, so the vanilla FSM opened the
+                        if (SandRoughSelectDialogSuppressed)
+                        {
+                            // The EnableEnter detour kept the FSM out of SelectSandRough, so no
+                            // dialog was opened and there is nothing to sweep.
+                            this.SandSetAction("waiting for next base");
+                            this.sandApiState = SandApiState.FindBase;
+                            this.sandApiNextActionAt = now + SandApiPostChooseBackoffSeconds;
+                            return;
+                        }
+
+                        // Fallback (detour not installed): the rough spawned next to the player, so the vanilla FSM opened the
                         // DialogueSimplePanel "choose model" dialog. Our protocol Choose bypassed
                         // its callback, so nothing closes it — sweep it shut.
                         this.sandApiState = SandApiState.CloseDialog;

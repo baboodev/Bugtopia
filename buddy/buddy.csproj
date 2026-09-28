@@ -491,6 +491,7 @@
     <Compile Include="AutoIceSkatingFeature.cs" />
     <Compile Include="SnowSculptureFeature.cs" />
     <Compile Include="SandSculptureFeature.cs" />
+    <Compile Include="SandRoughSelectHook.cs" />
     <Compile Include="SeaCleanQteFeature.cs" />
     <Compile Include="CleanupBossFeature.cs" />
     <Compile Include="SeaCleanBannerHideFeature.cs" />
