@@ -426,6 +426,7 @@ baseline that exists.** Note its path when the pipeline prints it.
 | 2026-08-20 | +774 / −92 / ~1078 | 911 → 948 tables, 337 746 → 376 657 rows | `ReadUInt64` opcode added to the decoder; `AreaPriorityManager` moved namespace (diagnostic-only break) |
 | 2026-08-27 | +0 / −0 / ~16 | 14 of 949 tables edited, all micro-fixes | a stale `old/` archive in the work dir made `promote` SKIP silently — bindings/uipaths then diffed the wrong pair; move the archive aside and rerun promote+checks |
 | 2026-09-24 | +2001 / −531 / ~1661 (≈310 of the removals are namespace moves, `XDTGame.UGC` → `XDTGame.GAS`) | 948 → 985 tables, 376 661 → 413 629 rows | two new ctor shapes broke the schema parser (`arrN = TableArrayPool.Share(arrN)`, collections sized after the count via `TableEmptyDictionary`); the failed decode truncated `cn_tables.db` and the rerun snapshotted the 0-byte file — `snapshot` now keeps the first snapshot. Baseline rebuilt from a second machine's `cn.ab` + its own `EcsClient` |
+| 2026-09-30 | +6 / −0 / ~38 | 985 tables, 413 629 → 413 637 rows; 28 edited (19 only expression-pool renumbering) | the stale `old/` archive trap from 2026-08-27 hit again (`promote` SKIP) — moved aside, reran promote + checks. No binding broke; the player→plot lookup rewrite (`HomeFieldComponent`) is a vanilla regression, not a mod break |
 
 See also: [GAME_ASSEMBLIES_AND_TOOLS.md](GAME_ASSEMBLIES_AND_TOOLS.md) (runtime access,
 IL2CPP tree), [GAME_EVENTS.md](GAME_EVENTS.md) (the event engine),
