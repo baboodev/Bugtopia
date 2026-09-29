@@ -223,6 +223,9 @@ namespace HeartopiaMod
             public float gameLodNineCellMult;
             public bool gameLodShadowEnabled;
             public float gameLodShadowDistance;
+            public bool gameLodTextureBudgetEnabled;
+            public int gameLodTextureBudgetMb;
+            public bool gameLodBrgRebuildEnabled;
             public bool gameLodHlodEnabled;
             public float gameLodHlodMult;
             public bool gameLodXdLodEnabled;

@@ -225,6 +225,9 @@ namespace HeartopiaMod
             data.gameLodNineCellMult = this.gameLodNineCellMult;
             data.gameLodShadowEnabled = this.gameLodShadowEnabled;
             data.gameLodShadowDistance = this.gameLodShadowDistance;
+            data.gameLodTextureBudgetEnabled = this.gameLodTextureBudgetEnabled;
+            data.gameLodTextureBudgetMb = this.gameLodTextureBudgetMb;
+            data.gameLodBrgRebuildEnabled = this.gameLodBrgRebuildEnabled;
             data.gameLodHlodEnabled = this.gameLodHlodEnabled;
             data.gameLodHlodMult = this.gameLodHlodMult;
             data.gameLodXdLodEnabled = this.gameLodXdLodEnabled;
@@ -633,6 +636,9 @@ namespace HeartopiaMod
             this.gameLodNineCellMult = data.gameLodNineCellMult;
             this.gameLodShadowEnabled = data.gameLodShadowEnabled;
             this.gameLodShadowDistance = data.gameLodShadowDistance;
+            this.gameLodTextureBudgetEnabled = data.gameLodTextureBudgetEnabled;
+            this.gameLodTextureBudgetMb = data.gameLodTextureBudgetMb;
+            this.gameLodBrgRebuildEnabled = data.gameLodBrgRebuildEnabled;
             this.gameLodHlodEnabled = data.gameLodHlodEnabled;
             this.gameLodHlodMult = data.gameLodHlodMult;
             this.gameLodXdLodEnabled = data.gameLodXdLodEnabled;
@@ -1310,6 +1316,8 @@ namespace HeartopiaMod
             this.SetGameLodSignificanceOffEnabled(false);
             this.SetGameLodNineCellEnabled(false);
             this.SetGameLodShadowEnabled(false);
+            this.SetGameLodTextureBudgetEnabled(false);
+            this.SetGameLodBrgRebuildEnabled(false);
             this.SetGameLodHlodEnabled(false);
             this.SetGameLodXdLodEnabled(false);
             this.ugcCacheRaiseLimitEnabled = false;
@@ -1326,6 +1334,7 @@ namespace HeartopiaMod
             this.gameLodVegetationApplyDuringLoad = false;
             this.gameLodNineCellMult = 2f;
             this.gameLodShadowDistance = 300f;
+            this.gameLodTextureBudgetMb = 2048;
             this.gameLodHlodMult = 2f;
             this.showStatusOverlay = false;
             this.SaveKeybinds(false);

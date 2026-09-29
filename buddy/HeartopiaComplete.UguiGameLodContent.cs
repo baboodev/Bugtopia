@@ -64,6 +64,10 @@ namespace HeartopiaMod
             public GameObject BrgStatusLabel;
             public string BrgStatusShown;
 
+            public Toggle BrgRebuildToggle;
+            public GameObject BrgRebuildStatusLabel;
+            public string BrgRebuildStatusShown;
+
             public Toggle VegetationToggle;
             public Toggle VegetationDuringLoadToggle;
             public GameObject VegetationLabel;
@@ -100,6 +104,13 @@ namespace HeartopiaMod
             public Slider ShadowSlider;
             public GameObject ShadowStatusLabel;
             public string ShadowStatusShown;
+
+            public Toggle TextureBudgetToggle;
+            public GameObject TextureBudgetLabel;
+            public string TextureBudgetShown;
+            public Slider TextureBudgetSlider;
+            public GameObject TextureBudgetStatusLabel;
+            public string TextureBudgetStatusShown;
 
             public float NextSlowSyncAt;
             public int ErrorCount;
@@ -283,6 +294,31 @@ namespace HeartopiaMod
                 handle.BrgStatusShown, 11f, hintColor, false);
             this.TrySetUguiLabelWrapped(handle.BrgStatusLabel);
             PlaceUguiTopLeft(handle.BrgStatusLabel, pad, yCur, rowW, 18f);
+            yCur += 28f;
+
+            handle.BrgRebuildToggle = this.CreateUguiCheckbox(scrollContent, "BrgRebuildToggle",
+                this.L("Rebuild low-poly batches after load"), this.gameLodBrgRebuildEnabled,
+                new System.Action<bool>(this.OnUguiGameLodBrgRebuildToggled));
+            PlaceUguiTopLeft(handle.BrgRebuildToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 30f;
+
+            GameObject rebuildBtn = this.CreateUguiSecondaryButton(scrollContent, "BrgRebuildButton",
+                this.L("Rebuild now"), new System.Action(this.OnUguiGameLodBrgRebuildClicked));
+            PlaceUguiTopLeft(rebuildBtn, pad, yCur, 160f, 24f);
+            yCur += 30f;
+
+            GameObject rebuildHint = this.CreateUguiLabel(scrollContent, "BrgRebuildHint",
+                this.L("Fixes a game bug: objects created together with the world can stay on their low-poly placeholder mesh (flat flower centres, blocky furniture). Runs once a few seconds after each load."),
+                11f, hintColor, false);
+            this.TrySetUguiLabelWrapped(rebuildHint);
+            PlaceUguiTopLeft(rebuildHint, pad, yCur, rowW, 30f);
+            yCur += 34f;
+
+            handle.BrgRebuildStatusShown = this.BuildUguiGameLodStatusText(this.gameLodBrgRebuildStatus);
+            handle.BrgRebuildStatusLabel = this.CreateUguiLabel(scrollContent, "BrgRebuildStatus",
+                handle.BrgRebuildStatusShown, 11f, hintColor, false);
+            this.TrySetUguiLabelWrapped(handle.BrgRebuildStatusLabel);
+            PlaceUguiTopLeft(handle.BrgRebuildStatusLabel, pad, yCur, rowW, 18f);
             yCur += 28f;
 
             // ---------------- VEGETATION & NEIGHBOR HOUSES ----------------
@@ -484,6 +520,42 @@ namespace HeartopiaMod
                 handle.ShadowStatusShown, 11f, hintColor, false);
             this.TrySetUguiLabelWrapped(handle.ShadowStatusLabel);
             PlaceUguiTopLeft(handle.ShadowStatusLabel, pad, yCur, rowW, 18f);
+            yCur += 28f;
+
+            // ---------------- TEXTURE STREAMING ----------------
+            GameObject textureHeader = this.CreateUguiHeaderLabel(scrollContent, "TextureBudgetHeader",
+                this.L("TEXTURE STREAMING"), 12f);
+            PlaceUguiTopLeft(textureHeader, pad, yCur, rowW, 18f);
+            yCur += 24f;
+
+            handle.TextureBudgetToggle = this.CreateUguiCheckbox(scrollContent, "TextureBudgetToggle",
+                this.L("Custom texture streaming budget"), this.gameLodTextureBudgetEnabled,
+                new System.Action<bool>(this.OnUguiGameLodTextureBudgetToggled));
+            PlaceUguiTopLeft(handle.TextureBudgetToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 30f;
+
+            handle.TextureBudgetShown = this.LF("Texture budget: {0} MB", this.gameLodTextureBudgetMb);
+            handle.TextureBudgetLabel = this.CreateUguiBodyLabel(scrollContent, "TextureBudgetLabel",
+                handle.TextureBudgetShown, 13f);
+            PlaceUguiTopLeft(handle.TextureBudgetLabel, pad, yCur + 2f, labelW, 20f);
+            handle.TextureBudgetSlider = this.CreateUguiSlider(scrollContent, "TextureBudgetSlider",
+                512f, 4096f, this.gameLodTextureBudgetMb, true,
+                new System.Action<float>(this.OnUguiGameLodTextureBudgetChanged));
+            PlaceUguiTopLeft(handle.TextureBudgetSlider.gameObject, sliderX, yCur + 3f, sliderW, 20f);
+            yCur += 26f;
+
+            GameObject textureHint = this.CreateUguiLabel(scrollContent, "TextureBudgetHint",
+                this.L("Video memory Unity may spend on streamed texture mip levels (game default 512 MB). A higher budget keeps textures at full resolution; set it below your graphics card's free VRAM."),
+                11f, hintColor, false);
+            this.TrySetUguiLabelWrapped(textureHint);
+            PlaceUguiTopLeft(textureHint, pad, yCur, rowW, 30f);
+            yCur += 34f;
+
+            handle.TextureBudgetStatusShown = this.BuildUguiGameLodStatusText(this.gameLodTextureBudgetStatus);
+            handle.TextureBudgetStatusLabel = this.CreateUguiLabel(scrollContent, "TextureBudgetStatus",
+                handle.TextureBudgetStatusShown, 11f, hintColor, false);
+            this.TrySetUguiLabelWrapped(handle.TextureBudgetStatusLabel);
+            PlaceUguiTopLeft(handle.TextureBudgetStatusLabel, pad, yCur, rowW, 18f);
             yCur += 26f;
 
             // ---------------- DIAGNOSTICS ----------------
@@ -566,6 +638,7 @@ namespace HeartopiaMod
             {
                 this.SyncUguiToggleFromField(handle.FurnitureToggle, this.gameLodFurnitureEnabled);
                 this.SyncUguiToggleFromField(handle.BrgBiasToggle, this.gameLodBrgBiasEnabled);
+                this.SyncUguiToggleFromField(handle.BrgRebuildToggle, this.gameLodBrgRebuildEnabled);
                 this.SyncUguiToggleFromField(handle.VegetationToggle, this.gameLodVegetationEnabled);
                 this.SyncUguiToggleFromField(handle.VegetationDuringLoadToggle, this.gameLodVegetationApplyDuringLoad);
                 this.SyncUguiToggleFromField(handle.HlodToggle, this.gameLodHlodEnabled);
@@ -573,6 +646,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.SignificanceToggle, this.gameLodSignificanceOffEnabled);
                 this.SyncUguiToggleFromField(handle.NineCellToggle, this.gameLodNineCellEnabled);
                 this.SyncUguiToggleFromField(handle.ShadowToggle, this.gameLodShadowEnabled);
+                this.SyncUguiToggleFromField(handle.TextureBudgetToggle, this.gameLodTextureBudgetEnabled);
 
                 if (handle.FurnitureMaxSlider != null
                     && Mathf.Abs(handle.FurnitureMaxSlider.value - this.gameLodFurnitureMaxObjects) > 0.5f)
@@ -662,6 +736,14 @@ namespace HeartopiaMod
                 this.SyncUguiSelfLabelText(handle.ShadowLabel, ref handle.ShadowShown,
                     this.LF("Shadow distance: {0:F0} m", this.gameLodShadowDistance));
 
+                if (handle.TextureBudgetSlider != null
+                    && Mathf.Abs(handle.TextureBudgetSlider.value - this.gameLodTextureBudgetMb) > 0.5f)
+                {
+                    handle.TextureBudgetSlider.SetValueWithoutNotify(this.gameLodTextureBudgetMb);
+                }
+                this.SyncUguiSelfLabelText(handle.TextureBudgetLabel, ref handle.TextureBudgetShown,
+                    this.LF("Texture budget: {0} MB", this.gameLodTextureBudgetMb));
+
                 // Live status lines change from the feature's background apply loop — 0.5s tick.
                 if (Time.unscaledTime >= handle.NextSlowSyncAt)
                 {
@@ -672,6 +754,8 @@ namespace HeartopiaMod
                         this.BuildUguiUgcCacheApplyStatusText());
                     this.SyncUguiSelfLabelText(handle.BrgStatusLabel, ref handle.BrgStatusShown,
                         this.BuildUguiGameLodStatusText(this.gameLodBrgStatus));
+                    this.SyncUguiSelfLabelText(handle.BrgRebuildStatusLabel, ref handle.BrgRebuildStatusShown,
+                        this.BuildUguiGameLodStatusText(this.gameLodBrgRebuildStatus));
                     this.SyncUguiSelfLabelText(handle.VegetationStatusLabel, ref handle.VegetationStatusShown,
                         this.BuildUguiGameLodStatusText(this.gameLodVegetationStatus));
                     this.SyncUguiSelfLabelText(handle.HlodStatusLabel, ref handle.HlodStatusShown,
@@ -684,6 +768,8 @@ namespace HeartopiaMod
                         this.BuildUguiGameLodStatusText(this.gameLodNineCellStatus));
                     this.SyncUguiSelfLabelText(handle.ShadowStatusLabel, ref handle.ShadowStatusShown,
                         this.BuildUguiGameLodStatusText(this.gameLodShadowStatus));
+                    this.SyncUguiSelfLabelText(handle.TextureBudgetStatusLabel, ref handle.TextureBudgetStatusShown,
+                        this.BuildUguiGameLodStatusText(this.gameLodTextureBudgetStatus));
                 }
             }
             catch (Exception ex)
@@ -866,6 +952,24 @@ namespace HeartopiaMod
             try { this.SaveKeybinds(false); } catch { }
         }
 
+        private void OnUguiGameLodBrgRebuildToggled(bool value)
+        {
+            if (value == this.gameLodBrgRebuildEnabled)
+            {
+                return;
+            }
+            this.SetGameLodBrgRebuildEnabled(value);
+            this.AddMenuNotification(value ? this.L("Batch rebuild after load on") : this.L("Batch rebuild after load off"),
+                new Color(0.55f, 1f, 0.65f));
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiGameLodBrgRebuildClicked()
+        {
+            this.RequestGameLodBrgRebuild();
+            this.AddMenuNotification(this.L("Batch rebuild queued"), new Color(0.45f, 0.85f, 1f));
+        }
+
         private void OnUguiGameLodDumpClicked()
         {
             this.DumpGameLodNearbyLodObjects();
@@ -964,6 +1068,30 @@ namespace HeartopiaMod
                 return;
             }
             this.gameLodShadowDistance = rounded;
+            this.nextGameLodApplyAt = 0f;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiGameLodTextureBudgetToggled(bool value)
+        {
+            if (value == this.gameLodTextureBudgetEnabled)
+            {
+                return;
+            }
+            this.SetGameLodTextureBudgetEnabled(value);
+            this.AddMenuNotification(value ? this.L("Custom texture budget on") : this.L("Custom texture budget off"),
+                new Color(0.55f, 1f, 0.65f));
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiGameLodTextureBudgetChanged(float value)
+        {
+            int rounded = Mathf.Clamp(Mathf.RoundToInt(value / 128f) * 128, 512, 4096);
+            if (rounded == this.gameLodTextureBudgetMb)
+            {
+                return;
+            }
+            this.gameLodTextureBudgetMb = rounded;
             this.nextGameLodApplyAt = 0f;
             try { this.SaveKeybinds(false); } catch { }
         }

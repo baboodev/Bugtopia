@@ -456,6 +456,7 @@
     <Compile Include="LocalizationManager.cs" />
     <Compile Include="LodSettingsFeature.cs" />
     <Compile Include="GameLodFeature.cs" />
+    <Compile Include="GameLodBrgRebuild.cs" />
     <Compile Include="FpsWatchdogFeature.cs" />
     <Compile Include="UgcTextureCacheFeature.cs" />
     <Compile Include="HideJumpButtonFeature.cs" />
