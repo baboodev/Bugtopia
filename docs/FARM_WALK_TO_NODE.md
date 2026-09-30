@@ -260,6 +260,14 @@ object is known to `DataCenter`. The event comes first, so that is what we liste
   at 04:06:21 and missed the opening broadcast.
 * The verdict for **every** netId is recorded, not just the current node's. The old handler discarded
   roughly 800 verdicts per run behind its gates.
+* **`coldEndTime` is in the game's time base, not UTC.** `TimeServiceClient.GetGameUnixMs()` is
+  `UtcNow + _serverUtfOffset` (the server's zone offset), and every end the game broadcasts is on that
+  clock. Every comparison in the mod goes through `NowUnixMs()` (HeartopiaComplete.MapSpots.cs), which
+  reads `GameTimeUtility.GetUnixTimeMs` through AuraMono and caches the offset from UTC (refreshed every
+  30 s, logged once as `[CollectCold] game clock offset vs UTC`). Before this it returned true UTC, and
+  on a +07:00 account every mushroom verdict read seven hours ahead: six ripe Shiitake in front of the
+  player were hidden as "not ready yet" (2026-09-30). Never compare a game timestamp with
+  `DateTimeOffset.UtcNow`.
 
 ### The sweep: asking the game to publish a verdict for everything
 

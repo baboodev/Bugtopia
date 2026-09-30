@@ -322,10 +322,102 @@ namespace HeartopiaMod
         // offset. Read live from the running build, not from a dump.
         private const int CollectableDataOffset = 72;
 
-        private static long NowUnixMs()
+        // "Now" for every comparison against a game timestamp: cooldown ends, maturity verdicts,
+        // persisted cold rows, drain detection.
+        //
+        // ⚠️ THE GAME'S UNIX TIME IS NOT UTC. TimeServiceClient.GetGameUnixMs() is
+        // UtcNow + _serverUtfOffset (the server's zone offset), and every cooldown end the game
+        // broadcasts (CmdUpdateCollectCold endMs, GetColdEndTime) is in THAT base. This used to
+        // return true UTC, so on a +07:00 account every mushroom verdict read seven hours in the
+        // future: six ripe Shiitake in front of the player were hidden from the radar and the farm
+        // as "not ready yet" (2026-09-30 17:13 local, game clock measured 25 201 s ahead of UTC).
+        // Only a zero-offset account ever saw correct behaviour.
+        //
+        // The game clock is read through GameTimeUtility.GetUnixTimeMs (AuraMono) and cached as an
+        // offset from UTC, refreshed every GameClockOffsetRefreshSeconds; until the first read
+        // succeeds the offset is 0 and this is plain UTC, which is the old behaviour and the best
+        // available. Still an instance member: the AuraMono bridge is one.
+        private long gameClockOffsetMs;
+        private bool gameClockOffsetKnown;
+        private float gameClockOffsetNextAt;
+        private const float GameClockOffsetRefreshSeconds = 30f;
+
+        private static long UtcNowUnixMs()
         {
             return (long)(System.DateTime.UtcNow - new System.DateTime(1970, 1, 1, 0, 0, 0, System.DateTimeKind.Utc)).TotalMilliseconds;
         }
+
+        private long NowUnixMs()
+        {
+            long utc = UtcNowUnixMs();
+            if (Time.unscaledTime >= this.gameClockOffsetNextAt)
+            {
+                this.gameClockOffsetNextAt = Time.unscaledTime + GameClockOffsetRefreshSeconds;
+                long gameMs;
+                if (this.TryGetGameUnixTimeMs(out gameMs))
+                {
+                    long offset = gameMs - utc;
+                    if (!this.gameClockOffsetKnown || System.Math.Abs(offset - this.gameClockOffsetMs) > 2000L)
+                    {
+                        ModLogger.Msg("[CollectCold] game clock offset vs UTC: " + (offset / 1000L) + " s"
+                            + (this.gameClockOffsetKnown ? " (was " + (this.gameClockOffsetMs / 1000L) + " s)" : string.Empty)
+                            + " — cooldown ends are compared in the game's time base.");
+                    }
+
+                    this.gameClockOffsetMs = offset;
+                    this.gameClockOffsetKnown = true;
+                }
+            }
+
+            return utc + this.gameClockOffsetMs;
+        }
+
+        // GameTimeUtility.GetUnixTimeMs() via AuraMono. Static method, no arguments, boxed Int64
+        // back — unboxed as a full 8-byte read (a 4-byte read truncates, see the Int64 note in
+        // project memory). Returns false before the world's time service exists (the game answers
+        // 0 then) or when the bridge is not ready.
+        private unsafe bool TryGetGameUnixTimeMs(out long unixMs)
+        {
+            unixMs = 0L;
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null || auraMonoObjectUnbox == null)
+            {
+                return false;
+            }
+
+            if (this.gameClockGetUnixTimeMsMethod == IntPtr.Zero)
+            {
+                IntPtr cls = this.FindAuraMonoClassAnySpelling("XDTDataAndProtocol.ProtocolService.GameTimeUtility");
+                if (cls == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                this.gameClockGetUnixTimeMsMethod = this.FindAuraMonoMethodOnHierarchy(cls, "GetUnixTimeMs", 0);
+                if (this.gameClockGetUnixTimeMsMethod == IntPtr.Zero)
+                {
+                    return false;
+                }
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(this.gameClockGetUnixTimeMsMethod, IntPtr.Zero, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr raw = auraMonoObjectUnbox(boxed);
+            if (raw == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            unixMs = *(long*)raw;
+            return unixMs > 0L;
+        }
+
+        private IntPtr gameClockGetUnixTimeMsMethod;
         private readonly System.Text.StringBuilder mapResGatherBreakdown = new System.Text.StringBuilder();
 
         private float mapResNextScanAt;

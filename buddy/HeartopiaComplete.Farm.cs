@@ -1285,7 +1285,7 @@ namespace HeartopiaMod
 
         private float GetVisitedColdStampSeconds(long coldEndUnixMs)
         {
-            long nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            long nowUnixMs = this.NowUnixMs();
             if (coldEndUnixMs > nowUnixMs)
             {
                 return Mathf.Clamp((float)((coldEndUnixMs - nowUnixMs) / 1000.0) + 2f,
@@ -2351,7 +2351,7 @@ namespace HeartopiaMod
             }
             this.auraCollectSeenAvailByNetId[resourceNetId] = availableNum;
 
-            long nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            long nowUnixMs = this.NowUnixMs();
             // Drained = a real cooldown end in the future OR charges exhausted: some resource
             // families (event forage) never set endMs/inCold — their drain event only zeroes
             // availableNum (and their shape leaves the axe-checker).
@@ -2555,7 +2555,7 @@ namespace HeartopiaMod
             int availableNum = -1;
             string resTypeName = string.Empty;
             bool cooldownRead = this.TryReadLiveCollectableCooldown(collectable, out coldEndTimeMs, out availableNum, out resTypeName);
-            long nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            long nowUnixMs = this.NowUnixMs();
 
             if (!this.auraCollectNodeDiagLogged)
             {
