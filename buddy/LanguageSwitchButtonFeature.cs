@@ -20,6 +20,15 @@ namespace HeartopiaMod
     // looked up by its hierarchy path — one GameObject.Find per panel open, nothing per frame.
     // On the global build the button is already active and this is a no-op.
     //
+    // THE LOGIN SCREEN opens the same SettingPanel at the same path, but event hooks install only
+    // once a world is up (inflating DispatchEvent<T> on the login screen aborts the process), so
+    // the hook above never fires there. Before a world exists a Unity-only check covers it
+    // instead: GameObject.Find twice a second until the panel shows, then an activeSelf read per
+    // frame on the cached button, so a reopen that hides it again is undone on the next frame.
+    // No Mono is touched. The game's own panel already handles a pick on the login screen: it
+    // changes the language, closes every panel and reopens LoginPanel (LanguageSwitchPanel
+    // .OnConfirmClick, GameWorld.IsLevel<GameLevel_Login> branch).
+    //
     // Pair with LocalizationFallbackFeature (untranslated strings) and the UguiKitTmp font sweep
     // releasing its bundles — without that release the game could not load the English font.
     // ============================================================================================
@@ -29,7 +38,11 @@ namespace HeartopiaMod
         private const string LanguageButtonSettingPanelPath = "GameApp/startup_root(Clone)/XDUIRoot/Full/SettingPanel(Clone)";
         private const string LanguageButtonRelativePath = "AniRoot@queueanimation/GameObjectLayout/language@btn";
 
+        private const float LanguageButtonLoginFindInterval = 0.5f;
+
         private bool languageButtonRevealLogged;
+        private Transform languageButtonLoginCached;
+        private float languageButtonLoginNextFindAt;
 
         private void RegisterLanguageSwitchButtonReveal()
         {
@@ -41,13 +54,47 @@ namespace HeartopiaMod
 
         private void OnPanelOpenedRevealLanguageButton(GameEventSnapshot e)
         {
-            GameObject panel = GameObject.Find(LanguageButtonSettingPanelPath);
-            if (panel == null)
+            this.RevealSettingLanguageButton(FindSettingLanguageButton());
+        }
+
+        // Login screen (and loading screens): the event hook is not installed yet, see the header.
+        private void ProcessLanguageButtonLoginRevealOnUpdate()
+        {
+            if (this.IsWorldReady)
             {
+                this.languageButtonLoginCached = null;
                 return;
             }
 
-            Transform button = panel.transform.Find(LanguageButtonRelativePath);
+            Transform button = this.languageButtonLoginCached;
+            if (button == null)   // Unity null: never found, or the panel was destroyed
+            {
+                float now = Time.unscaledTime;
+                if (now < this.languageButtonLoginNextFindAt)
+                {
+                    return;
+                }
+                this.languageButtonLoginNextFindAt = now + LanguageButtonLoginFindInterval;
+
+                button = FindSettingLanguageButton();
+                if (button == null)
+                {
+                    return;
+                }
+                this.languageButtonLoginCached = button;
+            }
+
+            this.RevealSettingLanguageButton(button);
+        }
+
+        private static Transform FindSettingLanguageButton()
+        {
+            GameObject panel = GameObject.Find(LanguageButtonSettingPanelPath);
+            return panel == null ? null : panel.transform.Find(LanguageButtonRelativePath);
+        }
+
+        private void RevealSettingLanguageButton(Transform button)
+        {
             if (button == null || button.gameObject.activeSelf)
             {
                 return;

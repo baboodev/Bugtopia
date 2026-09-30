@@ -326,9 +326,13 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
   handler, `LanguageSwitchPanel`, all 12 languages and every translation are otherwise intact.
 - The mod re-activates the button on `UIPanelOpenEvent` (dispatched right after `OnStart`), found by
   its hierarchy path under `XDUIRoot/Full/SettingPanel(Clone)`. On the global build it is already
-  visible and nothing happens. The login-screen language button is not touched (its visibility follows
-  login-state changes that raise no event).
-- Picking a language re-enters the world through the game's own loading screen. English needs the
+  visible and nothing happens.
+- The login screen opens the same `SettingPanel`, but event hooks install only once a world is up, so
+  there a Unity-only check takes over: `GameObject.Find` twice a second until the panel shows, then an
+  `activeSelf` read per frame on the cached button. No Mono is touched before the world.
+  `LoginPanel`'s own `language@btn` is not touched (the global build hides it too).
+- Picking a language in a world re-enters it through the game's own loading screen; on the login
+  screen the game closes its panels and reopens `LoginPanel` in the new language. English needs the
   font-sweep fix in `UguiKitTmp` (the mod must not hold the game's `fonts_*.ab`), and the strings the
   game never translated show in Chinese (previous section).
 - Log: `[LanguageButton] settings language button was hidden by the game (China build) — shown.`
