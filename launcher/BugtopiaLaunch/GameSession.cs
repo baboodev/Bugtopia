@@ -198,6 +198,31 @@ namespace Bugtopia.Launch
         }
 
         /// <summary>
+        /// Asks a game's client to start it, through the URI scheme the client registered - the way
+        /// its own desktop shortcut does. Returns as soon as the shell has handed it over; the game
+        /// turns up later, and <see cref="FindRunning"/> is what notices.
+        ///
+        /// Nothing of ours reaches that process: BUGTOPIA_STORAGE cannot travel through the client,
+        /// so the bootstrap finds its storage through bin\bugtopia_inject.cfg, as it does for a game
+        /// started by hand.
+        /// </summary>
+        public static void StartThroughClient(string uri)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true })?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                string scheme = uri.Split(':')[0];
+                throw new LaunchException(
+                    "Could not ask the game's client to start it - is it installed? Nothing answers " +
+                    scheme + ":// links (" + ex.Message + "). Start the game from the client and " +
+                    "tick \"I start the game myself\" instead.");
+            }
+        }
+
+        /// <summary>
         /// The running game, when there is one: a process of that executable's name whose image is
         /// that executable. Started by anything - Steam, TapTap, a shortcut - since nothing about the
         /// injection depends on who created the process.

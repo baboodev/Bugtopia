@@ -45,8 +45,15 @@ and a dependency on the VC redist being installed there is a failure mode with n
 
 One job, each step skipped when its result is already on disk:
 
-1. **Find the game.** Steam's own library list out of the registry and `libraryfolders.vdf`, then
-   the usual folders.
+1. **Find the game.** Every install, not the first: Steam's own library list out of the registry and
+   `libraryfolders.vdf`, TapTap Global's `<drive>:\TapTapGlobal\Apps\231364`, the TapTap CN client's
+   `<drive>:\TapTap\PC Games\*` (its settings, which would name the drive, are encrypted), then the
+   usual folders. A folder counts only when it identifies as Heartopia: `<name>_Data\app.info`, the two
+   lines Unity writes at build time, names company `xd` and product `Heartopia` or `心动小镇` (the CN
+   build) — or, with no `app.info`, the player is `xdt.exe`. Libraries are enumerated folder by folder,
+   so without that check any other IL2CPP game in one would be offered as this one. With more than one
+   install both views show a list; the pick is saved as `gameFolder`, and a later detection keeps it
+   while it is still a game rather than swapping in whichever install it found first.
 2. **Adopt or clear what is already installed.** A doorstop-style BepInEx install or a MelonLoader
    one boots from inside `il2cpp_init`, before the injection, and the bootstrap will not start a
    second runtime in one process — so an existing install replaces this launcher rather than
@@ -82,6 +89,40 @@ One job, each step skipped when its result is already on disk:
    `bin\bugtopia_inject.cfg` when `BUGTOPIA_STORAGE` is not in the environment. The wait has no
    timeout and is called off with **Stop waiting**; a game that never becomes ready is left running,
    since it is not this launcher's to kill.
+
+   The **TapTap CN** build is started through its client instead of directly — started on its own,
+   `xdt.exe` has no signed-in session — by opening
+   `taptap://taptap.com/app?app_id=45213&auto_launch=true&ch_src=desktop---&game_type=pc&platform=pc`,
+   the link its desktop shortcut uses; the wait above follows, again with no deadline, since the
+   client may want a sign-in or an update first. Which build a folder is comes from its `app.info`,
+   not from where it is installed.
+
+   **A game running as administrator.** The TapTap CN client starts the game elevated, although
+   neither `xdt.exe` nor `TapTap.exe` asks for it in its manifest (both are `asInvoker`), and a
+   process without those rights cannot open it: the injection fails with *OpenProcess was denied*.
+   So the waiting and the injection move into a copy of the launcher run as administrator —
+   `Bugtopia.exe inject --exe … --dll … --log … --stop …`, started with the shell's `runas` verb,
+   which is what raises the UAC prompt. Everything before it stays unelevated, so no file in storage
+   becomes the administrator's and the client is not started with rights it did not ask for. It is
+   asked for on the click, for the CN build or for a game already running that refuses to be opened:
+   a prompt raised later, when the game is in front, only blinks on the taskbar. Any other build
+   found elevated at injection time falls back to the same helper then. `runas` cannot redirect
+   output, so the helper writes `bin\inject_elevated.log`, which the launcher relays line by line as
+   `[admin] …`; Stop waiting creates `bin\inject_elevated.stop`, which the helper polls, since an
+   unelevated process cannot signal an elevated one. The exit code is the verdict: 0 injected,
+   1 failed, 2 stopped.
+
+### What else differs for the TapTap CN build
+
+| | Global (Steam, TapTap Global) | TapTap CN |
+|---|---|---|
+| Save profiles | `%LocalLow%\xd\Heartopia\XD` | `%LocalLow%\xd\心动小镇\XD` |
+| Server | chosen per profile (`GetRecommendZoneServer_h3995072540` under `HKCU\Software\xd\Heartopia`) | none — one region, no such value; the list is hidden |
+| Started by | the launcher, directly | the TapTap client, through the link above |
+| Storage tree | the chosen folder | its sibling with `-cn` appended — see §5 |
+
+The profiles are the same mechanism in both — the `PC` folder, parked siblings, `active_profile.txt`
+— only the product name in the path differs, since it is Unity's `persistentDataPath`.
 
 The launcher **is** the injector, so it has to stay alive from the moment the game starts until the
 bootstrap is inside it. That is why it closes when the job finishes rather than on the click.
@@ -124,6 +165,12 @@ runtime/
 ```
 
 Deleting `runtime/` undoes the whole installation.
+
+The TapTap CN build gets a tree of its own beside the chosen one — `runtime-cn` for the default, or
+`<chosen>-cn` (`<drive>:\cn` for a drive root). The interop assemblies are generated from one
+`GameAssembly.dll`, and the CN build does not ship the global one's, so a shared tree would have the
+generator rebuild them, for minutes, on every switch between the two. Each tree is prepared from the
+same BepInEx source; expert mode says where the CN one is under the storage field.
 
 ---
 

@@ -68,5 +68,24 @@ namespace Bugtopia.Launch
 
         /// <summary>An interop set exists. Whether it is *current* is <see cref="Bugtopia.Interop"/>'s question.</summary>
         public bool HasInterop => File.Exists(InteropHash);
+
+        /// <summary>
+        /// The storage root for one build of the game. The global builds share the chosen folder; the
+        /// CN build gets a sibling of it with <c>-cn</c> appended. The interop assemblies are generated
+        /// from one GameAssembly.dll and the two builds do not ship the same one, so a shared tree
+        /// would rebuild them - for minutes - on every switch between the two.
+        /// </summary>
+        public static string RootFor(string root, GameInstall install)
+        {
+            if (install == null || install.Edition == GameEdition.Global || string.IsNullOrWhiteSpace(root))
+                return root;
+
+            char[] separators = { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
+            string full = Path.GetFullPath(root);
+            string drive = Path.GetPathRoot(full) ?? "";
+            string trimmed = full.TrimEnd(separators);
+            // A drive root has no sibling to have; its CN tree goes inside it instead.
+            return trimmed.Length <= drive.TrimEnd(separators).Length ? Path.Combine(drive, "cn") : trimmed + "-cn";
+        }
     }
 }

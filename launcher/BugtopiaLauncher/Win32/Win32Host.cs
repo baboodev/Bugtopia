@@ -36,7 +36,7 @@ namespace Bugtopia.Launcher.Win32
         private TextRun CopyRun(string text) =>
             new TextRun(Environment.TickCount64 - copiedAt < 2000 ? "Copied" : "Copy", CopyPrefix + text);
         private const int IdDetect = 101, IdBrowse = 102, IdArchive = 103, IdCancel = 104, IdPlay = 105, IdAuto = 106,
-                          IdExpert = 107, IdWaitForGame = 108;
+                          IdExpert = 107, IdWaitForGame = 108, IdGameSelect = 109;
 
         /// <summary>The page's rocket, path for path.</summary>
         private static readonly string[] Rocket =
@@ -104,7 +104,7 @@ namespace Bugtopia.Launcher.Win32
 
         private Card cardGame, cardClean, cardBepInEx, cardMod, cardInterop;
         private Card[] cards;
-        private Button expertBox, detect, browse, archive, cancel, play, auto, waitForGame;
+        private Button expertBox, gameSelect, detect, browse, archive, cancel, play, auto, waitForGame;
 
         /// <summary>A launch is waiting for the game someone else will start; Cancel stops that wait.</summary>
         private bool waiting;
@@ -169,11 +169,12 @@ namespace Bugtopia.Launcher.Win32
         {
             expertBox = AddButton(IdExpert, ButtonKind.Checkbox, "Expert mode");
 
+            gameSelect = AddButton(IdGameSelect, ButtonKind.Select, "");
             detect = AddButton(IdDetect, ButtonKind.Secondary, "Detect");
             browse = AddButton(IdBrowse, ButtonKind.Secondary, "Browse...");
             archive = AddButton(IdArchive, ButtonKind.Secondary, "Choose the zip...");
 
-            cardGame = new Card { Key = "game", Title = "Heartopia", Actions = new[] { detect, browse }, Shown = new bool[2], HasActions = true };
+            cardGame = new Card { Key = "game", Title = "Heartopia", Actions = new[] { gameSelect, detect, browse }, Shown = new bool[3], HasActions = true };
             cardClean = new Card { Key = "clean", Title = "Game folder" };
             cardBepInEx = new Card { Key = "bepinex", Title = "BepInEx", Actions = new[] { archive }, Shown = new bool[1], HasActions = true };
             cardMod = new Card { Key = "mod", Title = "Bugtopia", Hidden = true };
@@ -338,20 +339,89 @@ namespace Bugtopia.Launcher.Win32
 
         private bool profilesLoaded;
 
+        /// <summary>The build the profiles on show belong to; another one has other profiles.</summary>
+        private string profilesEdition;
+
         private void SetState(JsonElement data)
         {
             stateDoc?.Dispose();
             stateDoc = JsonDocument.Parse(data.GetRawText());
             state = stateDoc.RootElement;
             haveState = true;
+            readInstalls();
             render();
 
-            // The page's refresh() loads the profiles once, after the first state.
-            if (!profilesLoaded)
+            // The page's refresh() loads the profiles once, after the first state - and again whenever
+            // the game picked is another build, which keeps its saves in a folder of its own.
+            if (!profilesLoaded || profilesEdition != S("edition"))
             {
                 profilesLoaded = true;
+                profilesEdition = S("edition");
                 loadProfiles();
             }
+        }
+
+        // ---- which install ------------------------------------------------------
+
+        /// <summary>The installs to pick from, the current one among them.</summary>
+        private readonly List<(string Folder, string Name)> gameInstalls = new List<(string, string)>();
+
+        private void readInstalls()
+        {
+            gameInstalls.Clear();
+            if (state.TryGetProperty("installs", out JsonElement list) && list.ValueKind == JsonValueKind.Array)
+                foreach (JsonElement install in list.EnumerateArray())
+                    gameInstalls.Add((Str(install, "folder") ?? "", Str(install, "name") ?? ""));
+        }
+
+        /// <summary>Only worth a list with something to choose between.</summary>
+        private bool HasInstallChoice => gameInstalls.Count > 1;
+
+        /// <summary>
+        /// What the list calls each install: its store. Two of the same store - two Steam libraries -
+        /// get their folder as well, since the name alone would not tell them apart.
+        /// </summary>
+        private List<string> InstallOptions()
+        {
+            var names = new List<string>();
+            foreach (var install in gameInstalls)
+            {
+                bool shared = gameInstalls.FindAll(i => i.Name == install.Name).Count > 1;
+                names.Add(shared ? install.Name + " - " + install.Folder : install.Name);
+            }
+            return names;
+        }
+
+        private int CurrentInstallIndex() =>
+            gameInstalls.FindIndex(i => string.Equals(i.Folder.TrimEnd('\\'), S("game").TrimEnd('\\'),
+                                                      StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>
+        /// A select wide enough for its longest option, not just the one showing: the list opens as
+        /// wide as the select, and an option cut short there is one that cannot be read.
+        /// </summary>
+        private float InstallSelectWidth(List<string> options)
+        {
+            float border = MathF.Max(1, MathF.Round(S(1)));
+            float text = 0;
+            foreach (string option in options)
+                text = MathF.Max(text, Fonts.Measure(Fonts.Input, option));
+            return S(14) + S(38) + border * 2 + text;
+        }
+
+        /// <summary>Both views' game list: the pick is saved as the game folder, which is what the next start opens with.</summary>
+        private void chooseInstall(Button anchor)
+        {
+            if (!HasInstallChoice)
+                return;
+            int chosen = Popup(anchor, InstallOptions(), CurrentInstallIndex());
+            if (chosen < 0 || chosen == CurrentInstallIndex())
+                return;
+            // Someone is choosing: no countdown for the rest of this run, as with the checkboxes.
+            autoArmed = true;
+            stopAutoLaunch();
+            SetButtonText(anchor, gameInstalls[chosen].Name);
+            save("game", gameInstalls[chosen].Folder);
         }
 
         // ---- state accessors, with the page's truthiness ------------------------
@@ -486,9 +556,18 @@ namespace Bugtopia.Launcher.Win32
             JsonElement existing = Existing;
             bool gameOk = B("gameOk");
 
+            // With more than one install the card carries the list, and says which one Launch starts.
+            string gameName = S("gameName");
             step(cardGame, gameOk ? "done" : "todo",
-                 Plain(gameOk ? "Found" : S("game").Length > 0 ? "Not an IL2CPP build" : "Not found"));
-            cardGame.Shown[0] = cardGame.Shown[1] = !gameOk;
+                 Plain(!gameOk ? (S("game").Length > 0 ? "Not an IL2CPP build" : "Not found")
+                       : HasInstallChoice ? "Found " + gameInstalls.Count + " installs - Launch starts the one chosen here."
+                       : gameName.Length > 0 ? "Found: " + gameName
+                       : "Found"));
+            cardGame.Shown[0] = HasInstallChoice;
+            cardGame.Shown[1] = cardGame.Shown[2] = !gameOk;
+            if (HasInstallChoice)
+                SetButtonText(gameSelect, CurrentInstallIndex() >= 0 ? InstallOptions()[CurrentInstallIndex()] : gameName);
+            Enable(gameSelect, !busy);
 
             if (!gameOk)
             {
@@ -740,6 +819,9 @@ namespace Bugtopia.Launcher.Win32
         {
             switch (id)
             {
+                case IdGameSelect:
+                    chooseInstall(gameSelect);
+                    return;
                 case IdDetect:
                     detectGame();
                     return;
@@ -947,6 +1029,8 @@ namespace Bugtopia.Launcher.Win32
                 if (!card.Shown[i])
                     continue;
                 sizes[i] = Measure(card.Actions[i]);
+                if (card.Actions[i] == gameSelect)
+                    sizes[i].W = InstallSelectWidth(InstallOptions());
                 actionsW += (actionsW > 0 ? S(8) : 0) + sizes[i].W;
                 actionsH = MathF.Max(actionsH, sizes[i].H);
             }

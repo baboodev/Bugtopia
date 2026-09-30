@@ -31,34 +31,79 @@ namespace Bugtopia.Launcher
             this.dialogs = dialogs;
             settings = LauncherSettings.Load();
 
-            // A saved path that no longer resolves is worse than none: it makes the status panel
-            // explain a folder the user has since moved. Re-detect instead.
-            if (!GameDetection.IsGameFolder(settings.GameFolder))
-                DetectAndStore(announce: false);
+            // Always looked for, not only when the saved folder is gone: with more than one install
+            // the window offers the others, and it can only offer what it has found.
+            DetectAndStore(announce: false);
         }
 
+        /// <summary>Every install detection found, in the order it found them. Replaced whole, never edited.</summary>
+        private volatile List<GameInstall> installs = new List<GameInstall>();
+
         /// <summary>
-        /// Looks for the install and remembers it. Quiet on startup — a detection nobody asked for
-        /// should not put a line in the log every launch — and spoken when the button was pressed.
+        /// Looks for the installs and keeps the chosen one. Quiet on startup — a detection nobody
+        /// asked for should not put a line in the log every launch — and spoken when the button was
+        /// pressed.
+        ///
+        /// The saved folder is the user's pick and stays while it is still a game: a detection that
+        /// found two installs has no business swapping the one they chose for the one Steam lists
+        /// first. Only a folder that is gone, or none at all, is replaced by the first one found.
         /// </summary>
         private string DetectAndStore(bool announce)
         {
-            string found = GameDetection.Detect();
-            if (found != null)
+            List<GameInstall> found = GameDetection.DetectAll();
+            installs = found;
+
+            if (announce)
             {
-                settings.GameFolder = found;
-                SafeSave();
-                if (announce)
-                    Log("Found the game at " + found);
+                if (found.Count == 0)
+                {
+                    Log("No Heartopia install found. Looked in:");
+                    foreach (string candidate in GameDetection.SearchPaths())
+                        Log("  " + candidate);
+                }
+                foreach (GameInstall install in found)
+                    Log("Found " + install.Name + " at " + install.Folder);
             }
-            else if (announce)
-            {
-                Log("No Heartopia install found. Looked in:");
-                foreach (string candidate in GameDetection.SearchPaths())
-                    Log("  " + candidate);
-            }
-            return found;
+
+            if (GameDetection.IsGameFolder(settings.GameFolder) || found.Count == 0)
+                return found.Count == 0 ? null : settings.GameFolder;
+
+            settings.GameFolder = found[0].Folder;
+            SafeSave();
+            return settings.GameFolder;
         }
+
+        /// <summary>
+        /// The install the launcher is working with: the found one at the saved folder, or that folder
+        /// described on its own when it was picked by hand. Null with no usable folder.
+        /// </summary>
+        private GameInstall CurrentInstall()
+        {
+            string folder = settings.GameFolder;
+            if (string.IsNullOrWhiteSpace(folder))
+                return null;
+
+            foreach (GameInstall install in installs)
+                if (SamePath(install.Folder, folder))
+                    return install;
+            return GameDetection.Describe(folder);
+        }
+
+        private static bool SamePath(string a, string b)
+        {
+            try
+            {
+                return string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'),
+                                     StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>The save profiles of the build being launched: each build keeps its own.</summary>
+        private Profiles CurrentProfiles() => new Profiles(CurrentInstall());
 
         // ---- dispatch --------------------------------------------------------
 
@@ -239,33 +284,33 @@ namespace Bugtopia.Launcher
                     break;
 
                 case "profiles":
-                    Reply(id, w => WriteProfiles(w, Profiles.List()));
+                    Reply(id, w => WriteProfiles(w, CurrentProfiles().List()));
                     break;
 
                 case "profileCreate":
                 {
                     string created = Str(args, "name");
-                    Log(Profiles.Create(created));
+                    Log(CurrentProfiles().Create(created));
                     // Selected the moment it exists, as picking a profile from the list is: creating one
                     // and then finding the old one still active reads as the new one not having worked.
-                    Log(Profiles.Switch(created));
-                    Reply(id, w => WriteProfiles(w, Profiles.List()));
+                    Log(CurrentProfiles().Switch(created));
+                    Reply(id, w => WriteProfiles(w, CurrentProfiles().List()));
                     break;
                 }
 
                 case "profileSwitch":
-                    Log(Profiles.Switch(Str(args, "name")));
-                    Reply(id, w => WriteProfiles(w, Profiles.List()));
+                    Log(CurrentProfiles().Switch(Str(args, "name")));
+                    Reply(id, w => WriteProfiles(w, CurrentProfiles().List()));
                     break;
 
                 case "serverGet":
-                    Reply(id, w => w.WriteNumberValue(Profiles.GetServer(Str(args, "profile"))));
+                    Reply(id, w => w.WriteNumberValue(CurrentProfiles().GetServer(Str(args, "profile"))));
                     break;
 
                 case "serverSet":
-                    Profiles.SetServer(Str(args, "profile"), args.GetProperty("value").GetInt32());
+                    CurrentProfiles().SetServer(Str(args, "profile"), args.GetProperty("value").GetInt32());
                     Log("Zone server set.");
-                    Reply(id, w => w.WriteNumberValue(Profiles.GetServer(Str(args, "profile"))));
+                    Reply(id, w => w.WriteNumberValue(CurrentProfiles().GetServer(Str(args, "profile"))));
                     break;
 
                 default:
@@ -670,7 +715,7 @@ namespace Bugtopia.Launcher
 
             return DetectAndStore(announce: true)
                    ?? throw new InvalidOperationException(
-                       "No Heartopia install found - Steam libraries and the usual folders were " +
+                       "No Heartopia install found - Steam libraries, TapTap and the usual folders were " +
                        "checked. Point at it with Browse.");
         }
 
@@ -1033,10 +1078,24 @@ namespace Bugtopia.Launcher
             }
 
             string exe = GameSession.FindGameExe(game);
+            GameInstall install = CurrentInstall();
 
-            if (settings.WaitForGame)
+            // A build its client has to start - the CN one, which the client signs in first - is
+            // asked for through the client, and then waited for like one started by hand.
+            string startUri = settings.WaitForGame ? null : install?.LaunchUri;
+
+            // Asked now, while the click that started this is the last thing that happened: a UAC
+            // prompt raised by a window that is not in front only blinks on the taskbar, and by the
+            // time the game is up, the game is in front.
+            if (NeedsElevation(install, exe))
             {
-                Attach(storage, exe);
+                AttachElevated(storage, exe, startUri);
+                return;
+            }
+
+            if (settings.WaitForGame || startUri != null)
+            {
+                Attach(storage, exe, startUri);
                 return;
             }
 
@@ -1070,8 +1129,12 @@ namespace Bugtopia.Launcher
         ///
         /// A game that never becomes ready is left alone here, unlike a launch that started it: it is
         /// the user's own session, not one this launcher may kill.
+        ///
+        /// With <paramref name="startUri"/>, the game's client is asked to start it first - the same
+        /// wait follows, with no deadline, since the client may want a sign-in or an update before it
+        /// gets to the game, and Stop waiting is there for a client that never does.
         /// </summary>
-        private void Attach(StorageLayout storage, string exe)
+        private void Attach(StorageLayout storage, string exe, string startUri)
         {
             Process game = GameSession.FindRunning(exe);
             if (game != null)
@@ -1080,10 +1143,20 @@ namespace Bugtopia.Launcher
             }
             else
             {
+                // Asked before the wait is announced: a client that is not there fails here, and must
+                // not leave the window showing Stop waiting for a wait that never began.
+                if (startUri != null)
+                {
+                    GameSession.StartThroughClient(startUri);
+                    Log("Asked TapTap to start the game: " + startUri);
+                }
+
                 stopWaiting = false;
                 Event("waiting", true);
-                Working("game", "Waiting for the game to start.");
-                Log("Waiting for " + exe + " - start the game however you like.");
+                Working("game", startUri != null ? "TapTap is starting the game." : "Waiting for the game to start.");
+                Log(startUri != null
+                    ? "Waiting for " + exe + "."
+                    : "Waiting for " + exe + " - start the game however you like.");
                 try
                 {
                     DateTime since = DateTime.UtcNow, nextHeartbeat = DateTime.UtcNow.AddSeconds(30);
@@ -1117,7 +1190,99 @@ namespace Bugtopia.Launcher
             if (!GameSession.WaitUntilReady(game, TimeSpan.FromMinutes(2), out string reason, Log))
                 throw new InvalidOperationException("The game never became ready: " + reason + ".");
 
-            Injector.Inject(game, storage.InjectDll);
+            try
+            {
+                Injector.Inject(game, storage.InjectDll);
+            }
+            catch (InjectionException ex) when (ex.AccessDenied && !ElevatedInjection.IsElevated)
+            {
+                // A game nobody expected to be elevated, that is: the one already running is found by
+                // the helper at once.
+                Log("The game runs as administrator.");
+                AttachElevated(storage, exe, startUri: null);
+                return;
+            }
+            Log("Injected. The bootstrap's own account is in " + Path.Combine(storage.Bin, "bugtopia_inject.log"));
+        }
+
+        /// <summary>
+        /// Whether the injection will need administrator rights: the game already running says so
+        /// itself, by refusing to be opened; one not yet started is judged by its build.
+        /// </summary>
+        private static bool NeedsElevation(GameInstall install, string exe)
+        {
+            if (ElevatedInjection.IsElevated)
+                return false;
+
+            Process running = GameSession.FindRunning(exe);
+            if (running != null)
+                return !Injector.CanOpen(running);
+            return install?.RunsElevated == true;
+        }
+
+        /// <summary>
+        /// <see cref="Attach"/>, with the waiting and the injection done by a copy of the launcher
+        /// running as administrator (<see cref="ElevatedInjection"/>): Windows asks first, then the
+        /// client is asked to start the game, and the helper's log is relayed here until it is done.
+        /// Stop waiting reaches the helper through a file, since this process cannot signal one with
+        /// more rights than its own.
+        /// </summary>
+        private void AttachElevated(StorageLayout storage, string exe, string startUri)
+        {
+            Log("The game runs as administrator, so loading the mod into it needs administrator rights " +
+                "as well - Windows will ask.");
+            Working("game", "Waiting for administrator rights.");
+            Process helper = ElevatedInjection.Start(exe, storage);
+            Log("Waiting and injecting as administrator (pid " + helper.Id + ").");
+
+            long position = 0;
+            try
+            {
+                if (startUri != null && GameSession.FindRunning(exe) == null)
+                {
+                    GameSession.StartThroughClient(startUri);
+                    Log("Asked TapTap to start the game: " + startUri);
+                }
+
+                stopWaiting = false;
+                Event("waiting", true);
+                Working("game", startUri != null ? "TapTap is starting the game." : "Waiting for the game to start.");
+                try
+                {
+                    bool stopRequested = false;
+                    while (!helper.WaitForExit(300))
+                    {
+                        ElevatedInjection.ForwardLog(storage, ref position, Log);
+                        if (stopWaiting && !stopRequested)
+                        {
+                            ElevatedInjection.RequestStop(storage);
+                            stopRequested = true;
+                        }
+                    }
+                    ElevatedInjection.ForwardLog(storage, ref position, Log);
+                }
+                finally
+                {
+                    Event("waiting", false);
+                }
+            }
+            catch (Exception)
+            {
+                // Never leave an administrator process waiting for a game behind a launch that failed.
+                ElevatedInjection.RequestStop(storage);
+                throw;
+            }
+
+            int result = helper.ExitCode;
+            ElevatedInjection.Cleanup(storage);
+            if (result == ElevatedInjection.ResultStopped)
+                throw new InvalidOperationException("Stopped waiting for the game.");
+            if (result != ElevatedInjection.ResultInjected)
+            {
+                throw new InvalidOperationException(
+                    "The injection as administrator failed - the lines above say why, and " +
+                    ElevatedInjection.LogFile(storage) + " keeps them.");
+            }
             Log("Injected. The bootstrap's own account is in " + Path.Combine(storage.Bin, "bugtopia_inject.log"));
         }
 
@@ -1248,6 +1413,22 @@ namespace Bugtopia.Launcher
         {
             w.WriteStartObject();
             w.WriteString("game", settings.GameFolder ?? "");
+
+            // Which build that folder is, and the others there are to pick from. The folder picked by
+            // hand is listed too when detection did not find it, so the list always holds the current
+            // one - a dropdown that cannot show what is selected reads as a bug.
+            GameInstall current = CurrentInstall();
+            w.WriteString("gameName", current?.Name ?? "");
+            w.WriteString("edition", current?.EditionId ?? "global");
+            w.WriteBoolean("hasServer", current?.HasServerChoice ?? true);
+            w.WriteStartArray("installs");
+            List<GameInstall> found = installs;
+            if (current != null && !found.Exists(i => SamePath(i.Folder, current.Folder)))
+                WriteInstall(w, current);
+            foreach (GameInstall install in found)
+                WriteInstall(w, install);
+            w.WriteEndArray();
+
             w.WriteString("source", settings.BepInExSource ?? "");
             // The file the user picked, for the simple screen, which has no path field: without it
             // "an archive was chosen" and "nothing happened" look exactly alike, since UseArchive
@@ -1261,6 +1442,8 @@ namespace Bugtopia.Launcher
                 ? LauncherSettings.DefaultStorage
                 : settings.Storage);
             w.WriteString("defaultStorage", LauncherSettings.DefaultStorage);
+            // Where this build's tree actually is: the folder above, or the CN build's sibling of it.
+            w.WriteString("storageRoot", StorageRoot());
             w.WriteString("version", HeartopiaMod.ModBuildVersion.Display);
             // Both are online-only. Nothing in an offline build can learn about a newer one, and
             // LatestSeen left in the settings file by an online build - the two share
@@ -1376,6 +1559,15 @@ namespace Bugtopia.Launcher
             }
         }
 
+        private static void WriteInstall(Utf8JsonWriter w, GameInstall install)
+        {
+            w.WriteStartObject();
+            w.WriteString("folder", install.Folder);
+            w.WriteString("name", install.Name);
+            w.WriteString("edition", install.EditionId);
+            w.WriteEndObject();
+        }
+
         private static void WriteProfiles(Utf8JsonWriter w, ProfileInfo info)
         {
             w.WriteStartObject();
@@ -1390,12 +1582,18 @@ namespace Bugtopia.Launcher
 
         // ---- helpers ---------------------------------------------------------
 
-        private StorageLayout RequireStorage()
+        private StorageLayout RequireStorage() => new StorageLayout(StorageRoot());
+
+        /// <summary>
+        /// Where the build being launched keeps its tree: the chosen folder, or for the CN build the
+        /// sibling <see cref="StorageLayout.RootFor"/> derives from it.
+        /// </summary>
+        private string StorageRoot()
         {
             string root = string.IsNullOrWhiteSpace(settings.Storage)
                 ? LauncherSettings.DefaultStorage
                 : settings.Storage;
-            return new StorageLayout(root);
+            return StorageLayout.RootFor(root, CurrentInstall());
         }
 
         private static string Require(string value, string what)

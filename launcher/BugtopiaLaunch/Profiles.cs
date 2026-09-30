@@ -22,8 +22,8 @@ namespace Bugtopia.Launch
     /// Save-profile switching, ported from Vugtopia's Rust implementation, which in turn replaced
     /// `HeartopiaProfileLauncher.bat`.
     ///
-    /// Heartopia keeps save data under <c>%LocalLow%\xd\Heartopia\XD</c> and always reads the folder
-    /// literally named <c>PC</c>. Other profiles are parked as siblings named after the profile, and
+    /// Heartopia keeps save data under <c>%LocalLow%\xd\Heartopia\XD</c> - the CN build under its own
+    /// product name in place of Heartopia - and always reads the folder literally named <c>PC</c>. Other profiles are parked as siblings named after the profile, and
     /// <c>active_profile.txt</c> records which one currently occupies <c>PC</c>. Switching parks the
     /// active profile back under its name and renames the target to <c>PC</c>.
     ///
@@ -31,7 +31,7 @@ namespace Bugtopia.Launch
     /// anything is renamed, and a failure to activate rolls the parking back, so there is no path
     /// that leaves <c>PC</c> empty and the game staring at a missing save.
     /// </summary>
-    public static class Profiles
+    public sealed class Profiles
     {
         private const string ActiveFolder = "PC";
         private const string StateFile = "active_profile.txt";
@@ -45,8 +45,22 @@ namespace Bugtopia.Launch
 
         private static readonly char[] InvalidNameChars = { '\\', '/', ':', '*', '?', '"', '<', '>', '|' };
 
-        /// <summary><c>%LocalLow%\xd\Heartopia\XD</c>.</summary>
-        public static string BaseDirectory => Path.Combine(KnownPaths.LocalLow, "xd", "Heartopia", "XD");
+        private readonly bool hasServer;
+
+        /// <summary>
+        /// The profiles of one build of the game. Each keeps its saves under its own product name,
+        /// and only the global one has a server to carry between profiles - the CN build has one
+        /// region, and no such value in its registry key.
+        /// </summary>
+        public Profiles(GameInstall install)
+        {
+            string product = install?.DataProduct ?? GameInstall.GlobalProduct;
+            BaseDirectory = Path.Combine(KnownPaths.LocalLow, "xd", product, "XD");
+            hasServer = install?.HasServerChoice ?? true;
+        }
+
+        /// <summary><c>%LocalLow%\xd\Heartopia\XD</c>, or the CN build's own folder beside it.</summary>
+        public string BaseDirectory { get; }
 
         // ---- reading state ---------------------------------------------------
 
@@ -93,7 +107,7 @@ namespace Bugtopia.Launch
             return "PC1";
         }
 
-        public static ProfileInfo List()
+        public ProfileInfo List()
         {
             string baseDir = BaseDirectory;
             var info = new ProfileInfo();
@@ -125,7 +139,7 @@ namespace Bugtopia.Launch
 
         // ---- mutating ---------------------------------------------------------
 
-        public static string Create(string name)
+        public string Create(string name)
         {
             string baseDir = BaseDirectory;
             name = (name ?? "").Trim();
@@ -156,7 +170,7 @@ namespace Bugtopia.Launch
         /// <summary>
         /// Makes <paramref name="target"/> the active profile, carrying the zone-server value with it.
         /// </summary>
-        public static string Switch(string target)
+        public string Switch(string target)
         {
             string baseDir = BaseDirectory;
             target = (target ?? "").Trim();
@@ -165,11 +179,12 @@ namespace Bugtopia.Launch
             // profile gets parked into, and the live registry value belongs to it.
             string previousActive = ReadActiveRecord(baseDir);
             bool alreadyActive = IsActive(baseDir, target);
-            int? currentServer = ReadZoneServer();
+            // The CN build has no server value; its switches move folders and nothing else.
+            int? currentServer = hasServer ? ReadZoneServer() : null;
 
             string message = SwitchFolders(baseDir, target);
 
-            if (!alreadyActive)
+            if (!alreadyActive && hasServer)
             {
                 if (previousActive.Length > 0 && currentServer.HasValue)
                 {
@@ -320,11 +335,13 @@ namespace Bugtopia.Launch
         }
 
         /// <summary>The zone server for a profile, or -1 when unknown. Empty name = the global value.</summary>
-        public static int GetServer(string profile)
+        public int GetServer(string profile)
         {
             string baseDir = BaseDirectory;
             profile = (profile ?? "").Trim();
 
+            if (!hasServer)
+                return -1;
             if (profile.Length == 0)
                 return ReadZoneServer() ?? -1;
 
@@ -335,11 +352,13 @@ namespace Bugtopia.Launch
         }
 
         /// <summary>Sets a profile's zone server, and the registry too when that profile is live.</summary>
-        public static void SetServer(string profile, int value)
+        public void SetServer(string profile, int value)
         {
             string baseDir = BaseDirectory;
             profile = (profile ?? "").Trim();
 
+            if (!hasServer)
+                throw new ProfileException("This build of the game has no server to choose.");
             if (profile.Length == 0)
             {
                 WriteZoneServer(value);

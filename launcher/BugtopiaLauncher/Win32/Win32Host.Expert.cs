@@ -15,7 +15,8 @@ namespace Bugtopia.Launcher.Win32
         private const int IdExDetect = 120, IdExBrowseGame = 121, IdSourceZip = 122, IdSourceFolder = 123, IdDlBepInEx = 124,
                           IdStorageBrowse = 125, IdStorageDefault = 126,
                           IdProfile = 129, IdProfileCreate = 130, IdServer = 131, IdProfileOk = 132, IdProfileCancel = 133,
-                          IdModVersion = 134, IdModLoad = 135, IdModInstall = 136, IdForce = 137, IdPrepare = 138, IdGenerate = 139;
+                          IdModVersion = 134, IdModLoad = 135, IdModInstall = 136, IdForce = 137, IdPrepare = 138, IdGenerate = 139,
+                          IdExGameSelect = 140;
 
         /// <summary>input[type=text] and #log: rgba(15,23,42,0.6) over the card, flattened so a text box can use it as its brush.</summary>
         private const uint FieldBg = 0x0e1628;
@@ -45,7 +46,7 @@ namespace Bugtopia.Launcher.Win32
         private nint log, fieldBrush;
         private float logX, logY, logW, logH;
 
-        private Button exDetect, exBrowseGame, sourceZip, sourceFolder, dlBepInEx, storageBrowse, storageDefault,
+        private Button exGameSelect, exDetect, exBrowseGame, sourceZip, sourceFolder, dlBepInEx, storageBrowse, storageDefault,
                        profileSelect, profileCreate, serverSelect, profileOk, profileCancel, modSelect, modLoad,
                        modInstall, force, prepare, generate;
 
@@ -61,6 +62,7 @@ namespace Bugtopia.Launcher.Win32
         private string modHint = "";
 
         private List<TextRun> sourceHint = new List<TextRun>();
+        private string storageHint = "";
 
         // Layout results, in content pixels.
         private readonly List<(string Text, float X, float Y)> labels = new List<(string, float, float)>();
@@ -72,6 +74,7 @@ namespace Bugtopia.Launcher.Win32
         {
             fieldBrush = CreateSolidBrush(ColorRef(FieldBg));
 
+            exGameSelect = AddButton(IdExGameSelect, ButtonKind.Select, "");
             fieldGame = CreateField(true, "Detecting...");
             exDetect = AddButton(IdExDetect, ButtonKind.SecondaryLarge, "Detect", SearchIcon);
             exBrowseGame = AddButton(IdExBrowseGame, ButtonKind.SecondaryLarge, "Browse...", FolderIcon);
@@ -166,6 +169,18 @@ namespace Bugtopia.Launcher.Win32
             SetField(fieldSource, S("source"));
             SetField(fieldStorage, S("storage"));
 
+            if (HasInstallChoice)
+                SetButtonText(exGameSelect, CurrentInstallIndex() >= 0 ? InstallOptions()[CurrentInstallIndex()] : S("gameName"));
+            Enable(exGameSelect, !busy);
+
+            // The CN build keeps its tree beside the chosen folder: say where, since the field does not.
+            string storageRoot = S("storageRoot");
+            storageHint = storageRoot.Length > 0 && !string.Equals(storageRoot.TrimEnd('\\'), S("storage").TrimEnd('\\'),
+                                                                   StringComparison.OrdinalIgnoreCase)
+                ? S("gameName") + " keeps its own copy beside it, in " + storageRoot +
+                  " - its game code differs, so the interop assemblies cannot be shared."
+                : "";
+
             const string sourceLead = "The Unity.IL2CPP win-x64 archive — the zip as downloaded, or a folder already unpacked from it. ";
             sourceHint = downloads
                 ? Plain(sourceLead + "Needed only until Prepare.")
@@ -256,7 +271,8 @@ namespace Bugtopia.Launcher.Win32
                     : "The game has not created its save folder yet.";
                 UpdateProfileControls();
 
-                if (activeProfile.Length > 0)
+                // A build with one region has no server to ask about, and the list is not shown for it.
+                if (activeProfile.Length > 0 && B("hasServer"))
                 {
                     string profile = activeProfile;
                     Call("serverGet", w => w.WriteString("profile", profile), value =>
@@ -335,6 +351,7 @@ namespace Bugtopia.Launcher.Win32
         {
             switch (id)
             {
+                case IdExGameSelect: chooseInstall(exGameSelect); break;
                 case IdExDetect: detectGame(); break;
                 case IdExBrowseGame: pick("game", false, "Select folder"); break;
                 case IdSourceZip: chooseArchive(); break;
@@ -508,8 +525,18 @@ namespace Bugtopia.Launcher.Win32
             float gap = S(14);
             bool downloads = B("downloads");
 
+            // With more than one install, the list of them takes the buttons' row and the path gets a row
+            // of its own underneath: sharing one, the path was cut down to its drive letter.
             y = Label("Heartopia Directory", padX, y);
-            y = Row(y, padX, width, fieldGame, null, exDetect, exBrowseGame);
+            if (HasInstallChoice)
+            {
+                y = Row(y, padX, width, null, exGameSelect, exDetect, exBrowseGame);
+                y = Row(y + S(6), padX, width, fieldGame, null);
+            }
+            else
+            {
+                y = Row(y, padX, width, fieldGame, null, exDetect, exBrowseGame);
+            }
             y += gap;
 
             y = Label("BepInEx source", padX, y);
@@ -519,15 +546,24 @@ namespace Bugtopia.Launcher.Win32
 
             y = Label("Storage folder", padX, y);
             y = Row(y, padX, width, fieldStorage, null, storageBrowse, storageDefault);
+            if (storageHint.Length > 0)
+                y = Hint(Plain(storageHint), padX, y, width);
             y += gap;
 
-            // Save profile and server, side by side.
-            float colW = (width - S(12)) / 2, rightX = padX + colW + S(12);
+            // Save profile and server, side by side - or the profile alone, for a build with one region.
             float rowY = Label("Save Profile", padX, y);
-            Label("Server", rightX, y);
-            float left = Row(rowY, padX, colW, null, profileSelect, profileCreate);
-            float right = Row(rowY, rightX, colW, null, serverSelect);
-            y = MathF.Max(left, right);
+            if (B("hasServer") || !haveState)
+            {
+                float colW = (width - S(12)) / 2, rightX = padX + colW + S(12);
+                Label("Server", rightX, y);
+                float left = Row(rowY, padX, colW, null, profileSelect, profileCreate);
+                float right = Row(rowY, rightX, colW, null, serverSelect);
+                y = MathF.Max(left, right);
+            }
+            else
+            {
+                y = Row(rowY, padX, width, null, profileSelect, profileCreate);
+            }
             if (newProfileShown)
                 y = Row(y + S(6), padX, width, fieldNewProfile, null, profileOk, profileCancel);
             y = Hint(Plain(profileHint), padX, y, width);

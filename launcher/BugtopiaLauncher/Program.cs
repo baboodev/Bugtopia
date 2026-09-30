@@ -21,8 +21,42 @@ namespace Bugtopia.Launcher
         {
             if (args.Length > 0 && args[0] == VerbInterop)
                 return RunInterop(args);
+            if (args.Length > 0 && args[0] == ElevatedInjection.Verb)
+                return RunElevatedInjection(args);
 
             return Win32.Win32Host.Run();
+        }
+
+        /// <summary>
+        /// The launcher run as administrator for one job: wait for the game, inject into it, exit. No
+        /// window - the launcher that asked for it shows the progress, read out of the log file.
+        /// </summary>
+        private static int RunElevatedInjection(string[] args)
+        {
+            string exe = null, dll = null, log = null, stop = null;
+            for (int i = 1; i + 1 < args.Length; i++)
+            {
+                switch (args[i])
+                {
+                    case "--exe": exe = args[++i]; break;
+                    case "--dll": dll = args[++i]; break;
+                    case "--log": log = args[++i]; break;
+                    case "--stop": stop = args[++i]; break;
+                }
+            }
+
+            if (exe == null || dll == null || log == null || stop == null)
+                return ElevatedInjection.ResultFailed;
+
+            try
+            {
+                return ElevatedInjection.Run(exe, dll, log, stop);
+            }
+            catch (Exception)
+            {
+                // Run reports into the log itself; this is only the log file failing to open.
+                return ElevatedInjection.ResultFailed;
+            }
         }
 
         private static int RunInterop(string[] args)

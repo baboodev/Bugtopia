@@ -49,6 +49,22 @@ namespace Bugtopia.Launch
             return false;
         }
 
+        private const uint InjectAccess = ProcessCreateThread | ProcessQueryInformation | ProcessVmOperation |
+                                          ProcessVmWrite | ProcessVmRead;
+
+        /// <summary>
+        /// Whether this process may inject into the target: false for a game running with more rights
+        /// than this process has - an elevated game and a launcher that is not.
+        /// </summary>
+        public static bool CanOpen(Process target)
+        {
+            IntPtr process = OpenProcess(InjectAccess, false, target.Id);
+            if (process == IntPtr.Zero)
+                return Marshal.GetLastWin32Error() != ErrorAccessDenied;
+            CloseHandle(process);
+            return true;
+        }
+
         /// <exception cref="InjectionException">Anything that stopped the DLL from loading, with the reason.</exception>
         public static void Inject(Process target, string dllPath)
         {
@@ -59,18 +75,18 @@ namespace Bugtopia.Launch
             if (!File.Exists(dllPath))
                 throw new InjectionException("No such DLL: " + dllPath);
 
-            IntPtr process = OpenProcess(
-                ProcessCreateThread | ProcessQueryInformation | ProcessVmOperation |
-                ProcessVmWrite | ProcessVmRead,
-                false, target.Id);
+            IntPtr process = OpenProcess(InjectAccess, false, target.Id);
 
             if (process == IntPtr.Zero)
             {
                 int error = Marshal.GetLastWin32Error();
-                throw new InjectionException(error == ErrorAccessDenied
-                    ? "OpenProcess was denied. The game is running with higher privileges than this " +
-                      "launcher — start both the same way."
-                    : "OpenProcess failed with error " + error + ".");
+                if (error == ErrorAccessDenied)
+                {
+                    throw new InjectionException(
+                        "OpenProcess was denied. The game is running with higher privileges than this " +
+                        "launcher - start both the same way.", accessDenied: true);
+                }
+                throw new InjectionException("OpenProcess failed with error " + error + ".");
             }
 
             IntPtr remote = IntPtr.Zero;
@@ -158,6 +174,12 @@ namespace Bugtopia.Launch
 
     public sealed class InjectionException : Exception
     {
-        public InjectionException(string message) : base(message) { }
+        public InjectionException(string message, bool accessDenied = false) : base(message)
+        {
+            AccessDenied = accessDenied;
+        }
+
+        /// <summary>The game has more rights than the injecting process - the one failure elevation fixes.</summary>
+        public bool AccessDenied { get; }
     }
 }
