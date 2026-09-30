@@ -363,6 +363,7 @@
     <Compile Include="HeartopiaComplete.UguiShellTabIndices.cs" />
     <Compile Include="HeartopiaComplete.UguiAboutContent.cs" />
     <Compile Include="HeartopiaComplete.UguiResearchContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiOrderShopContent.cs" />
     <Compile Include="HeartopiaComplete.UguiSettingsMainContent.cs" />
     <Compile Include="HeartopiaComplete.UguiKeybindsContent.cs" />
     <Compile Include="HeartopiaComplete.UguiThemeContent.cs" />
@@ -528,6 +529,7 @@
     <Compile Include="ShopBuyAllFeature.cs" />
     <Compile Include="FaceShopBuyAllFeature.cs" />
     <Compile Include="ResearchDiagnosticsFeature.cs" />
+    <Compile Include="OrderShopFeature.cs" />
     <Compile Include="ShopDumpFeature.cs" />
     <Compile Include="ShopQuickBuyFeature.cs" />
     <Compile Include="ShopQuickSellFeature.cs" />

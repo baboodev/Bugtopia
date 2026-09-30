@@ -192,6 +192,7 @@ namespace HeartopiaMod
             this.ProcessUguiShellScaleOnUpdate();
             this.ProcessUguiShellLiveRailOnUpdate();
             this.ProcessUguiShellResearchContentOnUpdate();
+            this.ProcessUguiShellOrderShopContentOnUpdate();
             this.ProcessUguiShellSettingsMainOnUpdate();
             this.ProcessUguiShellSettingsLoggingOnUpdate();
             this.ProcessUguiShellSettingsKeybindsOnUpdate();
@@ -430,7 +431,7 @@ namespace HeartopiaMod
                 {
                     this.L("Self"), this.L("Resource Gathering"), this.L("Features"),
                     this.L("New Features"), this.L("Radar"), this.L("Teleport"),
-                    this.L("Bag / Warehouse"), this.L("Research"), this.L("Music"),
+                    this.L("Bag / Warehouse"), this.L("Research / Order"), this.L("Music"),
                     this.L("Settings"), this.L("Agent")
                 };
                 string[] tabSubtitles = new string[]
@@ -438,7 +439,7 @@ namespace HeartopiaMod
                     this.L("Player, camera and input"), this.L("Aura farm and collection"),
                     this.L("Automation and helpers"), this.L("Experiments"),
                     this.L("World scanner"), this.L("Locations and travel"),
-                    this.L("Bulk item tools"), this.L("Institute tools"),
+                    this.L("Bulk item tools"), this.L("Institute and order machine"),
                     this.L("Play .bin note tracks"),
                     this.L("Menu, theme and hotkeys"),
                     this.L("MCP bridge and sandbox plugins")
@@ -452,7 +453,7 @@ namespace HeartopiaMod
                     new string[] { this.L("Main"), this.L("Settings") },
                     new string[] { this.L("Home"), this.L("Animal Care"), this.L("NPCs"), this.L("Locations"), this.L("Events"), this.L("House"), this.L("Custom"), this.L("XYZ"), this.L("Spawn Vehicle") },
                     new string[0], // Bag / Warehouse — no sub-tabs
-                    new string[0], // Research — no sub-tabs
+                    new string[0], // Research / Order — no sub-tabs
                     new string[0], // Music — no sub-tabs
                     new string[] { this.L("Main"), this.L("Keybinds"), this.L("UI Theme"), this.L("About"), this.L("Logging"), this.L("Game Keys") },
                     new string[0]  // Agent — sub-tabs are built at RUNTIME (plugins come and go), so
@@ -924,7 +925,13 @@ namespace HeartopiaMod
                             // label match — see the sub-tab branch above.
                             if (i == UguiShellResearchTabIndex)
                             {
-                                this.BuildUguiShellResearchContent(container.transform, 0f, 0f, contentColW, contentH);
+                                // Research / Order page: the fixed-height order card on top
+                                // (HeartopiaComplete.UguiOrderShopContent.cs), the Research block —
+                                // whose height depends on the analyzer count — in the rest.
+                                const float orderGap = 8f;
+                                this.BuildUguiShellOrderShopContent(container.transform, 0f, 0f, contentColW, UguiOrderShopCardHeight);
+                                this.BuildUguiShellResearchContent(container.transform, 0f, UguiOrderShopCardHeight + orderGap,
+                                    contentColW, contentH - UguiOrderShopCardHeight - orderGap);
                             }
                             else if (i == UguiShellBagWarehouseTabIndex)
                             {

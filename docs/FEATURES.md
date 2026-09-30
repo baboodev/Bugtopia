@@ -1935,9 +1935,28 @@ Skill ids are per-staticId constants recovered from the decrypted `cn.bytes` tab
 
 ---
 
-## Research Tab
+## Research / Order Tab
 
-A practical panel for the Research Institute (research store is StoreId **142**). Opening the tab auto-prepares everything: it polls the server-sync instrument cache immediately, arms the level spoof, and force-spawns the institute's client entities (all silent, main-town only) — so the list and buttons are ready without any setup. System map: `.research-record/RESEARCH_STORE_REPORT.md`.
+The sidebar entry is **Research / Order**: the order-machine card sits on top, the Research Institute
+block below it.
+
+**Order Machine** (`OrderShopFeature.cs` + `HeartopiaComplete.UguiOrderShopContent.cs`) — the game's
+order machine ("Order Pickup", in-game system name *Subscription*): you order an out-of-catalog item
+with order tickets, wait for it to arrive, then buy it at the machine.
+
+| Element | What it does |
+|---------|--------------|
+| Item line | The ordered item under the game's own label (`ShopItemData(storeGroupId).name`, e.g. *Building Permit: Vibrant Adjustable Window*), or **No active order.** |
+| Status line | **Arrives in 1d 22h 35m (around MM-dd HH:mm)** — remaining time on the game clock (`GameTimeUtility.ParseToUnixMs(RefreshTime) − GetUnixTimeMs()`, the same countdown the game's panel shows), ETA in the PC's local time. Turns green **Arrived — ready to collect.** once due. |
+| OPEN ORDER PANEL | Opens, from anywhere, the panel the machine itself would open now: `OrderShopItemPanel` (no order → catalog), `ShowOrderedShopItemPanel` (in transit), `OrderShopBuyPanel` (arrived → Purchase). State from `ShopSystem.GeOrderShopMachineState()`; open = `UIManager.OpenView(Type, null)`, the vanilla path (no PanelLogic exists for these panels). Hides the mod menu so the full-screen game panel is usable. |
+
+Data is read only while the page is on screen (every 15 s, immediately on page open and after the
+button; the countdown is interpolated in between). Read path, all non-generic:
+`PlayerDataCenter.GetSelfEcsEntity` → `StoreHelper.TryGetStoreEntity` → `NetworkEntityRef.get_Entity`
+→ `EcsEntityExtensions.GetComponentValues` → the `SubscriptionComponent` box (`Id`, `RefreshTime`).
+Reads only — the mod never places, cancels or buys an order.
+
+**Research Institute** — a practical panel for the Research Institute (research store is StoreId **142**). Opening the tab auto-prepares everything: it polls the server-sync instrument cache immediately, arms the level spoof, and force-spawns the institute's client entities (all silent, main-town only) — so the list and buttons are ready without any setup. System map: `.research-record/RESEARCH_STORE_REPORT.md`.
 
 **Instruments** (live from the server-sync cache — works from any location):
 
