@@ -35,7 +35,7 @@ namespace HeartopiaMod
         };
 
         // "Rare food": every fish that never spawns in sunny weather — only rain/snow and/or rainbow.
-        // Generated from cn_tables.db Fish (appearWeather lacks 1 = Sunny family) with
+        // Generated from oversea_tables.db Fish (appearWeather lacks 1 = Sunny family) with
         // `tools/HeartopiaTables/conditional_spawns.py --weather-not 1`; fish ids == item staticIds.
         // Re-run that after a game update that adds fish.
         private static readonly HashSet<int> WildAnimalFeedRareFishStaticIds = new HashSet<int>

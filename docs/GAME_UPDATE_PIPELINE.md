@@ -5,8 +5,8 @@ pipelines, one per artifact kind:
 
 | | Pipeline A — **code** | Pipeline B — **data** |
 |---|---|---|
-| Input | `%LocalLow%/xd/Heartopia/DotnetAssemblies/*.dll` (XDENCODE) | `%LocalLow%/xd/Heartopia/AssetBundle/*cn.ab` |
-| Output | `ilspy-dumps/<Module>/**.cs` | `tools/HeartopiaTables/cn_tables.db` |
+| Input | `%LocalLow%/xd/Heartopia/DotnetAssemblies/*.dll` (XDENCODE) | `%LocalLow%/xd/Heartopia/AssetBundle/*_oversea.ab` |
+| Output | `ilspy-dumps/<Module>/**.cs` | `tools/HeartopiaTables/oversea_tables.db` |
 | Driver | `tools/gameupdate/hcode.py` | `tools/gameupdate/htablediff.py` |
 | Skill | `decompile-assemblies` | `export-tables` |
 
@@ -23,7 +23,7 @@ python tools/gameupdate/htablediff.py run
 
 Both write to a scratch dir (`%TEMP%/heartopia-update`, override with
 `HEARTOPIA_UPDATE_WORK`) and print the path. **Do not delete it until you are done**
-— it holds the only copy of the previous dump and the previous `cn_tables.db`.
+— it holds the only copy of the previous dump and the previous `oversea_tables.db`.
 
 ---
 
@@ -247,20 +247,24 @@ the `EventCenter` dispatch the mod detours. They correctly do not appear in the 
 ## Pipeline B — design tables
 
 The numeric config (items, drops, fish, recipes, stores, tasks) is a custom binary
-`cn.bytes` inside the AssetBundle `cn.ab`, read at runtime by `EcsClient.TableData.Init`.
+`oversea.bytes` inside the AssetBundle `<hash>_oversea.ab`, read at runtime by
+`EcsClient.TableData.Init` (`TableData.dataPath`). The install also carries `<hash>_cn.ab`
+(`cn.bytes`): the China build's variant, never read by the global client. Before 2026-09-30
+this pipeline decoded `cn.ab` by mistake, so update diffs up to 09-30 describe the CN table
+(same tables and row counts; event dates, unlock gates and some shop rows differ).
 `tools/HeartopiaTables/htables.py` decodes it to SQLite; `htablediff.py` wraps that
 with the parts that are easy to get wrong.
 
 ### B1. `snapshot` — **before** anything overwrites the DB
 
-Row counts alone miss edited rows, and once `cn_tables.db` is overwritten the old
-content is gone. `snapshot` copies `cn_tables.db`, `table_code_map.json`,
+Row counts alone miss edited rows, and once `oversea_tables.db` is overwritten the old
+content is gone. `snapshot` copies `oversea_tables.db`, `table_code_map.json`,
 `icon_index.tsv` and `conditional_spawns.tsv` aside first. `run` does it automatically.
 
 ### B2. `decode`
 
-Always decodes the **LocalLow** `cn.ab`: a hotfix drops a new one there and it
-**overrides** the Steam copy at runtime.
+Always decodes the **LocalLow** `<hash>_oversea.ab`: a hotfix drops a new one there and
+it **overrides** the Steam copy at runtime.
 
 `table_code_map.json` is cached and only rebuilt when missing. It follows the table
 **code**, not the resources:
@@ -279,10 +283,11 @@ Always decodes the **LocalLow** `cn.ab`: a hotfix drops a new one there and it
 
 Two distinct failure shapes:
 
-**Schema skew** — a ctor reads a field the shipped binary does not have (the `cn.ab`
+**Schema skew** — a ctor reads a field the shipped binary does not have (the bundle
 is an earlier sub-build than the decompiled code). Add an entry to `SCHEMA_OVERRIDES`
-in `cn_bytes_decode.py`. Only `TableCooker` (`_cookerType` is a `Byte`, not
-`ReadUInt16`) is permanently overridden.
+in `cn_bytes_decode.py`. There are none today: `oversea.bytes` matches the global
+ctors exactly. Region differences live in `VARIANT_OVERRIDES` instead — the only one is
+`TableCooker` for `cn` (`_cookerType` is a `Byte` in the China build, `UInt16` on global).
 
 **Unknown opcode** — `ValueError: unknown read 'X' in: data.ReadX()`. The update
 introduced a `BinaryReader` op the schema parser has never seen. This happened on
@@ -311,7 +316,7 @@ ctor. Console prints of Chinese names crash on cp1252, so start such scripts wit
 ### B4. `diff` — table-level
 
 ```bash
-python tools/gameupdate/htablediff.py diff --old <work>/cn_tables_old.db
+python tools/gameupdate/htablediff.py diff --old <work>/oversea_tables_old.db
 ```
 
 Reports added / removed / changed tables with row deltas, split into **grew**,
@@ -350,7 +355,7 @@ compares only the shared ones.
 python tools/gameupdate/htablediff.py names --old <old.db> --table Fish,Insect,Bird
 ```
 
-`cn_tables.db` stores the Chinese string inline; `designTable.db` carries the
+`oversea_tables.db` stores the Chinese string inline; `designTable.db` carries the
 translations under the same `zhHans` key (XOR'd with `SecureStorage.Key`, rotated by
 the row's primary key — implemented in `_common.loc_decrypt`). Two resolution paths:
 
@@ -369,7 +374,7 @@ Row growth without new ids is normal and worth knowing: on 2026-08-20 `Fish` gre
 | Artifact | When |
 |---|---|
 | `icon_index.tsv` | after a **code** update (md5 moved on 2026-08-20; byte-identical across three prior resource hotfixes, so `--res-only` skips it) |
-| `heartopia_index.db` | whenever `cn_tables.db` or a Layer-A DB changed (see the `search-gamedata` skill) |
+| `heartopia_index.db` | whenever `oversea_tables.db` or a Layer-A DB changed (see the `search-gamedata` skill) |
 | `conditional_spawns.tsv` | after any table regen |
 | `.research-record/heartopia-tables/` | the durable snapshot — md5-verified against live |
 
@@ -403,7 +408,7 @@ resolves — that is `modtouch` (bodies, struct layouts, panels that gained a lo
 | Encrypted modules (live) | `%LocalLow%/xd/Heartopia/DotnetAssemblies/*.dll` | — |
 | Older build fallback | `<Steam>/Heartopia/xdt_Data/StreamingAssets/DotnetAssemblies/*.dll.bytes` | — |
 | Decompiled C# | `ilspy-dumps/<Module>/` | **gitignored** |
-| Design tables | `tools/HeartopiaTables/cn_tables.db` | **gitignored** |
+| Design tables | `tools/HeartopiaTables/oversea_tables.db` | **gitignored** |
 | Localization | `%LocalLow%/xd/Heartopia/Others/db/designTable.db` | — |
 | Durable snapshot | `.research-record/heartopia-tables/` | **gitignored** |
 | These scripts | `tools/gameupdate/` | **gitignored** — local tooling, like the rest of the game-data pipeline |
@@ -425,7 +430,7 @@ baseline that exists.** Note its path when the pipeline prints it.
 | 2026-08-06 | +0 / −0 / ~22 | 911 tables, no row change | `IconsBarWidget` renamed one node → 16 broken `GameObject.Find` paths |
 | 2026-08-20 | +774 / −92 / ~1078 | 911 → 948 tables, 337 746 → 376 657 rows | `ReadUInt64` opcode added to the decoder; `AreaPriorityManager` moved namespace (diagnostic-only break) |
 | 2026-08-27 | +0 / −0 / ~16 | 14 of 949 tables edited, all micro-fixes | a stale `old/` archive in the work dir made `promote` SKIP silently — bindings/uipaths then diffed the wrong pair; move the archive aside and rerun promote+checks |
-| 2026-09-24 | +2001 / −531 / ~1661 (≈310 of the removals are namespace moves, `XDTGame.UGC` → `XDTGame.GAS`) | 948 → 985 tables, 376 661 → 413 629 rows | two new ctor shapes broke the schema parser (`arrN = TableArrayPool.Share(arrN)`, collections sized after the count via `TableEmptyDictionary`); the failed decode truncated `cn_tables.db` and the rerun snapshotted the 0-byte file — `snapshot` now keeps the first snapshot. Baseline rebuilt from a second machine's `cn.ab` + its own `EcsClient` |
+| 2026-09-24 | +2001 / −531 / ~1661 (≈310 of the removals are namespace moves, `XDTGame.UGC` → `XDTGame.GAS`) | 948 → 985 tables, 376 661 → 413 629 rows | two new ctor shapes broke the schema parser (`arrN = TableArrayPool.Share(arrN)`, collections sized after the count via `TableEmptyDictionary`); the failed decode truncated `oversea_tables.db` and the rerun snapshotted the 0-byte file — `snapshot` now keeps the first snapshot. Baseline rebuilt from a second machine's `cn.ab` + its own `EcsClient` |
 | 2026-09-30 | +6 / −0 / ~38 | 985 tables, 413 629 → 413 637 rows; 28 edited (19 only expression-pool renumbering) | the stale `old/` archive trap from 2026-08-27 hit again (`promote` SKIP) — moved aside, reran promote + checks. No binding broke; the player→plot lookup rewrite (`HomeFieldComponent`) is a vanilla regression, not a mod break |
 
 See also: [GAME_ASSEMBLIES_AND_TOOLS.md](GAME_ASSEMBLIES_AND_TOOLS.md) (runtime access,

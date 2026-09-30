@@ -43,11 +43,11 @@ namespace HeartopiaMod
         private const float SandBaseScanRadius = 60f;
         private const int SandFeatureOpenQualityId = 300041; // FeatureOpenEnum.SandSculptingQuality
         // SandfinishedItem ids 1..14 are the real sculptures; ids >14 are decoy answers that
-        // produce sandfinished 600299 (a spoiled/failure sculpture). Verified vs cn_tables.db.
+        // produce sandfinished 600299 (a spoiled/failure sculpture). Verified vs oversea_tables.db.
         private const int SandValidModelMaxId = 14;
 
         // SandfinishedItem id (1..14) -> Sandfinished model staticId, and the model's rarity (1..5,
-        // from Entity._rarity). Semantically-forced 1:1 map, verified vs cn_tables.db + designTable
+        // from Entity._rarity). Semantically-forced 1:1 map, verified vs oversea_tables.db + designTable
         // (see .research-record/sand-5star-priority.md). Index 0 is unused (item ids are 1-based).
         private static readonly int[] SandItemToModelStaticId =
         {

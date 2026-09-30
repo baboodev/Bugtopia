@@ -537,17 +537,21 @@ Two encrypted/encoded layers are recovered and merged into one searchable FTS5 i
 - **Layer A — SQLite** (`xdt_Data/StreamingAssets/Others/db/` and the `%LocalLow%\xd\Heartopia\Others\db\`
   runtime copy: `designTable.db` = localization in 11 languages, `dialogueTable.db`, `ResIndex.db` =
   asset-path→bundle index). String columns use the **SecureStorage** column cipher.
-- **Layer B — `cn.bytes` design tables** (~880 tables / ~308k rows: item / stat / rarity / price /
-  recipe / store / entity / task / drop / …) — a custom binary packed in AssetBundle `cn.ab`, read at
-  runtime by `EcsClient.TableData.Init`. Design rows store display names in native **zh-Hans**; the
-  builder cross-resolves them to every language via Layer A, so rows are searchable in English too.
+- **Layer B — design tables** (~984 tables / ~414k rows: item / stat / rarity / price /
+  recipe / store / entity / task / drop / …) — a custom binary packed in a table AssetBundle, read at
+  runtime by `EcsClient.TableData.Init`. Every install ships **two variants**: `<hash>_oversea.ab`
+  (`oversea.bytes`, read by the global client — the default everywhere here) and `<hash>_cn.ab`
+  (`cn.bytes`, read only by the China build; different event dates / unlock gates / shop
+  rows). Decode the CN one only on purpose: `htables.py decode --variant cn`. Design rows store
+  display names in native **zh-Hans**; the builder cross-resolves them to every language via
+  Layer A, so rows are searchable in English too.
 
 ### Usage
 
 ```powershell
 cd tools\HeartopiaTables
 pip install -r requirements.txt      # UnityPy — only needed for `decode`
-python htables.py decode             # cn.ab -> cn.bytes -> cn_tables.db   (needs ilspy-dumps present)
+python htables.py decode             # oversea.ab -> oversea.bytes -> oversea_tables.db   (needs ilspy-dumps present)
 python htables.py index              # decrypt A + load B -> heartopia_index.db (FTS5, ~3.2M docs)
 python htables.py search "Pickaxe" --source B   # cross-language: Pickaxe / 곡괭이 / Топор-мотыга …
 python htables.py search "金币"                 # native zh-Hans
@@ -557,7 +561,7 @@ python htables.py all                # decode + index
 
 `decode` needs **UnityPy + `ilspy-dumps/EcsClient`** (row schemas are parsed live from the decompiled
 `Table*` ctors for the current build); `index`/`search` are stdlib-only (need the SQLite DBs + a
-`cn_tables.db`). Generated DBs are gitignored (the ~424 MB index regenerates in ~16 s). Keys, the
+`oversea_tables.db`). Generated DBs are gitignored (the ~424 MB index regenerates in ~16 s). Keys, the
 container/row format, and the Steam-vs-TapTap caveat are documented in
 [`tools/HeartopiaTables/README.md`](../tools/HeartopiaTables/README.md).
 

@@ -1466,7 +1466,7 @@ namespace HeartopiaMod
         // nothing, which is why the farm asks this before it casts.
         //
         // THE COST IS A CONSTANT, not a table read: row 600 of the Interaction table carries
-        // _staminaCost = 2 (decrypted tables, tools/HeartopiaTables/cn_tables.db), and pulling that
+        // _staminaCost = 2 (decrypted tables, tools/HeartopiaTables/oversea_tables.db), and pulling that
         // one int out of TableData.TableInteractions would mean inflating a
         // Dictionary<int, TableInteraction> walk over AuraMono on every cast. If a game update ever
         // raises the cost, this gate only becomes permissive again -- the server refusal and the

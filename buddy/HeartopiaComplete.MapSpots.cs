@@ -79,7 +79,7 @@ namespace HeartopiaMod
         // (berry bushes cluster with stick bushes, fruit trees with plain trees) — the wrong produce
         // then resolved (sticks 40001 for "Blueberry", timber 40002 for "Apple Tree") AND poisoned
         // mapTrackLabelIcon[label] for every far marker of that type until relog. These labels don't
-        // need a live match to know their icon (RandomDrop, cn_tables): Timber 40002 / Rare 40004,
+        // need a live match to know their icon (RandomDrop, oversea_tables): Timber 40002 / Rare 40004,
         // Apple 40101, Mandarin 40201, Blueberry 40501, Raspberry 40502, Stone 40021, Ore 40022.
         // Labels with VARIED produce (Meteor tiers 40034-36, mushrooms, greens, underwater) keep the
         // live resolve chain. 0 = not pinned.
@@ -501,7 +501,7 @@ namespace HeartopiaMod
         // which is ANOTHER bird's card (61101) — a wrong species picture is worse than the
         // generic one, so it keeps the native icon.
         // ⚠️ REGENERATE THESE THREE MAPS AFTER EVERY CONTENT UPDATE. They are baked joins over
-        // cn_tables (Bird.normalPrefabId/birdPhotoId, Insect.normalPrefabId), and a species the
+        // oversea_tables (Bird.normalPrefabId/birdPhotoId, Insect.normalPrefabId), and a species the
         // update adds is simply absent here — the marker silently falls back to the category
         // icon, which reads as "the new species have no icon". That is exactly how season 8
         // shipped: 5 insects and 5 birds missing. Insects need no map — the insect entity

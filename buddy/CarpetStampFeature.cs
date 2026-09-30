@@ -44,7 +44,7 @@ namespace HeartopiaMod
             public int ExitRemoveSkillId;  // PhysEvent PlayerExit (500004) → server RemoveBuff (permanent one)
         }
 
-        // Skill ids per carpet staticId, recovered from the decrypted cn.bytes tables
+        // Skill ids per carpet staticId, recovered from the decrypted design tables (oversea.bytes)
         // (Mechanism.ugcSkills → Ugcskill.trigger/_serverAction → UgcServerAction/BuffConfig).
         private static readonly Dictionary<int, CarpetStampSkillSet> CarpetStampSkillMap = new Dictionary<int, CarpetStampSkillSet>
         {

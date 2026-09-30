@@ -365,7 +365,7 @@ namespace HeartopiaMod
             return UguiScriptMaskForLanguage(languageCode) != 0;
         }
 
-        // Game UI language, as a TableLanguages id (cn_tables.db "Languages"):
+        // Game UI language, as a TableLanguages id (oversea_tables.db "Languages"):
         //   0 zh-cn  1 tw  2 en  3 de  4 fr  5 ja  6 ko  7 es  8 pt  9 th  10 ru  11 id
         // Everything else draws in Latin or Cyrillic, both of which LiberationSans covers; signal 3
         // above catches it if that is ever wrong.

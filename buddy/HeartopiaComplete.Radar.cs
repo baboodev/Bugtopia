@@ -558,7 +558,7 @@ namespace HeartopiaMod
                     // gatherables that already load here (scallop = a recognizable seashell). Falls back to the
                     // hazard diamond while it loads.
                     return "p_gather_decadopecten_step00";
-                // Decoration.normalPrefabId of the first slab piece each node drops (cn_tables:
+                // Decoration.normalPrefabId of the first slab piece each node drops (oversea_tables:
                 // 302685 -> kapibalaslate_1, 302694 -> oakslab_1). The nodes themselves are
                 // p_dynamicbush_slate_00_*, which has no ui_item_normal_* icon — the DROP does,
                 // and that is the picture the player recognises.
@@ -566,7 +566,7 @@ namespace HeartopiaMod
                     return "p_decoration_tribe_kapibalaslate_1";
                 case "Oak-Oak Slab":
                     return "p_decoration_tribe_oakslab_1";
-                // Pickable.normalPrefabId of Entity 7100 (cn_tables Pickable table) - the bag-item icon
+                // Pickable.normalPrefabId of Entity 7100 (oversea_tables Pickable table) - the bag-item icon
                 // ui_item_normal_p_dogpoop_dogpoop001 exists in the icon index.
                 case "Dog Poop":
                     return "p_dogpoop_dogpoop001";
@@ -584,7 +584,7 @@ namespace HeartopiaMod
                     return "p_material_wood3";
                 case "Flawless Fluorite":
                     return "p_material_stone3";
-                // Material.normalPrefabId of item 40001 (cn_tables Material table) — same
+                // Material.normalPrefabId of item 40001 (oversea_tables Material table) — same
                 // ui_item_normal_* family as the stone/bamboo keys above, so the direct loader
                 // fetches it like any other radar icon.
                 case "Branch":
@@ -593,7 +593,7 @@ namespace HeartopiaMod
                     return "tree";
                 case "Rare Tree":
                     return "rare_tree";
-                // Material.normalPrefabId of item 40033 (cn_tables Material table).
+                // Material.normalPrefabId of item 40033 (oversea_tables Material table).
                 case "Bamboo":
                     return "p_material_bamboo1";
                 case "Apple Tree":

@@ -39,7 +39,7 @@ namespace HeartopiaMod
     public partial class HeartopiaComplete
     {
         private const string PetPoopTag = "PetPoop";
-        private const int PetPoopStaticIdMin = 7100;   // cn_tables EntityType 44 "pickable": minId
+        private const int PetPoopStaticIdMin = 7100;   // oversea_tables EntityType 44 "pickable": minId
         private const int PetPoopStaticIdMax = 7199;   // ... maxId
         internal const int PetPoopItemId = 7100;       // Entity 7100 "Dog Poop" (bag item + icon p_dogpoop_dogpoop001)
         private const string PetPoopPickableViewClassName = "XDTLevelAndEntity.Gameplay.Component.Pickable.PickableComponent";

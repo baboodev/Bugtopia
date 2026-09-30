@@ -55,18 +55,17 @@ namespace HeartopiaMod
         // copies — never status-polled, never pinned, never registered.
         private const int NetCookMaxScannedTargets = 256;
 
-        // Live `TableCooker.cookerType` value marking a cooker the CLIENT HAS SWITCHED OFF. Established
-        // in-world 2026-09-02 (see docs/FEATURES.md for the full write-up):
-        //  - The table file is fine: parsing cn.bytes row by row gives 370006→2, 370010→3, 370014→5,
-        //    370019→6, matching the offline dump. The live client reports 999 for the contiguous id
-        //    range 370006-370023, while 370001-5 → 1, 370024 → 11 … 370033 → 1 all read correctly.
-        //  - Not a decode bug: the live object IS that row (370006's prefabPath is
-        //    `…/p_cooker_season_sandshop_cooker_1`) and its cookwareType still reads 2 — a parse
-        //    desync would corrupt the adjacent field too. Exactly one field is overwritten, on
-        //    cookers only; TableCookingRecipe is untouched (live GetCookingRecipe still returns
-        //    cookerType 2/3/5/6/15 for 45129/45216/45254/45274/45532).
+        // `TableCooker.cookerType` value of a cooker with NO recipe menu on the global build (see
+        // docs/FEATURES.md for the full write-up):
+        //  - It is plain table data: the global client reads oversea.bytes, where the contiguous id
+        //    range 370006-370023 carries 999 (the field is a UInt16 there), while 370001-5 → 1,
+        //    370024 → 11 … 370033 → 1. The China build's cn.bytes gives those same cookers their
+        //    real types (370006→2, 370010→3, 370014→5, 370019→6 …) — that difference is what first
+        //    looked like a runtime gate on 2026-09-02, when the offline tables were decoded from cn.ab.
+        //  - TableCookingRecipe is identical in both variants (GetCookingRecipe returns cookerType
+        //    2/3/5/6/15 for 45129/45216/45254/45274/45532).
         // So the menu buckets exist and are populated while their cookers point at an empty 999
-        // bucket: GetAllRecipes returns 0 for every gated cooker and the game itself will not serve
+        // bucket: GetAllRecipes returns 0 for every such cooker and the game itself will not serve
         // their menu. Two things follow, both load-bearing:
         //  - 999 is a SHARED bucket across cookers that have nothing to do with each other, so
         //    grouping by it would merge a crucible, a grill and a food cart into one "type".

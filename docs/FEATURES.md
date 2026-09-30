@@ -1439,12 +1439,11 @@ Cook commands (`PrepareCooking`/`StartCooking`/`InteractWithCooker`/`ContinueCoo
 - **by staticId** — splits a homogeneous kitchen: 灶台 `370001` and 简约灶台 `370002` are different ids with an identical 141-recipe menu. This was the live path on builds where the burner view reports cookware `0` (observed in-world: `Captured cookerStaticId=370001 cookerType=0`), so the minority style was silently dropped from every capture.
 - **by cookware** — the same value is shared by cookers with different menus (the stove and the elephant food truck are both cookware Boil), and conversely one menu can span several cookware values, so it splits and merges in the wrong places both ways.
 
-**`cookerType == 999` marks a cooker the client has switched OFF**, and it is excluded from grouping entirely (no census entry, no merge, no pin). Established in-world 2026-09-02:
+**`cookerType == 999` marks a cooker with no recipe menu on the global build**, and it is excluded from grouping entirely (no census entry, no merge, no pin). It is plain table data:
 
-- The table file is accurate — parsing `cn.bytes` row by row gives `370006 → 2`, `370010 → 3`, `370014 → 5`, `370019 → 6`, matching `tools/HeartopiaTables`.
-- The live object is that same row (`GetCooker(370006).prefabPath` = `…/p_cooker_season_sandshop_cooker_1`) and its `cookwareType` reads **correctly** (2), while `cookerType` reads 999. A parse desync is ruled out: it would corrupt the adjacent field too. One field is overwritten at runtime, on cookers only.
-- `TableCookingRecipe` is **not** gated: live `GetCookingRecipe` returns cookerType 2 / 3 / 5 / 6 / 15 for `45129` / `45216` / `45254` / `45274` / `45532`, exactly as in the file. So the menu buckets exist and are populated, while the cookers that own them are redirected to an empty `999` bucket — `GetAllRecipes` returns 0 for every one of them, i.e. the game itself will not serve their menu.
-- Switched off is the contiguous id range **370006-370023** (it is not "seasonal vs not": winter cookers `370024`/`370025` work, the autumn cooker `370022` does not). No `TableCooker.OnAfterRead` subscriber exists in the Mono dump, so the gate is applied elsewhere (IL2CPP side or a server-sent table patch) — effect confirmed, mechanism not located.
+- The global client reads the **oversea** table variant (`oversea.bytes` in `<hash>_oversea.ab`; `TableData.dataPath`), where `TableCooker._cookerType` is a `UInt16` and the contiguous id range **370006-370023** carries `999` (sandshop cart, mall campfires, Halloween crucible, New Year stove, …). `370001-5 → 1`, `370024 → 11`, `370025 → 12` … `370033 → 1`. It is not "seasonal vs not": winter cookers `370024`/`370025` have menus, the autumn cooker `370022` does not.
+- The China build reads `cn.bytes` instead, where the field is a `Byte` and those cookers carry their real types (`370006 → 2`, `370010 → 3`, `370014 → 5`, `370019 → 6` …). When this was first observed in-world (2026-09-02) the offline tables were decoded from `cn.ab`, so the live 999 looked like a runtime gate with no visible mechanism; comparing both variants on 2026-09-30 showed it is just the global data.
+- `TableCookingRecipe` is identical in both variants: live `GetCookingRecipe` returns cookerType 2 / 3 / 5 / 6 / 15 for `45129` / `45216` / `45254` / `45274` / `45532`. So the menu buckets exist and are populated, while the cookers that would own them point at an empty `999` bucket — `GetAllRecipes` returns 0 for every one of them, i.e. the game itself will not serve their menu.
 
 Two consequences the code depends on: 999 is a **shared** bucket across unrelated cookers, so grouping by it would merge a crucible, a grill and a food cart into one "type"; and re-deriving the real type from the offline table would not help, because the recipe list still comes from the client's own bucket lookup.
 
@@ -1978,7 +1977,7 @@ Research tool for the party **stampede carpets** — Slippery Rug `260242` (`p_m
 - **Step Off** — completes the cycle like a real exit: both `PlayerExit` skills in `ugcSkills` order (AddBuff 1005, +20% for 3 s linger, then RemoveBuff 1003).
 - **Logging** — always on, no toggle: resolution pointers, dictionary walk per-actor lines (netId/staticId/ugcType/pos/dist), full command payloads, invoke results/exceptions.
 
-Skill ids are per-staticId constants recovered from the decrypted `cn.bytes` tables (`Mechanism.ugcSkills` → `Ugcskill` → `UgcServerAction`/`BuffConfig`); the game-side pipeline this replays is `UGCTriggerCase → LocalPlayerComponent.TriggerEnter → PhysInteractionSystem → PhysEventSkill → Action_Command_UgcOperate`. Research: `/ugc-mechanism-carpet-interaction.md`.
+Skill ids are per-staticId constants recovered from the decrypted design tables (`oversea.bytes`) (`Mechanism.ugcSkills` → `Ugcskill` → `UgcServerAction`/`BuffConfig`); the game-side pipeline this replays is `UGCTriggerCase → LocalPlayerComponent.TriggerEnter → PhysInteractionSystem → PhysEventSkill → Action_Command_UgcOperate`. Research: `/ugc-mechanism-carpet-interaction.md`.
 
 ---
 

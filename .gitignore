@@ -67,3 +67,6 @@ release/
 tools/VehicleTuneProbe
 tools/CleanupProbe
 tools/FishRouteProbe
+
+# China build (TapTap CN) copy + decompilation — local research only
+cn-version/

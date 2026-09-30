@@ -14,7 +14,7 @@ Related code:
 | `tools/instrument_banks.json` | `instrumentType` → bank filename, or a list for one-bank-per-note types |
 | `tools/instrument_bank_index.py` | Resolve which bank holds a given `noteId` |
 | `tools/*_map.json`, `tools/maps/*.json` | Per-instrument note/key/MIDI/subsong maps |
-| `tools/HeartopiaTables/cn_tables.db` | `Musicaudio`, `Instrumenttype` design tables |
+| `tools/HeartopiaTables/oversea_tables.db` | `Musicaudio`, `Instrumenttype` design tables |
 | `tools/parse_record.py` | In-game `.bin` calibration (key → noteId only) |
 
 ---
@@ -148,7 +148,7 @@ Stop events (`stopEventName`) are ignored for sample export.
 4. **Design tables DB** (for fix/audit):
 
    ```text
-   tools/HeartopiaTables/cn_tables.db
+   tools/HeartopiaTables/oversea_tables.db
    ```
 
    Must contain current `Musicaudio` and `Instrumenttype` rows. After a content patch, regenerate tables before fixing maps (see project table-export docs / `export-tables` skill).
@@ -168,7 +168,7 @@ cd tools
 python fix_instrument_subsongs.py
 ```
 
-This walks every map that has an entry in `instrument_banks.json`, loads `playEeventName` for each `noteId` from `cn_tables.db`, parses the bank HIRC, and writes:
+This walks every map that has an entry in `instrument_banks.json`, loads `playEeventName` for each `noteId` from `oversea_tables.db`, parses the bank HIRC, and writes:
 
 - `subsongByNoteId` — primary stream (first Play action)
 - `variantSubsong` — all Play-action streams when count &gt; 1
@@ -433,7 +433,7 @@ Nominal MIDI (white-key major layout used by maps):
 60 62 64 65 67 69 71
 ```
 
-`noteIds` for a 15-key instrument **must** be `Instrumenttype.notes15a` for that type (not a pitch-sorted permutation). Broken maps (duplicate noteIds, fewer than 15 unique ids) produce wrong filenames even if Wwise subsongs are fixed — restore from `cn_tables.db` first.
+`noteIds` for a 15-key instrument **must** be `Instrumenttype.notes15a` for that type (not a pitch-sorted permutation). Broken maps (duplicate noteIds, fewer than 15 unique ids) produce wrong filenames even if Wwise subsongs are fixed — restore from `oversea_tables.db` first.
 
 ### 9.4 Piano / harp 37-key layout (KeyMode22 + pianoSemitone)
 
@@ -542,7 +542,7 @@ If an Event cannot be resolved, audit reports `MISS` — usually stale `Musicaud
 
 ## 13. After a game patch
 
-1. Update / regenerate `tools/HeartopiaTables/cn_tables.db` (`Musicaudio`, `Instrumenttype`).  
+1. Update / regenerate `tools/HeartopiaTables/oversea_tables.db` (`Musicaudio`, `Instrumenttype`).  
 2. Confirm banks exist under `GeneratedSoundBanks/Windows` (names in `instrument_banks.json`).  
 3. If `Instrumenttype.notes*` arrays changed: `python reseed_instrument_maps.py` (never hand-edit from pitch).  
 4. `python fix_instrument_subsongs.py`  

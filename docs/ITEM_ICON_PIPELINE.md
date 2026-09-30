@@ -186,7 +186,7 @@ icon the game can load, recovered from the encrypted resource index — no game 
 - **Key alignment:** `iconName` is the path basename without extension, so the mod's runtime key
   `"ui_item_normal_" + RewardUtility.GetIconName(staticId, step)` (§2.2) matches column 1 **directly**
   — grep the TSV by icon name to confirm an asset exists / find its bundle.
-- **Item → icon mapping** is independently confirmed in the decoded design tables (`cn_tables.db`):
+- **Item → icon mapping** is independently confirmed in the decoded design tables (`oversea_tables.db`):
   129 tables carry an icon column (`iconspecial` for equip/furniture, `icon` / `itemIcon` /
   `avatarIcon` / `showPath` elsewhere) — searchable via `htables.py search`.
 - **Extract the PNG offline:** feed the row's `bundle` to `tools/HeartopiaTables/heartopia_ab.py`,
