@@ -257,6 +257,15 @@ namespace HeartopiaMod
                 {
                     Image image = this.keyIconTargets[i];
                     Sprite want = this.keyIconApplied[i];
+                    if (want != null && !IsLiveHintSprite(want))
+                    {
+                        want = this.ReplaceDeadHintSprite(want);
+                        this.keyIconApplied[i] = want;
+                        if (want == null && !IsLiveHintSprite(image.sprite) && IsLiveHintSprite(this.keyIconOriginals[i]))
+                        {
+                            image.sprite = this.keyIconOriginals[i]; // the game's own letter beats a white quad
+                        }
+                    }
                     Sprite current = image.sprite;
                     if (want != null && (current == null || current.GetInstanceID() != want.GetInstanceID()))
                     {
@@ -392,13 +401,13 @@ namespace HeartopiaMod
 
                 bool chip;
                 string key = KeymappingIconKey(sprite.name, out chip);
-                if (key == null)
+                if (key == null || !IsLiveHintSprite(sprite))
                 {
                     continue;
                 }
 
                 Dictionary<string, Sprite> family = chip ? this.keyChipIconSprites : this.keyIconSprites;
-                if (!family.ContainsKey(key))
+                if (!family.TryGetValue(key, out Sprite known) || !IsLiveHintSprite(known))
                 {
                     family[key] = sprite;
                 }
@@ -501,7 +510,7 @@ namespace HeartopiaMod
             // already written to was filtered out above, so this is never our own replacement.
             bool harvestChip;
             string harvestKey = KeymappingIconKey(sprite.name, out harvestChip);
-            if (harvestKey != null)
+            if (harvestKey != null && IsLiveHintSprite(sprite))
             {
                 if (harvestChip)
                 {
@@ -750,11 +759,96 @@ namespace HeartopiaMod
             return string.Equals(key, "Del", StringComparison.OrdinalIgnoreCase) ? "Delete" : key;
         }
 
+        // A hint sprite is only usable while its atlas texture is loaded. The keymapping atlas is
+        // loaded and released with the panels that use it, and a Sprite whose texture went with it
+        // stays a valid object that Unity draws as a plain WHITE quad: that is what covered the
+        // build panel's Delete hint (2026-09-30: keymapping_icon_KB_V with texture == null, cached
+        // by the index and re-applied every tick). Every cache and apply path checks this.
+        private static bool IsLiveHintSprite(Sprite sprite)
+        {
+            try
+            {
+                return sprite != null && sprite.texture != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void DropDeadHintSprite(Dictionary<string, Sprite> family, string key)
+        {
+            if (family.TryGetValue(key, out Sprite sprite) && !IsLiveHintSprite(sprite))
+            {
+                family.Remove(key);
+            }
+        }
+
+        // One pass over the loaded sprites for a single key, both families. Runs only when the
+        // cache has no live entry for it, i.e. right after an atlas reload.
+        private void RescanHintSprite(string key)
+        {
+            Il2CppArrayBase<Sprite> sprites = Resources.FindObjectsOfTypeAll<Sprite>();
+            if (sprites == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < sprites.Length; i++)
+            {
+                Sprite sprite = sprites[i];
+                if (sprite == null || !IsLiveHintSprite(sprite))
+                {
+                    continue;
+                }
+
+                string found = KeymappingIconKey(sprite.name, out bool chip);
+                if (found == null || !string.Equals(found, key, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                Dictionary<string, Sprite> family = chip ? this.keyChipIconSprites : this.keyIconSprites;
+                if (!family.ContainsKey(key))
+                {
+                    family[key] = sprite;
+                }
+            }
+        }
+
+        // An applied replacement whose atlas was unloaded: the same key, same family, live instance.
+        // Null when none is loaded right now; the tick then leaves the hint to the game until one is.
+        private Sprite ReplaceDeadHintSprite(Sprite dead)
+        {
+            string key;
+            bool chip;
+            try
+            {
+                key = KeymappingIconKey(dead.name, out chip);
+            }
+            catch
+            {
+                return null;
+            }
+
+            Sprite live = key != null ? this.FindHintSprite(key, chip) : null;
+            LogInputMap("key hint '" + (key ?? "?") + "': cached sprite lost its atlas texture — "
+                + (live != null ? "switched to a live instance." : "no live instance loaded yet."));
+            return live;
+        }
+
         // Same family when it has the key; otherwise the other one. A hint in the wrong STYLE is a
         // cosmetic mismatch, a hint with the wrong LETTER is misinformation — so falling back beats
         // leaving it stale.
         private Sprite FindHintSprite(string key, bool chip)
         {
+            this.DropDeadHintSprite(this.keyChipIconSprites, key);
+            this.DropDeadHintSprite(this.keyIconSprites, key);
+            if (!this.keyChipIconSprites.ContainsKey(key) && !this.keyIconSprites.ContainsKey(key))
+            {
+                this.RescanHintSprite(key);
+            }
+
             Sprite sprite;
             if (chip)
             {
