@@ -822,6 +822,8 @@ namespace HeartopiaMod
             Breadcrumbs.Phase("ou.uguiquest");
             this.ProcessFriendInteractUnlockOnUpdate();
             this.ProcessUguiActionPanelOnUpdate();
+            // Avatar Studio: follows the game's Generate Avatar panel (AvatarStudioFeature.cs).
+            this.ProcessUguiAvatarStudioOnUpdate();
             this.ProcessUguiQuestAssistantWindowOnUpdate();
             // Theme dirty-consumption + debounced SaveUiTheme flush (HeartopiaComplete.UiKit.cs).
             // Used to piggyback on EnsureThemeStyles at the top of OnGUI; with the IMGUI menu

@@ -308,6 +308,8 @@
     <Compile Include="FurnitureDyeFeature.cs" />
     <Compile Include="FurnitureDyePanelFeature.cs" />
     <Compile Include="ActionPanelFeature.cs" />
+    <Compile Include="AvatarStudioFeature.cs" />
+    <Compile Include="AvatarStudioBackgrounds.cs" />
     <Compile Include="ControllerNameResolver.cs" />
     <Compile Include="ForagingAnimationFeature.cs" />
     <Compile Include="ForagingAnimationFeature.SeaClean.cs" />
@@ -390,6 +392,7 @@
     <Compile Include="HeartopiaComplete.UguiHomelandFarmContent.cs" />
     <Compile Include="HeartopiaComplete.UguiDailyQuestsContent.cs" />
     <Compile Include="HeartopiaComplete.UguiActionPanelContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiAvatarStudioContent.cs" />
     <Compile Include="HeartopiaComplete.UguiQuestAssistantWindowContent.cs" />
     <Compile Include="HeartopiaComplete.UguiFeaturesMainContent.cs" />
     <Compile Include="HeartopiaComplete.UguiFeaturesFoodRepairContent.cs" />

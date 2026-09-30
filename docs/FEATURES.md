@@ -142,6 +142,53 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
 
 ---
 
+### Avatar Studio (floating window, Generate Avatar panel)
+
+- Appears by itself while the game's **Generate Avatar** panel
+  (`PersonalInformationCreateHeadIconPanel`, Profile → avatar → create) is open and disappears with
+  it. The × hides it until the panel is opened again. Nothing is added to the mod menu.
+- **Pose** — the panel's own 6 portrait poses (`TableSnapshotAction`) plus every `Singleaction`
+  emote, named in the game's language and read live from `TableData`, so new emotes appear without a
+  mod update. `(loop)` marks emotes that keep playing, `(posture)` sit/lie/squat.
+- **Frame** — Pause freezes the model; the slider then scrubs the CURRENT animation state frame by
+  frame (30 fps). Moving the slider while it plays pauses it first. A multi-part emote shows the part
+  it was in when paused; press Play, pause again in the next part to reach it.
+  Freezing the animator does not freeze the ACTION playing the emote: `PlayerSocialAction` has a
+  35 s real-time safety timeout (`ActionClip._safe_time_check`) and used to end the emote under a
+  paused model, dropping it back to the portrait pose. While paused, the running clip's timer is
+  parked; Play gives it back its full `duration`.
+- **Face** — the 63 `anim_facestation_*` clips on the model (the panel exposes 8): tongue, scared,
+  sleep, pain, flustered, eat/drink, the laugh variants and the transition clips. One clip at a time;
+  blending two does not combine them (measured).
+- **Zoom** — 0.25x..3x on the avatar camera's field of view; below 1x shows the whole body, which
+  also lets hand gestures below the chest into the frame. **Rotation** — ±180° on the model pivot,
+  composing with the panel's own ±30° buttons. **Move X / Y** — ±1.5 world units, as sliders or by
+  dragging the model with the RIGHT mouse button inside the capture circle (the left button stays the
+  panel's own ±0.1 drag). The offset goes on `AvatarCamera`, whose parent `camera@go` is what the
+  panel's drag writes, so the two add up; the drag speed follows zoom and depth, so the model stays
+  under the cursor. **Reset view** returns zoom, rotation and move.
+- **Background** — the panel's backdrop is a 3D plane (`background_plane@frame/backgroundimage01..10`),
+  so any material on the visible plane is captured. The list offers: *Game* (hands control back to the
+  panel's own button), *Panel 1..10* (its own ten, picked directly), 15 scene backgrounds the game
+  ships for other screens (mini pass Dream/Foison/Kindergarten/Sauna/Star River/Street/Tribe,
+  research, gacha 1001-1003, pay shop 1-2; loaded by the IL2CPP `ResManager.LoadObjectSync`
+  through the interop and unloaded on close), and *File:* entries for every PNG/JPG in
+  `%LocalLow%/Bugtopia/AvatarBackgrounds` (the **Folder** button creates and opens it; the list
+  rescans every 2 s). Files are cover-cropped to the 2:1 the game's backgrounds use. A pick follows
+  the plane if the panel's button switches it. The two private-island backgrounds are sky cubemaps
+  and are left out.
+- ⚠ The panel object is POOLED, not re-instantiated: anything written to it outlives a close/reopen.
+  That is why every value is captured at open and put back on close — a manual edit that skips this
+  (as a bridge test once did to `AvatarCamera`) stays wrong until the game restarts.
+- **Why it is safe to use:** Confirm grabs a screen rectangle and uploads it as a plain picture; the
+  server only receives the photo id (`EditAlternativeAvatarImages`), never the pose or the face. The
+  window hides itself for the capture (the panel switches `blackbg@go` off for exactly that window),
+  so it cannot be baked into the avatar even when dragged over the circle. Camera and pivot are put
+  back when the panel closes.
+- Implementation: `AvatarStudioFeature.cs` (detection via `UIPanelOpen/Closing/CloseEvent` +
+  `UIManager.GetView`, model commands through AuraMono, camera/pivot/face on the Unity side) +
+  `HeartopiaComplete.UguiAvatarStudioContent.cs` (window). Verbose trace: `MasterLogAvatarStudio`.
+
 ## Self Tab
 
 ### Camera Toggle (Mouse Look)

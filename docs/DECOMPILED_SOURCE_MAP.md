@@ -921,6 +921,16 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 - **UI:** `HeartopiaComplete.cs` — shares `forceOpenShopSelectedIndex` / `TryResolveForceOpenShopStoreId`
 - **Docs:** [FEATURES.md § Buy All (Coin)](./FEATURES.md#buy-all-coin--selected-shop)
 
+#### Avatar Studio — `AvatarStudioFeature.cs`
+- **Dump:** `XDTGameUI/XDTGame.UI.Panel/PersonalInformationCreateHeadIconPanel.cs`; `XDTLevelAndEntity/XDTLevelAndEntity.Gameplay.Component.GuiChar/GuiPlayer.cs`, `GuiPlayerComponent.cs`; `XDTLevelAndEntity/XDTLevelAndEntity.EntityView/AnimationComponent.cs`; `EngineWrapper/XDT.EngineSystem.AnimationSystem/XDAnimationStateInfo.cs`; `XDTLevelAndEntity/XDTGUI.Utility/CanvasUtility.cs` (the screen-rect capture); `EcsClient/TableSnapshotAction.cs`, `TableSingleaction.cs`
+- **Features:** extra poses, frame scrubbing, 63 face clips, zoom and rotation for the Generate Avatar panel
+- **Detection:** `UIPanelOpenEvent` / `UIPanelClosingEvent` / `UIPanelCloseEvent` as triggers (their `System.Type` payload is unreadable) + `UIManager.GetView(Type)` — **A**
+- **Model:** panel `_characterModel` (GuiPlayer) → `_guiPlayer` → `animation`; `GuiPlayer.PlaySnapshot(int)`, `PlayerAction(int)`, `SetAnimationSpeed(float)`, `StopAction()`; `AnimationComponent.get_CurrentStateInfo`, `PlayState(int,int,float)`, `Evaluate(float)` (both unique in the sealed class — `AnimationController.PlayState` has two 3-arg overloads, avoid it) — **A**, resolved on the object's class
+- **Catalogue:** `TableData.TableSnapshotActions` / `TableSingleactions` `.Values`, row `get_name` = `TableData.Localize` — **A**
+- **Unity side:** `AvatarCamera.fieldOfView`, `avatar_model` localRotation, `p_player_ui_skeleton(Clone)/face` legacy `Animation.Play`, `blackbg@go` = capture in progress — **I** + **W** (found under the panel by `GameObject.Find`)
+- **Backgrounds (`AvatarStudioBackgrounds.cs`):** `background_plane@frame` MeshRenderers (the panel's `background_plane_frame.SetFrame` only toggles which is active); extra materials `ui/material/m_avatar_scenebg_minibp*`, `m_avatar_scenebg_research*`, `m_scenebg_gacha_100x`, `m_scenebg_payshop_x` via `ScriptsRefactory.ResSystem.ResManager.LoadObjectSync(string, string, Type)` / `UnLoadSync` — **R** on the interop stub (as `HeartopiaComplete.GameIcons.cs`); names from `ResIndex.db`, users in `PayShopModule.cs`, `ResearchInstrumentPanel.cs`, `ItemPreviewShowPanel.cs`
+- **Docs:** [FEATURES.md § Avatar Studio](./FEATURES.md#avatar-studio-floating-window-generate-avatar-panel)
+
 ---
 
 ### 3.16 Movement, Unity (interop)

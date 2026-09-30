@@ -305,7 +305,7 @@ All dispatched globally from `FishingProtocolManager` / `HandHoldFishingRod` (`E
 | `ResetFishState` | 0 | *(empty)* | cycle reset (recast point) |
 | `FishingStickInputUpdated` | 8 | `input`(Vector2)@0 | reel stick input (**continuous** — stays per-frame) |
 | `BottomDialogEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 12 | `message`(string ref)@0 **unreadable**, `active`(bool)@8 | read `active` only; `clickCallback`(Action ref) is the real confirm action but ref-unreadable |
-| `UIPanelOpenEvent` / `UIPanelCloseEvent` | `XDTGame.Framework.UI` | — | `panelType`(System.Type ref)@0 **unreadable** | universal panel open/close, but needs a mono-`Type*`→name resolver to be useful |
+| `UIPanelOpenEvent` / `UIPanelClosingEvent` / `UIPanelCloseEvent` | `XDTGame.Framework.UI` | — | `panelType`(System.Type ref)@0 **unreadable** | universal panel open/close (`UIView.Open` dispatches Open after `OnStart`; `Close` dispatches Closing before `OnStop`). Usable today as a "some panel changed" trigger followed by one `UIManager.GetView(Type)` probe — [`AvatarStudioFeature`](../buddy/AvatarStudioFeature.cs) does exactly that |
 
 #### Pet-play QTE events (cat = global, dog = per-netId)
 
