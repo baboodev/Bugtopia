@@ -277,6 +277,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Paint Styles", this.paintStyleUnlockStatus));
             }
 
+            if (this.freePlaceRotateUnlockEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Free Rotate Unlock", this.freePlaceRotateUnlockStatus));
+            }
+
             if (this.foragingAnimEnabled && this.autoFarmActive)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Foraging Anim", this.foragingAnimStatus));

@@ -247,6 +247,7 @@ namespace HeartopiaMod
             data.quietAnimalCardPopups = this.quietAnimalCardPopups;
             data.emoteUnlockEnabled = this.emoteUnlockEnabled;
             data.paintStyleUnlockEnabled = this.paintStyleUnlockEnabled;
+            data.freePlaceRotateUnlockEnabled = this.freePlaceRotateUnlockEnabled;
             data.furnitureDyePickerEnabled = this.furnitureDyePickerEnabled;
             data.friendInteractUnlockEnabled = this.friendInteractUnlockEnabled;
             data.foragingAnimEnabled = this.foragingAnimEnabled;
@@ -660,6 +661,7 @@ namespace HeartopiaMod
             this.quietAnimalCardPopups = data.quietAnimalCardPopups;
             this.emoteUnlockEnabled = data.emoteUnlockEnabled;
             this.paintStyleUnlockEnabled = data.paintStyleUnlockEnabled;
+            this.freePlaceRotateUnlockEnabled = data.freePlaceRotateUnlockEnabled;
             this.furnitureDyePickerEnabled = data.furnitureDyePickerEnabled;
             this.friendInteractUnlockEnabled = data.friendInteractUnlockEnabled;
             this.foragingAnimEnabled = data.foragingAnimEnabled;

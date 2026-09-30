@@ -304,6 +304,7 @@
     <Compile Include="EmoteUnlockFeature.cs" />
     <Compile Include="PaintStyleUnlockFeature.cs" />
     <Compile Include="PaintStyleUnlockFeature.JointBuild.cs" />
+    <Compile Include="FreePlaceRotateUnlockFeature.cs" />
     <Compile Include="HeartopiaComplete.UguiColorPicker.cs" />
     <Compile Include="FurnitureDyeFeature.cs" />
     <Compile Include="FurnitureDyePanelFeature.cs" />

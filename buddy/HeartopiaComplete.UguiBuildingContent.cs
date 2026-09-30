@@ -92,15 +92,21 @@ namespace HeartopiaMod
 
         private const float UguiBuildingMovePanelW = 380f;
         private const float UguiBuildingMovePanelTitleH = 24f;   // drag strip (IMGUI: 22px)
-        private const float UguiBuildingMovePanelBaseH = 206f;   // strip 24 + coord + 5 rows
-        private const float UguiBuildingMovePanelGodH = 402f;    // + the 7 god-mode jog rows
+        // Controls start at UguiBuildingMovePanelControlsY and leave a 16px bottom margin; derived
+        // from the row constants so adding a row can never leave the window short again.
+        private const float UguiBuildingMovePanelBaseH =
+            UguiBuildingMovePanelControlsY + UguiFreePlacementBaseRowsH + 16f;              // 222
+        private const float UguiBuildingMovePanelGodH =
+            UguiBuildingMovePanelBaseH + UguiFreePlacementGodRowsH;                          // + 7 jog rows
         private const int UguiBuildingMovePanelSortingOrder = 29350; // Overlay 29300 < this < Shell 29400
         private const float UguiBuildingMovePanelControlsY = 50f;
         private const float UguiBuildingCoordEditExtraH = 28f;    // the editor's Apply/Cancel row
 
-        private const float UguiFreePlacementRowStep = 28f;
-        private const float UguiFreePlacementBaseRowsH = 5f * UguiFreePlacementRowStep;  // 140
-        private const float UguiFreePlacementGodRowsH = 7f * UguiFreePlacementRowStep;   // 196
+        // 26, not 28: the sixth base row (free place & rotate) had to fit on the Building page, whose
+        // paint section already runs to the bottom. 13 rows x 26 = 338 vs the old 12 x 28 = 336.
+        private const float UguiFreePlacementRowStep = 26f;
+        private const float UguiFreePlacementBaseRowsH = 6f * UguiFreePlacementRowStep;  // 156
+        private const float UguiFreePlacementGodRowsH = 7f * UguiFreePlacementRowStep;   // 182
         private const float UguiFreePlacementFullH = UguiFreePlacementBaseRowsH + UguiFreePlacementGodRowsH;
 
         // ----------------------------------------------------------------------------------------
@@ -175,6 +181,7 @@ namespace HeartopiaMod
             public Toggle SurfaceToggle;
             public Toggle RangeToggle;
             public Toggle OverlapToggle;
+            public Toggle FreePlaceRotateToggle;
             public GameObject GodRowsRoot;
             public readonly UguiBuildingJogRowHandle[] JogRows = new UguiBuildingJogRowHandle[UguiBuildingJogRowCount];
             public bool GodRowsVisible;
@@ -285,6 +292,13 @@ namespace HeartopiaMod
                 this.L("Bypass Overlap"), this.bypassOverlapEnabled,
                 new System.Action<bool>(this.OnUguiBuildingBypassOverlapToggled));
             PlaceUguiTopLeft(c.OverlapToggle.gameObject, 0f, rowY, w, 24f);
+
+            // Row 6 — lifts the game's free place/rotate blacklist (FreePlaceRotateUnlockFeature).
+            rowY += UguiFreePlacementRowStep;
+            c.FreePlaceRotateToggle = this.CreateUguiCheckbox(root.transform, "FreePlaceRotateToggle",
+                this.L("Free place & rotate for all items"), this.freePlaceRotateUnlockEnabled,
+                new System.Action<bool>(this.OnUguiBuildingFreePlaceRotateToggled));
+            PlaceUguiTopLeft(c.FreePlaceRotateToggle.gameObject, 0f, rowY, w, 24f);
 
             // God-mode jog rows — one sub-container the sync SetActive-toggles as a unit.
             GameObject godRoot = this.CreateUguiGo("GodRows", root.transform);
@@ -655,6 +669,7 @@ namespace HeartopiaMod
             this.SyncUguiToggleFromField(c.SurfaceToggle, buildingIgnoreSurfaceLimit);
             this.SyncUguiToggleFromField(c.RangeToggle, buildingIgnoreRangeHeight);
             this.SyncUguiToggleFromField(c.OverlapToggle, this.bypassOverlapEnabled);
+            this.SyncUguiToggleFromField(c.FreePlaceRotateToggle, this.freePlaceRotateUnlockEnabled);
 
             if (c.AngleSlider != null && Mathf.RoundToInt(c.AngleSlider.value) != this.buildingFreeAngleStep)
             {
@@ -836,6 +851,22 @@ namespace HeartopiaMod
 
         // The picker builds itself lazily on the first frame a dyeable object is focused, so this
         // only flips the flag — no window work from a UI callback.
+        // Flag only; FreePlaceRotateUnlockFeature's tick does the Mono work on its next pass.
+        private void OnUguiBuildingFreePlaceRotateToggled(bool value)
+        {
+            if (value == this.freePlaceRotateUnlockEnabled)
+            {
+                return;
+            }
+
+            this.SetFreePlaceRotateUnlock(value);
+            this.AddMenuNotification(
+                value ? "Free place & rotate unlocked — refocus the object, then pick Free in the build bar"
+                      : "Free place & rotate back to the game's blacklist",
+                value ? new Color(0.55f, 0.88f, 1f) : new Color(0.85f, 0.85f, 0.85f));
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
         private void OnUguiBuildingDyePickerToggled(bool value)
         {
             if (value == this.furnitureDyePickerEnabled)

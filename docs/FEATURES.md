@@ -578,6 +578,39 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
 - Toggle persisted in config (`paintStyleUnlockEnabled`). Implementation:
   `PaintStyleUnlockFeature.cs`; UI row in `HeartopiaComplete.UguiBuildingContent.cs`.
 
+### Building — Free place & rotate for all items (Free Placement list: Self → Building and the floating Move Panel)
+
+- Lets the game's own **Free** rotation (1° steps) and free placement be chosen for the items it
+  blacklists from them: whole entity types `wall` (209), `floor` (214), `quarterwall` (227),
+  `lighting` (55), plus 360 staticIds (77 staircases, fan terraces, platforms, pools, cubes,
+  windows, pillars, glass floors, Ice Rink Flooring 35383 …) — table `FreePlaceAndRotateBlackList`.
+- The rotation is snapped once, at confirm, in `BuildSingle.GenConfirmOption` with
+  `EffectiveAnglePrecision(element.anglePrecision, settings.rotatePrecision)`, which returns **1**
+  whenever the mode is Free, and `GodCraftMode.OnUpdate` copies `HomelandSystem.rotatePrecision`
+  into those settings every frame. The blacklist is enforced **only in the UI**
+  (`BuildStatusPanel` / `SimulationBuildStatusPanel.ApplyFreePlaceRotateBlackList`, reached from
+  `EnableTarget`), which forces Free → Fixed90 for a listed object. `EnableTarget` skips that for a
+  group — the gap a player used to leave Ice Rink Flooring at 30° with `anglePrecision` 90.
+- Implementation: no detour. The two `HashSet<int>` lists on `BuildModule`
+  (`_freePlaceRotateStaticIdBlackList`, `_freePlaceRotateEntityTypeBlackList`) are emptied with
+  `Clear()` after first calling the game's own `InitFreePlaceRotateBlackList()` (so its table
+  source is recorded and the lists are not rebuilt behind our back). A 1 Hz count check re-clears.
+  `IsFreePlaceRotateBlackListed` is not detoured on purpose: it has two one-argument overloads,
+  `(int)` and `(IBuildObject)`, that name + arity cannot tell apart. Switching off calls the init
+  once, restoring the lists from the table.
+- One list gates both free rotation and free placement, so both become available; neither is
+  forced. Refocus the object after toggling — the panel re-evaluates on the next focus change.
+- **What keeps a free angle after save (verified live):** Ice Rink Flooring (35383) — yes;
+  walls — yes; plain **Flooring — no**, it snaps back to 90°. Other listed items are untested.
+  The wire carries whole degrees (`ToBuildingRotValue` packs `(x<<20)|(z<<10)|y`), so the floor
+  snap is the storage format, not the client: a plain floor is kept as
+  `ServerLocationCollection` / `LocationCollection` — an axis-aligned box in grid cells plus
+  `rotation /= 90` (integer division) — and `BakeRenderingProcessorFloor` draws it with
+  `Quaternion.identity`, using rotation only to pick the plank direction. Do NOT generalise this to
+  all structure: `BakeRenderingProcessorWall` decodes the same `LocationCollection`, yet walls keep
+  their angle, so off-grid walls evidently end up in another representation (not yet traced).
+- Toggle persisted as `freePlaceRotateUnlockEnabled`. Implementation: `FreePlaceRotateUnlockFeature.cs`.
+
 ### Building — Free colour picker for furniture (Self → Building sub-tab)
 
 - A floating window with a graphics-app picker (SV square + hue strip + hex field + the item's own
