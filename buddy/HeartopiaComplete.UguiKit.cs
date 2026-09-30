@@ -136,9 +136,9 @@ namespace HeartopiaMod
         private const float UguiGameLanguageProbeSeconds = 10f;
         // Every TMP_FontAsset the bundle sweep pulled off disk (held as Object — TMP type refs stay
         // in UguiKitTmp.cs). Two jobs: it is the set of assets this mod OWNS and may mutate, and it
-        // is what later per-script hunts search instead of re-opening bundles — AssetBundle
-        // .LoadFromFile throws for a bundle that is already loaded, including by us, so the disk
-        // sweep is once per session while the scripts needing a font are discovered over time.
+        // is what later per-script hunts search instead of re-opening bundles — the disk sweep is
+        // once per session (and releases every bundle it opened, so the game can still load them)
+        // while the scripts needing a font are discovered over time.
         private readonly System.Collections.Generic.List<UnityObject> uguiKitBundleFonts =
             new System.Collections.Generic.List<UnityObject>();
         private bool uguiKitBundleSweepDone;

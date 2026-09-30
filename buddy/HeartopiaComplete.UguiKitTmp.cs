@@ -509,11 +509,18 @@ namespace HeartopiaMod
         // source fonts. Already-loaded bundles throw and are skipped.
         //
         // The sweep runs ONCE per session and harvests EVERY font asset it meets into
-        // uguiKitBundleFonts, whether or not it matches the caller's probe. Two reasons, both
-        // learned the hard way (2026-08-09): a later hunt for a different script cannot re-open
-        // these bundles (LoadFromFile throws for anything already loaded — including by us), and
-        // the Korean face is precisely the one that fails a Han probe, so probe-filtered harvesting
-        // threw away the asset the next hunt needed.
+        // uguiKitBundleFonts, whether or not it matches the caller's probe: the Korean face is
+        // precisely the one that fails a Han probe, so probe-filtered harvesting threw away the
+        // asset the next hunt needed (2026-08-09).
+        //
+        // ⚠️ Every bundle the sweep opened is RELEASED with Unload(false) before it returns. Unity
+        // refuses a second load of an open bundle, so holding them made every font bundle the game
+        // had not opened yet unloadable FOR THE GAME: its ResManager failed on Quicksand
+        // (fonts_a2b35e68) after a switch to English and every legacy Text got a null font — all
+        // game text blank (CN build, 2026-10-01; XdtownRounded fonts_6bbc2376 failed the same way
+        // with no switch at all). Unload(false) keeps every object already loaded from the bundle,
+        // so the harvested assets stay valid; their sourceFontFile is touched first so the TTF a
+        // dynamic SDF asset rasterizes from is resolved while its bundle is still open.
         [MethodImpl(MethodImplOptions.NoInlining)]
         private void UguiKitTmpSweepFontBundles(System.Text.StringBuilder report)
         {
@@ -547,56 +554,79 @@ namespace HeartopiaMod
 
             int loaded = 0;
             report.Append("bundles=").Append(files.Length).Append(' ');
-            // Both passes always run to completion — the sweep is once per session, so stopping at
-            // the first usable font would strand every other face where no later pass can reach it.
-            for (int pass = 0; pass < 2; pass++)
+            // Kept open until both passes are done (an SDF asset resolves its source TTF only while
+            // that bundle is loaded), then released in the finally below.
+            System.Collections.Generic.List<AssetBundle> opened = new System.Collections.Generic.List<AssetBundle>();
+            try
             {
-                for (int i = 0; i < files.Length; i++)
+                // Both passes always run to completion — the sweep is once per session, so stopping at
+                // the first usable font would strand every other face where no later pass can reach it.
+                for (int pass = 0; pass < 2; pass++)
                 {
-                    long len = 0;
-                    try { len = new System.IO.FileInfo(files[i]).Length; } catch { }
-                    bool big = len > 262144;
-                    if (pass == 0 ? !big : big)
+                    for (int i = 0; i < files.Length; i++)
                     {
-                        continue; // pass 0 = source fonts, pass 1 = the small SDF bundles
-                    }
-                    AssetBundle ab = null;
-                    try { ab = AssetBundle.LoadFromFile(files[i]); }
-                    catch { continue; }        // already loaded by the game, or undecryptable
-                    if (ab == null)
-                    {
-                        continue;
-                    }
-                    loaded++;
-                    if (pass == 0)
-                    {
-                        continue;              // source fonts: loading them is the whole point
-                    }
-                    try
-                    {
-                        var assets = ab.LoadAllAssets(Il2CppInterop.Runtime.Il2CppType.Of<TMP_FontAsset>());
-                        if (assets == null)
+                        long len = 0;
+                        try { len = new System.IO.FileInfo(files[i]).Length; } catch { }
+                        bool big = len > 262144;
+                        if (pass == 0 ? !big : big)
+                        {
+                            continue; // pass 0 = source fonts, pass 1 = the small SDF bundles
+                        }
+                        AssetBundle ab = null;
+                        try { ab = AssetBundle.LoadFromFile(files[i]); }
+                        catch { continue; }        // already loaded by the game, or undecryptable
+                        if (ab == null)
                         {
                             continue;
                         }
-                        for (int k = 0; k < assets.Length; k++)
+                        opened.Add(ab);
+                        loaded++;
+                        if (pass == 0)
                         {
-                            TMP_FontAsset fa = (assets[k] != null) ? assets[k].TryCast<TMP_FontAsset>() : null;
-                            if (fa == null)
+                            continue;              // source fonts: loading them is the whole point
+                        }
+                        try
+                        {
+                            var assets = ab.LoadAllAssets(Il2CppInterop.Runtime.Il2CppType.Of<TMP_FontAsset>());
+                            if (assets == null)
                             {
                                 continue;
                             }
-                            // Harvested unconditionally — see this method's header. Which of these
-                            // covers which script is a question each hunt asks for itself.
-                            if (!this.UguiKitTmpBundleFontsContains(fa))
+                            for (int k = 0; k < assets.Length; k++)
                             {
-                                this.uguiKitBundleFonts.Add(fa);
-                                report.Append("bundleFont='").Append(fa.name ?? "?").Append("' ");
+                                TMP_FontAsset fa = (assets[k] != null) ? assets[k].TryCast<TMP_FontAsset>() : null;
+                                if (fa == null)
+                                {
+                                    continue;
+                                }
+                                // Harvested unconditionally — see this method's header. Which of these
+                                // covers which script is a question each hunt asks for itself.
+                                if (!this.UguiKitTmpBundleFontsContains(fa))
+                                {
+                                    this.uguiKitBundleFonts.Add(fa);
+                                    report.Append("bundleFont='").Append(fa.name ?? "?").Append("' ");
+                                }
+                                // Resolve the source TTF now, while its bundle is still open.
+                                try { _ = fa.sourceFontFile; } catch { }
                             }
                         }
+                        catch { }
+                    }
+                }
+            }
+            finally
+            {
+                int released = 0;
+                for (int i = 0; i < opened.Count; i++)
+                {
+                    try
+                    {
+                        opened[i].Unload(false);
+                        released++;
                     }
                     catch { }
                 }
+                report.Append("bundlesReleased=").Append(released).Append(' ');
             }
             report.Append("bundlesLoaded=").Append(loaded)
                 .Append(" bundleFonts=").Append(this.uguiKitBundleFonts.Count).Append(' ');

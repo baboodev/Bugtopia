@@ -304,6 +304,36 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
 - Log: `[SelfRespawn] the server removed our player (respawn #n)` / `player back (…)`.
   Source: `buddy/SelfRespawnGuardFeature.cs`.
 
+### Untranslated game strings (always on)
+
+- Some game strings exist only in Chinese: in `designTable.db` 4927 of 41826 rows have no `en` text
+  (same in the global and the China build, 2026-09-30). The game shows those as `LOC:<hash>`, e.g. the
+  task conditions of "Scenic Dreamweave" (`LOC:1306391685  0/1`). The mod shows the Chinese original
+  instead — the same fallback the game's own `Localize` applies to an empty string.
+- How: once per world load, one query on the game's own `designTable.db` connection lists the rows
+  missing the current language, decrypts their `zhHans` text with the game's `GetDecryptedData`, and
+  puts it into the design table's lookup cache (`LocalizationDb._cache`, keyed by hash). No hook: the
+  native `GetText` returns the cached text like any translation. ~27 ms for 4927 rows. Labels already on
+  screen are re-resolved once; a language switch re-enters the world and refills for the new language.
+  Nothing happens while the game language is Simplified Chinese.
+- Log: `[LocFallback] language 2: column en: N untranslated strings now show the Chinese original, …`.
+  Source: `buddy/LocalizationFallbackFeature.cs`.
+
+### Language switch button on the China build (always on)
+
+- The China build (TapTap CN) hides Settings → "切换语言 / Switch language": `SettingPanel.OnStart`
+  shows it only when `LoginSystem.IsOverSea`, and that build never sets the flag. The button, its
+  handler, `LanguageSwitchPanel`, all 12 languages and every translation are otherwise intact.
+- The mod re-activates the button on `UIPanelOpenEvent` (dispatched right after `OnStart`), found by
+  its hierarchy path under `XDUIRoot/Full/SettingPanel(Clone)`. On the global build it is already
+  visible and nothing happens. The login-screen language button is not touched (its visibility follows
+  login-state changes that raise no event).
+- Picking a language re-enters the world through the game's own loading screen. English needs the
+  font-sweep fix in `UguiKitTmp` (the mod must not hold the game's `fonts_*.ab`), and the strings the
+  game never translated show in Chinese (previous section).
+- Log: `[LanguageButton] settings language button was hidden by the game (China build) — shown.`
+  Source: `buddy/LanguageSwitchButtonFeature.cs`.
+
 ### Skip Craft / Dye Animations
 
 - Cuts the character animation that plays after the server confirms a craft or a dye, so the

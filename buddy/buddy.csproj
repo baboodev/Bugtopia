@@ -457,6 +457,8 @@
     <Compile Include="HeartopiaResourceVisualEsp.cs" />
     <Compile Include="HelperPaths.cs" />
     <Compile Include="InsectNetFarm.cs" />
+    <Compile Include="LanguageSwitchButtonFeature.cs" />
+    <Compile Include="LocalizationFallbackFeature.cs" />
     <Compile Include="LocalizationManager.cs" />
     <Compile Include="LodSettingsFeature.cs" />
     <Compile Include="GameLodFeature.cs" />
