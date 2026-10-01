@@ -236,12 +236,32 @@ namespace HeartopiaMod
             }
         }
 
-        // GameObject.Find with a full path only matches ACTIVE objects — exactly the semantics we
-        // want: a closed/unfocused panel (root deactivated) reads as "not there".
+        // Returns the panel root only while the panel is actually on screen. An active GameObject
+        // proves nothing: a closed or unfocused view keeps its root active and is hidden by
+        // UIViewBase.SetViewActive(false) -> canvas.enabled = false (or, canvas-less, moved to
+        // y=4000). Treating such a root as "open" left VehicleStatusPanel counted as a live mode
+        // panel after leaving a car, so the item-use (F) button stayed hidden in Free mode.
         private static GameObject PersistentHudFindPanelRoot(string panelName)
         {
-            return GameObject.Find(PersistentHudStatusLayerPath + panelName + "(Clone)")
+            GameObject root = GameObject.Find(PersistentHudStatusLayerPath + panelName + "(Clone)")
                 ?? GameObject.Find(PersistentHudStatusLayerPath + panelName);
+            return PersistentHudIsPanelVisible(root) ? root : null;
+        }
+
+        private static bool PersistentHudIsPanelVisible(GameObject root)
+        {
+            if (root == null || !root.activeInHierarchy)
+            {
+                return false;
+            }
+
+            Canvas canvas = root.GetComponent<Canvas>();
+            if (canvas != null)
+            {
+                return canvas.enabled;
+            }
+
+            return root.transform.localPosition.y < 2000f;
         }
 
         // Hide the mode panels' duplicated HUD widgets while our reopened StatusPanel is visible;
@@ -272,7 +292,7 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                if (panelRoot == null || !panelRoot.activeInHierarchy)
+                if (!PersistentHudIsPanelVisible(panelRoot))
                 {
                     node.SetActive(true);
                     this.persistentHudHiddenNodes.RemoveAt(i);
