@@ -478,6 +478,26 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
   is a Settings → Logging row.
 - Persisted; default off. Source: `buddy/InteractObstacleBypassFeature.cs`.
 
+### Push Snap Fix
+
+- Self tab toggle **Push items without the "too crowded" refusal** (default off). Makes the push
+  interaction on UGC pieces (chess pieces and other ChestMove items) work instead of refusing with
+  **"It's too crowded ahead. Try another direction!"** = `ErrorCode.CantMoveIfTooCrowded` (94157).
+- **Why the game refuses:** `CrafeMode_Moving.Input_ConfirmMoveTowards` re-detects the destination onto
+  the put-zone grid and demands the snapped XZ equal the requested one to 0.1 mm
+  (`XZ().AlmostZero()`, sqrMagnitude < 1e-8). Measured live 2026-10-01 in a home whose field root is
+  yawed 7.2°: the zone was found every time (`result` Success), yet millimetre rounding alone missed
+  by 0.2–0.7 mm even along the grid axes, and a piece standing at 45° to the floor grid missed by
+  4.3 cm. A tolerance artefact, not an obstacle.
+- **Lever:** one Mono NativeDetour on `BuildSystemBaseMode.RayDetection(in Ray, Vector3, Quaternion,
+  bool)` that calls the original, then — only for a `CrafeMode_Moving` instance (class read off the
+  vtable), `force == true`, `alignment.result == Success` and a snap of at most 0.1 m — sets the
+  alignment's XZ back to the requested destination. The push then runs the game's whole path (path
+  box-cast, confirm, save) and, because `ExecuteTask` succeeds, `CastSkill` plays the push animation.
+  Real refusals keep their own codes (`CantMoveIfObstacle` 94156, `MovingPathHasBlocked` 93200,
+  no zone at the destination), and a larger snap is left to the game.
+- Live status counts the pushes it let through. Source: `buddy/PushSnapFixFeature.cs`.
+
 ### Auto-learn Recipes
 
 - Learns every blueprint / cookbook / music sheet that lands in the backpack — no Learn animation,

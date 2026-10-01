@@ -437,6 +437,7 @@
     <Compile Include="InstantTeleportFeature.cs" />
     <Compile Include="SelfRespawnGuardFeature.cs" />
     <Compile Include="InteractObstacleBypassFeature.cs" />
+    <Compile Include="PushSnapFixFeature.cs" />
     <Compile Include="PetHeightLimitBypassFeature.cs" />
     <Compile Include="HeartopiaComplete.Config.cs" />
     <Compile Include="HeartopiaComplete.Gui.cs" />

@@ -127,6 +127,7 @@ namespace HeartopiaMod
             public Toggle CraftDirectSendToggle;
             public Toggle InteractObstacleToggle;
             public Toggle InteractBuildModeToggle;
+            public Toggle PushSnapFixToggle;
             public Toggle PetHeightLimitToggle;
             public Toggle BlockTutorialsToggle;
             public Toggle AutoLearnRecipesToggle;
@@ -418,6 +419,9 @@ namespace HeartopiaMod
             handle.InteractBuildModeToggle = this.CreateUguiCheckbox(scrollContent, "InteractBuildModeToggle",
                 this.L("Ignore build mode on the interaction target"), this.interactBuildModeBypassEnabled,
                 new System.Action<bool>(this.OnUguiSelfInteractBuildModeToggled));
+            handle.PushSnapFixToggle = this.CreateUguiCheckbox(scrollContent, "PushSnapFixToggle",
+                this.L("Push items without the \"too crowded\" refusal"), this.pushSnapFixEnabled,
+                new System.Action<bool>(this.OnUguiSelfPushSnapFixToggled));
             handle.PetHeightLimitToggle = this.CreateUguiCheckbox(scrollContent, "PetHeightLimitToggle",
                 this.L("Pet cats and dogs from any height"), this.petHeightLimitBypassEnabled,
                 new System.Action<bool>(this.OnUguiSelfPetHeightLimitToggled));
@@ -725,6 +729,12 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.PushSnapFixToggle != null)
+            {
+                PlaceUguiTopLeft(handle.PushSnapFixToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             if (handle.PetHeightLimitToggle != null)
             {
                 PlaceUguiTopLeft(handle.PetHeightLimitToggle.gameObject, rowX, yCur, rowW, 24f);
@@ -806,6 +816,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.CraftDirectSendToggle, this.craftDirectSendEnabled);
                 this.SyncUguiToggleFromField(handle.InteractObstacleToggle, this.interactObstacleBypassEnabled);
                 this.SyncUguiToggleFromField(handle.InteractBuildModeToggle, this.interactBuildModeBypassEnabled);
+                this.SyncUguiToggleFromField(handle.PushSnapFixToggle, this.pushSnapFixEnabled);
                 this.SyncUguiToggleFromField(handle.PetHeightLimitToggle, this.petHeightLimitBypassEnabled);
                 this.SyncUguiToggleFromField(handle.BlockTutorialsToggle, this.blockTutorials);
                 this.SyncUguiToggleFromField(handle.AutoLearnRecipesToggle, this.autoLearnRecipes);
@@ -1335,6 +1346,17 @@ namespace HeartopiaMod
                 return;
             }
             this.interactBuildModeBypassEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Flag only; PushSnapFixFeature's tick installs the hook on the world-ready gate.
+        private void OnUguiSelfPushSnapFixToggled(bool value)
+        {
+            if (value == this.pushSnapFixEnabled)
+            {
+                return;
+            }
+            this.SetPushSnapFixEnabled(value);
             try { this.SaveKeybinds(false); } catch { }
         }
 

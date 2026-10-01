@@ -312,6 +312,11 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Interact Obstacle Bypass", this.interactObstacleStatus));
             }
 
+            if (this.pushSnapFixEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Push Snap Fix", this.pushSnapFixStatus));
+            }
+
             if (this.interactBuildModeBypassEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Interact Build-Mode Bypass", this.interactBuildModeStatus));

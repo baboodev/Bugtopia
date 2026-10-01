@@ -261,6 +261,7 @@ namespace HeartopiaMod
             data.autoLikeOwnHome = this.autoLikeOwnHome;
             data.craftDirectSendEnabled = this.craftDirectSendEnabled;
             data.interactObstacleBypassEnabled = this.interactObstacleBypassEnabled;
+            data.pushSnapFixEnabled = this.pushSnapFixEnabled;
             data.interactBuildModeBypassEnabled = this.interactBuildModeBypassEnabled;
             data.petHeightLimitBypassEnabled = this.petHeightLimitBypassEnabled;
             data.persistentHudEnabled = this.persistentHudEnabled;
@@ -675,6 +676,7 @@ namespace HeartopiaMod
             this.autoLikeOwnHome = data.autoLikeOwnHome;
             this.craftDirectSendEnabled = data.craftDirectSendEnabled;
             this.interactObstacleBypassEnabled = data.interactObstacleBypassEnabled;
+            this.pushSnapFixEnabled = data.pushSnapFixEnabled;
             this.interactBuildModeBypassEnabled = data.interactBuildModeBypassEnabled;
             this.petHeightLimitBypassEnabled = data.petHeightLimitBypassEnabled;
             this.persistentHudEnabled = data.persistentHudEnabled;

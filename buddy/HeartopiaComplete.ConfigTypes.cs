@@ -260,6 +260,7 @@ namespace HeartopiaMod
             public bool autoLikeOwnHome;
             public bool craftDirectSendEnabled;
             public bool interactObstacleBypassEnabled;
+            public bool pushSnapFixEnabled;
             public bool interactBuildModeBypassEnabled;
             public bool petHeightLimitBypassEnabled;
             public bool persistentHudEnabled;
