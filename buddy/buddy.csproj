@@ -329,6 +329,7 @@
     <Compile Include="FishingCameraHudFeature.cs" />
     <Compile Include="ServerSideFishingFeature.cs" />
     <Compile Include="DailyQuestSubmitFeature.cs" />
+    <Compile Include="DailyQuestFurnitureSubmitFeature.cs" />
     <Compile Include="DailyClaimsAutoClaimFeature.cs" />
     <Compile Include="DailyClaimsFeature.cs" />
     <Compile Include="BirdPhotoSubmitFeature.cs" />

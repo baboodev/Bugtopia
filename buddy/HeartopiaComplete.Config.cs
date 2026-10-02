@@ -461,6 +461,7 @@ namespace HeartopiaMod
             data.autoSellAllMatchingStacks = this.autoSellAllMatchingStacks;
             data.autoSellFullStack = this.autoSellFullStack;
             data.dailyQuestSubmitSkipFiveStar = this.dailyQuestSubmitSkipFiveStar;
+            data.dailyQuestSubmitSkipFurniture = this.dailyQuestSubmitSkipFurniture;
             data.dailyClaimsAutoClaimEnabled = this.dailyClaimsAutoClaimEnabled;
             data.autoSellMatchFamily = this.autoSellMatchFamily;
             data.autoSellHideBagItems = this.autoSellHideBagItems;
@@ -951,6 +952,7 @@ namespace HeartopiaMod
             this.autoSellAllMatchingStacks = hasAutoSellConfig ? data.autoSellAllMatchingStacks : true;
             this.autoSellFullStack = hasAutoSellConfig ? data.autoSellFullStack : true;
             this.dailyQuestSubmitSkipFiveStar = data.dailyQuestSubmitSkipFiveStar;
+            this.dailyQuestSubmitSkipFurniture = data.dailyQuestSubmitSkipFurniture;
             // Opt-in: auto-claim sends server commands with no user action, so a config written by
             // an older build (where the field is absent → false) must stay off.
             this.dailyClaimsAutoClaimEnabled = data.dailyClaimsAutoClaimEnabled;

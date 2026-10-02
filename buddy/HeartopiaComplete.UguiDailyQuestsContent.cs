@@ -186,7 +186,10 @@ namespace HeartopiaMod
 
             // -------- Part 1: Daily Quest Submit --------
             public GameObject AutoSubmitButton;   // gate 1 (3-way)
+            public GameObject FurnitureSubmitButton; // gate 1 + its own panel flow; shown only with a ready furniture order
+            public int FurnitureSubmitShown = -1;    // -1 never composed; else 0/1
             public Toggle SkipFiveStarToggle;
+            public Toggle SkipFurnitureToggle;
             public GameObject Status1Label;
             public string Status1Shown;
 
@@ -348,12 +351,28 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.AutoSubmitButton, 8f, 8f, 240f, 32f);
             this.SetUguiButtonInteractable(handle.AutoSubmitButton, !this.IsUguiDailyQuestsSubmitBusy());
 
+            // Hand-picked furniture submit through the game's own selection panel
+            // (DailyQuestFurnitureSubmitFeature.cs). Same busy gate, plus its own open panel.
+            handle.FurnitureSubmitButton = this.CreateUguiPrimaryButton(scrollContent, "FurnitureSubmitButton",
+                this.L("Submit Furniture..."), new System.Action(this.OnUguiDailyQuestsFurnitureSubmitClicked));
+            PlaceUguiTopLeft(handle.FurnitureSubmitButton, 256f, 8f, 240f, 32f);
+            this.SetUguiButtonInteractable(handle.FurnitureSubmitButton,
+                !this.IsUguiDailyQuestsSubmitBusy() && !this.IsDailyFurnitureSubmitBusy());
+            // Hidden until the per-frame sync has an answer (the check needs AuraMono, not built here).
+            handle.FurnitureSubmitButton.SetActive(false);
+            handle.FurnitureSubmitShown = 0;
+
             // :1732-1746 — DrawSwitchToggle (L()s internally → one L here); flag +
             // SaveKeybinds(false) only, guarded on actual change.
             handle.SkipFiveStarToggle = this.CreateUguiCheckbox(scrollContent, "SkipFiveStarToggle",
                 this.L("Skip 5 Star Items"), this.dailyQuestSubmitSkipFiveStar,
                 new System.Action<bool>(this.OnUguiDailyQuestsSkipFiveStarToggled));
-            PlaceUguiTopLeft(handle.SkipFiveStarToggle.gameObject, 8f, 48f, 300f, 28f);
+            PlaceUguiTopLeft(handle.SkipFiveStarToggle.gameObject, 8f, 48f, 240f, 28f);
+
+            handle.SkipFurnitureToggle = this.CreateUguiCheckbox(scrollContent, "SkipFurnitureToggle",
+                this.L("Skip Furniture"), this.dailyQuestSubmitSkipFurniture,
+                new System.Action<bool>(this.OnUguiDailyQuestsSkipFurnitureToggled));
+            PlaceUguiTopLeft(handle.SkipFurnitureToggle.gameObject, 256f, 48f, 240f, 28f);
 
             // :1750-1752 — status (statusStyle; 520 wide role → panelW).
             handle.Status1Shown = this.dailyQuestSubmitLastStatus ?? string.Empty;
@@ -818,11 +837,20 @@ namespace HeartopiaMod
 
                 // Toggle re-sync (external IMGUI edits) — WithoutNotify only.
                 this.SyncUguiToggleFromField(handle.SkipFiveStarToggle, this.dailyQuestSubmitSkipFiveStar);
+                this.SyncUguiToggleFromField(handle.SkipFurnitureToggle, this.dailyQuestSubmitSkipFurniture);
 
                 // The THREE busy gates — the FULL live conditions recomputed EVERY gated frame
                 // (file header: coroutine refs change from background activity; a disabled
                 // button must re-enable on its own). SetUguiButtonInteractable self-diffs.
                 this.SetUguiButtonInteractable(handle.AutoSubmitButton, !this.IsUguiDailyQuestsSubmitBusy());
+                int furnitureShown = this.IsDailyFurnitureSubmitAvailable() ? 1 : 0;
+                if (furnitureShown != handle.FurnitureSubmitShown)
+                {
+                    handle.FurnitureSubmitShown = furnitureShown;
+                    handle.FurnitureSubmitButton.SetActive(furnitureShown == 1);
+                }
+                this.SetUguiButtonInteractable(handle.FurnitureSubmitButton,
+                    !this.IsUguiDailyQuestsSubmitBusy() && !this.IsDailyFurnitureSubmitBusy());
                 bool claimsBusy = this.IsUguiDailyQuestsClaimsBusy();
                 for (int i = 0; i < handle.ClaimsButtons.Length; i++)
                 {
@@ -887,6 +915,29 @@ namespace HeartopiaMod
         private void OnUguiDailyQuestsAutoSubmitClicked()
         {
             this.StartDailyQuestAutoSubmitItems(silent: false);
+        }
+
+        private void OnUguiDailyQuestsFurnitureSubmitClicked()
+        {
+            this.StartDailyFurnitureSubmitPanel();
+        }
+
+        // Same shape as the 5-star toggle below: flag + SaveKeybinds(false), guarded on change.
+        private void OnUguiDailyQuestsSkipFurnitureToggled(bool value)
+        {
+            if (value == this.dailyQuestSubmitSkipFurniture)
+            {
+                return;
+            }
+            this.dailyQuestSubmitSkipFurniture = value;
+            FeatureLog.Toggle(DailyFurnitureTag, value, "Skip Furniture");
+            try
+            {
+                this.SaveKeybinds(false);
+            }
+            catch
+            {
+            }
         }
 
         // DailyQuestSubmitFeature.cs:1732-1746 — flag + SaveKeybinds(false) in try/catch ONLY

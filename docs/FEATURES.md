@@ -1782,6 +1782,15 @@ Full pipeline: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#bag--warehouse-tr
 |---------|---------|
 | **Auto submit items** | For orders in **CanSubmit** state, builds `List<ItemNetPair>` on game Mono and calls `ClientSubmitTaskItem` / `ClientSubmitNpcTaskItem`. |
 | **Skip 5 Star Items** | Excludes 5★ stacks from submission (saved in config). |
+| **Skip Furniture** | Auto submit leaves furniture requests alone — orders whose target is `ItemTag[20]` (EntityTag "Furniture"; daily orders 8010911–8010951 / 8020611–8020651). Saved in config, default off. |
+| **Submit Furniture...** | Opens the game's own item-selection panel (`NewSubmitItemPanel.Open`, NpcSubmit mode) for the furniture order in CanSubmit state, so the player picks which pieces to hand over. Shown only while such an order exists: re-checked on `TaskStateChanged` for a furniture task, after any submit, on world change, and every 30 s while the page is open (the daily reset removes orders without a state event). |
+
+**Submit Furniture... — how the confirm is completed** (`DailyQuestFurnitureSubmitFeature.cs`): opened
+outside the NPC dialogue, the panel's Submit only dispatches `SubmitItemDialogueEvent { callback }` and
+nobody runs the callback. The mod hooks that event (lazily, on first use — one hook slot), treats a
+non-null callback as "Submit pressed" (Cancel sends it null), reads the selection off the pinned panel
+(`_slotDisplayDatas[].submitItem`, netId → count) and sends it through the same validated
+`ClientSubmitTaskItem` path auto submit uses. Log tag `[DailyFurniture]`.
 
 **Item selection (auto submit):**
 

@@ -484,6 +484,7 @@ namespace HeartopiaMod
             public bool autoSellAllMatchingStacks;
             public bool autoSellFullStack;
             public bool dailyQuestSubmitSkipFiveStar;
+            public bool dailyQuestSubmitSkipFurniture;
             public bool dailyClaimsAutoClaimEnabled;
             public bool autoSellMatchFamily;
             public bool autoSellHideBagItems;

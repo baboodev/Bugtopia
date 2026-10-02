@@ -36,7 +36,8 @@ namespace HeartopiaMod
 
         private void StartDailyQuestAutoSubmitItems(bool silent)
         {
-            if (this.dailyQuestSubmitCoroutine != null || this.birdPhotoSubmitCoroutine != null || this.dailyClaimsCoroutine != null)
+            if (this.dailyQuestSubmitCoroutine != null || this.birdPhotoSubmitCoroutine != null || this.dailyClaimsCoroutine != null
+                || this.dailyFurnitureCoroutine != null)
             {
                 if (!silent)
                 {
@@ -49,6 +50,7 @@ namespace HeartopiaMod
             this.DailyQuestSubmitLog(
                 "=== Auto Submit Daily Items started"
                 + " skip5star=" + this.dailyQuestSubmitSkipFiveStar
+                + " skipFurniture=" + this.dailyQuestSubmitSkipFurniture
                 + " silent=" + silent
                 + " ===");
             this.dailyQuestSubmitLastStatus = "Submitting daily item orders...";
@@ -250,6 +252,16 @@ namespace HeartopiaMod
                     continue;
                 }
 
+                // Furniture requests take any furniture, and the cheapest-first fill would hand over
+                // pieces the player meant to keep — "Skip Furniture" leaves them to the hand-picked
+                // panel (DailyQuestFurnitureSubmitFeature.cs).
+                if (this.dailyQuestSubmitSkipFurniture && this.IsDailyQuestFurnitureTask(taskId))
+                {
+                    this.DailyQuestSubmitLog("skip taskId=" + taskId + " furniture request (Skip Furniture on)");
+                    skipped++;
+                    continue;
+                }
+
                 if (!this.TryGetTableGameTaskRowAura(taskId, out DailyQuestGameTaskInfo info, out string configNote)
                     || info.SubmitTargetCount <= 0)
                 {
@@ -311,6 +323,7 @@ namespace HeartopiaMod
             }
 
             this.dailyQuestSubmitCoroutine = null;
+            this.dailyFurnitureAvailabilityDirty = true;
         }
 
         // Reads the task id / order key off every raw order pointer in one synchronous pass with the
