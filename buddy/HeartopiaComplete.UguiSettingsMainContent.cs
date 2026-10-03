@@ -414,7 +414,6 @@ namespace HeartopiaMod
             public GameObject CustomIdValueLabel;   // "Value" caption
             public InputField CustomIdField;
             public string CustomIdShownValue;
-            public Toggle ShowOverlayToggle;
             public Toggle BlockInputToggle;
 
             // PERFORMANCE
@@ -604,9 +603,6 @@ namespace HeartopiaMod
                 handle.CustomIdShownValue, 24,
                 new System.Action<string>(this.OnUguiSettingsMainCustomIdValueEdited));
 
-            handle.ShowOverlayToggle = this.CreateUguiCheckbox(behavior.transform, "ShowOverlayToggle",
-                this.L("Show Status Overlay"), this.showStatusOverlay,
-                new System.Action<bool>(this.OnUguiSettingsMainShowOverlayChanged));
             handle.BlockInputToggle = this.CreateUguiCheckbox(behavior.transform, "BlockInputToggle",
                 this.L("Block Input"), this.blockGameUiWhenMenuOpen,
                 new System.Action<bool>(this.OnUguiSettingsMainBlockInputChanged));
@@ -812,8 +808,6 @@ namespace HeartopiaMod
                 }
                 by += 34f;
             }
-            if (handle.ShowOverlayToggle != null) { PlaceUguiTopLeft(handle.ShowOverlayToggle.gameObject, 16f, by, innerW, 24f); }
-            by += 30f;
             if (handle.BlockInputToggle != null) { PlaceUguiTopLeft(handle.BlockInputToggle.gameObject, 16f, by, innerW, 24f); }
             by += 30f;
             float behaviorH = by + 4f;
@@ -1005,7 +999,6 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.AutoCloseToggle, this.autoCloseAnnouncementEnabled);
                 this.SyncUguiToggleFromField(handle.HideIdToggle, this.hideIdEnabled);
                 this.SyncUguiToggleFromField(handle.CustomIdToggle, this.customDisplayIdEnabled);
-                this.SyncUguiToggleFromField(handle.ShowOverlayToggle, this.showStatusOverlay);
                 this.SyncUguiToggleFromField(handle.BlockInputToggle, this.blockGameUiWhenMenuOpen);
                 this.SyncUguiToggleFromField(handle.FpsToggle, this.fpsBypassEnabled);
                 this.SyncUguiToggleFromField(handle.FpsWatchToggle, this.fpsWatchdogEnabled);
@@ -1344,6 +1337,33 @@ namespace HeartopiaMod
             else
             {
                 this.AddMenuNotification(this.L("Status overlay disabled"), new Color(0.88f, 0.6f, 0.6f));
+            }
+        }
+
+        private void OnUguiSettingsMainOverlayScaleChanged(float value)
+        {
+            float normalized = this.NormalizeUiScale(value);
+            float oldScale = this.GetStatusOverlayScale();
+            if (Math.Abs(normalized - oldScale) <= 0.001f)
+            {
+                return;
+            }
+            // ox/oy are canvas units. Screen offset is units * scale, so rewrite them with the
+            // scale change — including while the overlay is hidden, or a later open would use
+            // the old units against the new multiplier.
+            if (this.statusOverlayPositionSet)
+            {
+                float ratio = oldScale / normalized;
+                this.statusOverlayX *= ratio;
+                this.statusOverlayY *= ratio;
+            }
+            this.statusOverlayScale = normalized;
+            this.SaveKeybinds(false);
+            UguiStatusOverlaySettingsHandle handle = this.uguiStatusOverlaySettings;
+            if (handle != null)
+            {
+                this.SetUguiLabelText(handle.ScaleLabel,
+                    this.LF("Overlay Scale: {0}%", Mathf.RoundToInt(normalized * 100f)));
             }
         }
 

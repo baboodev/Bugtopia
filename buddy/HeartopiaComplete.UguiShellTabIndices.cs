@@ -60,6 +60,10 @@ namespace HeartopiaMod
         // array and every index above keeps its value.
         private const int UguiShellSettingsGameKeysSubIndex = 5; // "Game Keys" within Settings' subs
 
+        // Settings → Status Overlay. Appended so the indices above stay put. Show toggle, the
+        // overlay's own scale, and one checkbox per row the floating readout can draw.
+        private const int UguiShellSettingsStatusOverlaySubIndex = 6;
+
         // Self→Building + Building Move Panel (round 4, HeartopiaComplete.UguiBuildingContent.cs):
         // display position 0 carries internal id 0 (UguiShellInternalTabIds[0]) = IMGUI
         // selectedTab 0 = Self, whose sub array {"Main","Building","Fun","Privacy","Game UI"}

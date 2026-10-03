@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace HeartopiaMod
@@ -15,6 +16,103 @@ namespace HeartopiaMod
             public string Label;
             public string Summary;
             public List<LiveFeatureStatusDetail> Details;
+        }
+
+        // Every label CollectLiveFeatureStatusEntries can emit, in that order. The Settings
+        // page lists these; a label missing here still draws, but has no toggle.
+        private static readonly string[] StatusOverlayEntryLabels =
+        {
+            "Radar",
+            "Foraging",
+            "Aura Farm",
+            "Combined Farm",
+            "Fishing Farm",
+            "Insect Farm",
+            "Bird Farm",
+            "Mass Cook",
+            "Auto Sell",
+            "Homeland Farm",
+            "Auto Puzzle",
+            "Pet Care",
+            "Auto Ice Skating",
+            "Ice Skating Seq",
+            "Auto Snow",
+            "Speed",
+            "Noclip",
+            "Bypass Overlap",
+            "Bird Vacuum",
+            "Auto Join Friend",
+            "Anti AFK",
+            "Fast Bubble Gen",
+            "Bubbles Spawn At Player",
+            "Auto Collect Bubbles",
+            "Aura Farm: Dog Poop",
+            "Auto-claim Animal Gifts",
+            "Bunny Hop",
+            "Analog Move",
+            "Skip Show Off",
+            "Quiet Popups",
+            "Quiet BP Reward Popup",
+            "Quiet Animal Cards",
+            "Auto-Claim Event Rewards",
+            "Hide Event Results Panel",
+            "Emote Unlock",
+            "Duo Unlock",
+            "Paint Styles",
+            "Free Rotate Unlock",
+            "Foraging Anim",
+            "Skip Craft/Dye Anim",
+            "Auto-learn Recipes",
+            "Auto-like Home",
+            "Direct Craft Send",
+            "Interact Obstacle Bypass",
+            "Push Snap Fix",
+            "Interact Build-Mode Bypass",
+            "Pet Height Limit Bypass",
+            "Minimap Zoom",
+            "Persistent HUD",
+            "Stranger Chat Bypass",
+            "Chat Translate Unlock",
+        };
+
+        private static readonly HashSet<string> StatusOverlayEntryLabelSet =
+            new HashSet<string>(StatusOverlayEntryLabels, StringComparer.Ordinal);
+
+        // Labels the user turned off on Settings → Status Overlay. Empty = show everything.
+        private readonly HashSet<string> statusOverlayHiddenLabels =
+            new HashSet<string>(StringComparer.Ordinal);
+        private bool statusOverlayCatalogGapLogged;
+
+        private List<LiveFeatureStatusEntry> CollectStatusOverlayEntries()
+        {
+            List<LiveFeatureStatusEntry> all = this.CollectLiveFeatureStatusEntries();
+            if (this.statusOverlayHiddenLabels.Count == 0 && this.statusOverlayCatalogGapLogged)
+            {
+                return all;
+            }
+
+            List<LiveFeatureStatusEntry> shown = new List<LiveFeatureStatusEntry>(all.Count);
+            for (int i = 0; i < all.Count; i++)
+            {
+                LiveFeatureStatusEntry entry = all[i];
+                if (entry == null)
+                {
+                    continue;
+                }
+                if (!this.statusOverlayCatalogGapLogged
+                    && !string.IsNullOrEmpty(entry.Label)
+                    && !StatusOverlayEntryLabelSet.Contains(entry.Label))
+                {
+                    this.statusOverlayCatalogGapLogged = true;
+                    ModLogger.Msg("[UguiStatusOverlay] \"" + entry.Label
+                        + "\" has no Settings toggle — add it to StatusOverlayEntryLabels");
+                }
+                if (string.IsNullOrEmpty(entry.Label) || !this.statusOverlayHiddenLabels.Contains(entry.Label))
+                {
+                    shown.Add(entry);
+                }
+            }
+            return shown;
         }
 
         private List<LiveFeatureStatusEntry> CollectLiveFeatureStatusEntries()

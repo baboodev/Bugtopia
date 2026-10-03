@@ -43,6 +43,22 @@ namespace HeartopiaMod
             return (float)Screen.height / Mathf.Max(scale, 0.001f);
         }
 
+        // Status overlay only. Not GetUiScale: the overlay has its own persisted multiplier.
+        private float GetStatusOverlayScale()
+        {
+            return this.NormalizeUiScale(this.statusOverlayScale > 0f ? this.statusOverlayScale : 1f);
+        }
+
+        private float GetStatusOverlayLogicalWidth()
+        {
+            return (float)Screen.width / Mathf.Max(this.GetStatusOverlayScale(), 0.001f);
+        }
+
+        private float GetStatusOverlayLogicalHeight()
+        {
+            return (float)Screen.height / Mathf.Max(this.GetStatusOverlayScale(), 0.001f);
+        }
+
 
         private float GetUiScale()
         {
@@ -127,7 +143,7 @@ namespace HeartopiaMod
 
         private float GetStatusOverlayHeight()
         {
-            List<LiveFeatureStatusEntry> entries = this.CollectLiveFeatureStatusEntries();
+            List<LiveFeatureStatusEntry> entries = this.CollectStatusOverlayEntries();
             const float chrome = 38f + 36f + 28f;
             if (entries.Count == 0)
             {
@@ -154,7 +170,7 @@ namespace HeartopiaMod
                 maxTextLength = Math.Max(maxTextLength, text.Trim().Length);
             }
 
-            List<LiveFeatureStatusEntry> entries = this.CollectLiveFeatureStatusEntries();
+            List<LiveFeatureStatusEntry> entries = this.CollectStatusOverlayEntries();
             this.ConsiderLiveFeatureStatusTextLengths(entries, Consider);
 
             if (maxTextLength <= 0)
@@ -163,7 +179,7 @@ namespace HeartopiaMod
             }
 
             float width = 228f + Mathf.Max(0f, (maxTextLength - 14) * 5.6f);
-            return Mathf.Clamp(width, 228f, Mathf.Min(420f, this.GetLogicalScreenWidth() - 16f));
+            return Mathf.Clamp(width, 228f, Mathf.Min(420f, this.GetStatusOverlayLogicalWidth() - 16f));
         }
 
 

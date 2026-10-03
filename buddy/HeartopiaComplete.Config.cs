@@ -429,6 +429,11 @@ namespace HeartopiaMod
             data.autoCloseAnnouncementEnabled = this.autoCloseAnnouncementEnabled;
             data.maxAutoEatAttempts = this.maxAutoEatAttempts;
             data.showStatusOverlay = this.showStatusOverlay;
+            data.statusOverlayScale = this.GetStatusOverlayScale();
+            data.statusOverlayPositionSet = this.statusOverlayPositionSet;
+            data.statusOverlayX = this.statusOverlayX;
+            data.statusOverlayY = this.statusOverlayY;
+            data.statusOverlayHidden = new List<string>(this.statusOverlayHiddenLabels);
             data.hideIdEnabled = this.hideIdEnabled;
             data.customDisplayIdEnabled = this.customDisplayIdEnabled;
             data.customDisplayId = this.NormalizeCustomId(this.customDisplayId);
@@ -908,6 +913,22 @@ namespace HeartopiaMod
             this.autoCloseAnnouncementEnabled = data.autoCloseAnnouncementEnabled;
             this.maxAutoEatAttempts = data.maxAutoEatAttempts;
             this.showStatusOverlay = data.showStatusOverlay;
+            this.statusOverlayScale = this.NormalizeUiScale(data.statusOverlayScale > 0f ? data.statusOverlayScale : 1f);
+            this.statusOverlayPositionSet = data.statusOverlayPositionSet;
+            this.statusOverlayX = data.statusOverlayX;
+            this.statusOverlayY = data.statusOverlayY;
+            this.statusOverlayHiddenLabels.Clear();
+            if (data.statusOverlayHidden != null)
+            {
+                for (int i = 0; i < data.statusOverlayHidden.Count; i++)
+                {
+                    string hiddenLabel = data.statusOverlayHidden[i];
+                    if (!string.IsNullOrEmpty(hiddenLabel))
+                    {
+                        this.statusOverlayHiddenLabels.Add(hiddenLabel);
+                    }
+                }
+            }
             this.hideIdEnabled = data.hideIdEnabled;
             this.customDisplayId = this.NormalizeCustomId(data.customDisplayId);
             this.customDisplayIdEnabled = data.customDisplayIdEnabled || !string.IsNullOrEmpty(this.customDisplayId);
@@ -1184,6 +1205,30 @@ namespace HeartopiaMod
                         else if (line.Contains("notificationsEnabled")) this.notificationsEnabled = GetJsonInt(line, "\"notificationsEnabled\":") != 0;
                         else if (line.Contains("blockGameUiWhenMenuOpen")) this.blockGameUiWhenMenuOpen = GetJsonInt(line, "\"blockGameUiWhenMenuOpen\":") != 0;
                         else if (line.Contains("showStatusOverlay")) this.showStatusOverlay = GetJsonInt(line, "\"showStatusOverlay\":") != 0;
+                        else if (line.Contains("statusOverlayScale"))
+                        {
+                            float parsedOverlayScale = GetJsonFloat(line, "\"statusOverlayScale\":");
+                            this.statusOverlayScale = this.NormalizeUiScale(parsedOverlayScale > 0f ? parsedOverlayScale : 1f);
+                        }
+                        else if (line.Contains("statusOverlayPositionSet")) this.statusOverlayPositionSet = GetJsonInt(line, "\"statusOverlayPositionSet\":") != 0;
+                        else if (line.Contains("statusOverlayX")) this.statusOverlayX = GetJsonFloat(line, "\"statusOverlayX\":");
+                        else if (line.Contains("statusOverlayY")) this.statusOverlayY = GetJsonFloat(line, "\"statusOverlayY\":");
+                        else if (line.Contains("statusOverlayHidden"))
+                        {
+                            this.statusOverlayHiddenLabels.Clear();
+                            string hiddenRaw = GetJsonString(line, "\"statusOverlayHidden\":");
+                            if (!string.IsNullOrEmpty(hiddenRaw))
+                            {
+                                string[] hiddenParts = hiddenRaw.Split('|');
+                                for (int hi = 0; hi < hiddenParts.Length; hi++)
+                                {
+                                    if (!string.IsNullOrEmpty(hiddenParts[hi]))
+                                    {
+                                        this.statusOverlayHiddenLabels.Add(hiddenParts[hi]);
+                                    }
+                                }
+                            }
+                        }
                         else if (line.Contains("maxAutoEatAttempts")) this.maxAutoEatAttempts = GetJsonInt(line, "\"maxAutoEatAttempts\":");
                         else if (line.Contains("autoClickStartEnabled")) this.autoClickStartEnabled = GetJsonInt(line, "\"autoClickStartEnabled\":") != 0;
                         else if (line.Contains("hideIdEnabled")) this.hideIdEnabled = GetJsonInt(line, "\"hideIdEnabled\":") != 0;
@@ -1343,6 +1388,11 @@ namespace HeartopiaMod
             this.gameLodTextureBudgetMb = 2048;
             this.gameLodHlodMult = 2f;
             this.showStatusOverlay = false;
+            this.statusOverlayScale = 1f;
+            this.statusOverlayPositionSet = false;
+            this.statusOverlayX = 0f;
+            this.statusOverlayY = 0f;
+            this.statusOverlayHiddenLabels.Clear();
             this.SaveKeybinds(false);
             this.AddMenuNotification(this.L("Defaults restored (Toggle Menu: Insert)"), new Color(1f, 0.75f, 0.75f));
         }

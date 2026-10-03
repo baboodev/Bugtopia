@@ -11,33 +11,29 @@ namespace HeartopiaMod
     // ============================================================================================
     // UGUI STATUS OVERLAY — Phase 2d (migration plan: cosmic-waddling-rainbow.md). The UGUI twin
     // of DrawStatusOverlay (HeartopiaComplete.UiKitPrimitives.cs:1352) + its caller block in
-    // HeartopiaComplete.Gui.cs:106-125: a fixed-position (left edge, vertically centered,
-    // clamped on-screen), content-sized readout driven by the persisted showStatusOverlay flag —
-    // completely independent of showMenu/the shell.
+    // HeartopiaComplete.Gui.cs:106-125: a content-sized readout driven by the persisted
+    // showStatusOverlay flag — completely independent of showMenu/the shell. Until the user
+    // drags it, it sits on the left edge, vertically centered, clamped on-screen.
     //
     // Deliberately NOT built through CreateUguiWindow: that factory bakes in center-anchoring and
-    // a draggable title bar this overlay must not have (the IMGUI version has no drag, no title
-    // bar, no close button). Instead: a minimal dedicated Canvas + panel, in the spirit of
-    // EnsureModClickBlockerOverlay (HeartopiaComplete.CameraInput.cs), composed from individual
-    // kit label/image factories.
+    // its own title bar. This overlay keeps the header strip the layout already draws and polls
+    // that rect for a drag, the same way ProcessUguiWindowDrag polls a title bar.
     //
     // Hard invariants:
     //  - sortingOrder 29300 — inside the mod band (above the 20000 click-blocker, below the
     //    30000 Dropdown-popup ceiling; see the HeartopiaComplete.UguiKit.cs file header), and
     //    distinct from Shell (29400) / PoC (29500).
-    //  - ZERO raycast surface: no GraphicRaycaster on the canvas AND raycastTarget=false on every
-    //    Image/label (the kit factories default to false and nothing here opts in). IMGUI's
-    //    version is pure rendered pixels — a raycastable UGUI twin would newly intercept clicks
-    //    meant for the game world, a regression IMGUI could never cause.
-    //  - NOT registered with the input-ownership registry (HeartopiaComplete.CameraInput.cs) —
-    //    read-only chrome with nothing to protect, exactly like the IMGUI version was never part
-    //    of UpdateGameUiClickBlockState/ShouldBlockGameplayInput.
-    //  - Sizing reuses GetStatusOverlayWidth()/GetStatusOverlayHeight() verbatim and the canvas
-    //    scaleFactor = GetUiScale() (the same value IMGUI's GUI.matrix uses), so 1 canvas unit
-    //    = 1 IMGUI logical unit and the ox/oy clamp formula ports 1:1.
+    //  - No GraphicRaycaster on this canvas, and raycastTarget stays false. The drag hit test is
+    //    RectangleContainsScreenPoint. Game clicks are blocked only while the pointer is on the
+    //    header or a drag is in progress, via the floating input-ownership entry below — the body
+    //    of the readout still lets clicks through to the world.
+    //  - Sizing reuses GetStatusOverlayWidth()/GetStatusOverlayHeight() and the canvas
+    //    scaleFactor = GetStatusOverlayScale() (its own persisted multiplier, not GetUiScale()).
+    //    Width and the ox/oy clamp use Screen / that same scale, so 1 canvas unit stays one
+    //    overlay logical unit.
     //
     // Refresh strategy: content (and size/position) rebuilds only when a cheap signature over
-    // CollectLiveFeatureStatusEntries() changes OR the screen size / UI scale changes; the FPS
+    // CollectLiveFeatureStatusEntries() changes OR the screen size / overlay scale changes; the FPS
     // footer label updates every frame from the SAME statusOverlaySmoothedFps/DisplayedFps/
     // nextStatusOverlayFpsRefreshAt fields both IMGUI drawers use (one smoothing state, ever).
     // Theme reload: registers its own "UguiStatusOverlay" rebuilder (idempotent by name) — unlike
@@ -56,6 +52,11 @@ namespace HeartopiaMod
         private float uguiStatusOverlayLastScale = -1f;
         private int uguiStatusOverlayLastScreenW = -1;
         private int uguiStatusOverlayLastScreenH = -1;
+        private RectTransform uguiStatusOverlayHeaderRt;
+        private bool uguiStatusOverlayDragActive;
+        private bool uguiStatusOverlayDragMoved;
+        private Vector2 uguiStatusOverlayDragLastMouse;
+        private int uguiStatusOverlayDragErrorCount;
 
         // ----------------------------------------------------------------------------------------
         // Per-frame driver (wired next to ProcessUguiShellOnUpdate/ProcessUguiPocOnUpdate in
@@ -76,6 +77,10 @@ namespace HeartopiaMod
             {
                 if (!this.showStatusOverlay)
                 {
+                    if (this.uguiStatusOverlayDragActive)
+                    {
+                        this.EndUguiStatusOverlayDrag();
+                    }
                     if (this.uguiStatusOverlayRoot != null && this.uguiStatusOverlayRoot.activeSelf)
                     {
                         this.uguiStatusOverlayRoot.SetActive(false);
@@ -101,6 +106,12 @@ namespace HeartopiaMod
                     // Live theme reload — own registration (idempotent by name): this canvas is
                     // not part of the shell/PoC builds, so no other rebuilder covers it.
                     this.RegisterUguiThemeRebuilder("UguiStatusOverlay", new System.Action(this.RebuildUguiStatusOverlayForTheme));
+                    // Floating, header-only. Closures read live fields: a theme rebuild replaces the rect.
+                    this.RegisterInputOwnershipSurface("UguiStatusOverlay", false,
+                        () => this.showStatusOverlay
+                            && this.uguiStatusOverlayRoot != null
+                            && this.uguiStatusOverlayRoot.activeSelf,
+                        () => this.IsUguiStatusOverlayHeaderGrabbed());
                 }
 
                 if (!this.uguiStatusOverlayRoot.activeSelf)
@@ -109,7 +120,7 @@ namespace HeartopiaMod
                 }
 
                 // Screen/scale reads are trivial — recheck alongside the entries diff each frame.
-                float scale = this.GetUiScale();
+                float scale = this.GetStatusOverlayScale();
                 bool metricsChanged = scale != this.uguiStatusOverlayLastScale
                     || Screen.width != this.uguiStatusOverlayLastScreenW
                     || Screen.height != this.uguiStatusOverlayLastScreenH;
@@ -118,7 +129,7 @@ namespace HeartopiaMod
                     this.uguiStatusOverlayCanvas.scaleFactor = scale;
                 }
 
-                List<LiveFeatureStatusEntry> entries = this.CollectLiveFeatureStatusEntries();
+                List<LiveFeatureStatusEntry> entries = this.CollectStatusOverlayEntries();
                 string signature = this.BuildLiveFeatureStatusSignature(entries);
                 if (metricsChanged || !string.Equals(signature, this.uguiStatusOverlaySignature, StringComparison.Ordinal))
                 {
@@ -132,6 +143,7 @@ namespace HeartopiaMod
                 // FPS footer: cheap single-label update every frame, shared smoothing fields.
                 this.TickStatusOverlayFpsShared();
                 this.SetUguiLabelText(this.uguiStatusOverlayFpsValue, this.GetStatusOverlayFpsDisplayText());
+                this.ProcessUguiStatusOverlayDrag();
             }
             catch (Exception ex)
             {
@@ -142,9 +154,9 @@ namespace HeartopiaMod
         }
 
         // Theme-change rebuild (registered via RegisterUguiThemeRebuilder): destroy + rebuild so
-        // every Image/label re-reads the live ui* theme fields. No window state to preserve (the
-        // overlay is fixed-position, content-sized); nulling the signature/metrics forces the
-        // driver to rebuild immediately — or lazily on next enable if currently hidden.
+        // every Image/label re-reads the live ui* theme fields. The dragged position lives in the
+        // config fields, not on the canvas. Nulling the signature/metrics forces the driver to
+        // rebuild immediately — or lazily on next enable if currently hidden.
         private void RebuildUguiStatusOverlayForTheme()
         {
             try
@@ -164,6 +176,8 @@ namespace HeartopiaMod
                 this.uguiStatusOverlayLastScale = -1f;
                 this.uguiStatusOverlayLastScreenW = -1;
                 this.uguiStatusOverlayLastScreenH = -1;
+                this.uguiStatusOverlayHeaderRt = null;
+                this.EndUguiStatusOverlayDrag();
 
                 this.ProcessUguiStatusOverlayOnUpdate(); // rebuild now if it should be showing
                 ModLogger.Msg("[UguiStatusOverlay] rebuilt for theme change");
@@ -193,7 +207,7 @@ namespace HeartopiaMod
                 canvas.renderMode = RenderMode.ScreenSpaceOverlay;
                 canvas.overrideSorting = true;
                 canvas.sortingOrder = 29300; // mod band (20000..30000); Shell=29400, PoC=29500
-                canvas.scaleFactor = this.GetUiScale();
+                canvas.scaleFactor = this.GetStatusOverlayScale();
                 // NO GraphicRaycaster — this canvas can never participate in pointer raycasts,
                 // which (with raycastTarget=false everywhere) is the hard guarantee that this
                 // read-only readout never intercepts a click meant for the game world.
@@ -250,16 +264,17 @@ namespace HeartopiaMod
             this.uguiStatusOverlayContent.Clear();
             this.uguiStatusOverlayFpsValue = null;
 
-            // --- Size + position: IMGUI caller block ported 1:1 (canvas units = logical units
-            // because scaleFactor = GetUiScale()). ---
+            // --- Size + position. Canvas units match overlay logical units because
+            // scaleFactor = GetStatusOverlayScale(), so the screen extent is Screen / that scale.
+            // A dragged position is reapplied; the centered formula runs only until the first drag.
             float ow = this.GetStatusOverlayWidth();
             float oh = this.GetStatusOverlayHeight();
-            float screenW = this.GetLogicalScreenWidth();
-            float screenH = this.GetLogicalScreenHeight();
-            float ox = Mathf.Clamp(16f, 8f, screenW - ow - 8f);
-            float oy = Mathf.Clamp((screenH - oh) * 0.5f, 72f, screenH - oh - 24f);
+            float ox;
+            float oy;
+            this.ResolveStatusOverlayPosition(ow, oh, out ox, out oy);
             GameObject panelGo = panelRt.gameObject;
             PlaceUguiTopLeft(panelGo, ox, oy, ow, oh);
+            this.uguiStatusOverlayHeaderRt = null;
 
             // --- Palette: DrawStatusOverlay's literals + live theme text/accent fields. ---
             Color textPrimary = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.98f);
@@ -298,6 +313,7 @@ namespace HeartopiaMod
             GameObject header = this.CreateUguiGo("Header", panelRt);
             PlaceUguiTopLeft(header, frameX + 1f, frameY + 1f, frameW - 2f, headerH);
             this.AddUguiImage(header, overlayHeaderFill, true, 1f);
+            this.uguiStatusOverlayHeaderRt = header.GetComponent<RectTransform>();
             this.uguiStatusOverlayContent.Add(header);
 
             GameObject headerLine = this.CreateUguiGo("HeaderLine", panelRt);
@@ -403,6 +419,134 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(fpsValue, frameX + 1f + 72f, footerY + 8f, footerW - 84f, 22f);
             this.uguiStatusOverlayContent.Add(fpsValue);
             this.uguiStatusOverlayFpsValue = fpsValue;
+        }
+
+        // Default seat is the old centered formula. After a drag, ox/oy are the persisted top-left
+        // in overlay logical units, clamped into the same margins the formula uses.
+        private void ResolveStatusOverlayPosition(float ow, float oh, out float ox, out float oy)
+        {
+            float screenW = this.GetStatusOverlayLogicalWidth();
+            float screenH = this.GetStatusOverlayLogicalHeight();
+            float maxX = screenW - ow - 8f;
+            float maxY = screenH - oh - 24f;
+            if (this.statusOverlayPositionSet)
+            {
+                ox = Mathf.Clamp(this.statusOverlayX, 8f, maxX);
+                oy = Mathf.Clamp(this.statusOverlayY, 72f, maxY);
+                this.statusOverlayX = ox;
+                this.statusOverlayY = oy;
+                return;
+            }
+
+            ox = Mathf.Clamp(16f, 8f, maxX);
+            oy = Mathf.Clamp((screenH - oh) * 0.5f, 72f, maxY);
+        }
+
+        // Saves only when the pointer actually moved, so a click on the header does not rewrite config.
+        private void EndUguiStatusOverlayDrag()
+        {
+            if (!this.uguiStatusOverlayDragActive)
+            {
+                return;
+            }
+            this.uguiStatusOverlayDragActive = false;
+            if (this.uguiStatusOverlayDragMoved)
+            {
+                this.uguiStatusOverlayDragMoved = false;
+                this.SaveKeybinds(false);
+            }
+        }
+
+        // True while a header drag is in progress, or the pointer is over the header strip.
+        // The body is deliberately not a grab: clicks there still reach the game.
+        private bool IsUguiStatusOverlayHeaderGrabbed()
+        {
+            if (this.uguiStatusOverlayDragActive)
+            {
+                return true;
+            }
+            if (!this.showStatusOverlay || this.uguiStatusOverlayHeaderRt == null
+                || this.uguiStatusOverlayRoot == null || !this.uguiStatusOverlayRoot.activeSelf)
+            {
+                return false;
+            }
+            try
+            {
+                Vector3 m = Input.mousePosition;
+                return RectTransformUtility.RectangleContainsScreenPoint(
+                    this.uguiStatusOverlayHeaderRt, new Vector2(m.x, m.y), null);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void ProcessUguiStatusOverlayDrag()
+        {
+            if (this.uguiStatusOverlayDragErrorCount >= 3 || this.uguiStatusOverlayPanelRt == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!this.uguiStatusOverlayDragActive)
+                {
+                    if (!Input.GetMouseButtonDown(0) || this.uguiStatusOverlayHeaderRt == null)
+                    {
+                        return;
+                    }
+                    Vector3 down = Input.mousePosition;
+                    Vector2 mouse = new Vector2(down.x, down.y);
+                    if (!RectTransformUtility.RectangleContainsScreenPoint(this.uguiStatusOverlayHeaderRt, mouse, null))
+                    {
+                        return;
+                    }
+                    this.uguiStatusOverlayDragActive = true;
+                    this.uguiStatusOverlayDragMoved = false;
+                    this.uguiStatusOverlayDragLastMouse = mouse;
+                    return;
+                }
+
+                if (!Input.GetMouseButton(0))
+                {
+                    this.EndUguiStatusOverlayDrag();
+                    return;
+                }
+
+                Vector3 now3 = Input.mousePosition;
+                Vector2 now = new Vector2(now3.x, now3.y);
+                Vector2 delta = new Vector2(now.x - this.uguiStatusOverlayDragLastMouse.x, now.y - this.uguiStatusOverlayDragLastMouse.y);
+                this.uguiStatusOverlayDragLastMouse = now;
+                if (delta.x == 0f && delta.y == 0f)
+                {
+                    return;
+                }
+                this.uguiStatusOverlayDragMoved = true;
+
+                // Mouse delta is screen pixels; anchoredPosition is canvas units.
+                float s = Mathf.Max(this.GetStatusOverlayScale(), 0.1f);
+                Vector2 pos = this.uguiStatusOverlayPanelRt.anchoredPosition;
+                pos.x += delta.x / s;
+                pos.y += delta.y / s;
+                float ow = this.uguiStatusOverlayPanelRt.sizeDelta.x;
+                float oh = this.uguiStatusOverlayPanelRt.sizeDelta.y;
+                this.statusOverlayPositionSet = true;
+                this.statusOverlayX = pos.x;
+                this.statusOverlayY = -pos.y;
+                float ox;
+                float oy;
+                this.ResolveStatusOverlayPosition(ow, oh, out ox, out oy);
+                this.uguiStatusOverlayPanelRt.anchoredPosition = new Vector2(ox, -oy);
+            }
+            catch (Exception ex)
+            {
+                this.EndUguiStatusOverlayDrag();
+                this.uguiStatusOverlayDragErrorCount++;
+                ModLogger.Msg("[UguiStatusOverlay] drag error (" + this.uguiStatusOverlayDragErrorCount
+                    + "/3, disabled at 3): " + ex.Message);
+            }
         }
 
         // ----------------------------------------------------------------------------------------

@@ -444,6 +444,15 @@ namespace HeartopiaMod
             public bool autoCloseAnnouncementEnabled;
             public int maxAutoEatAttempts;
             public bool showStatusOverlay;
+            // 0 in a file written before this slider existed. The loader treats that as 1 (100%),
+            // so an old config does not inherit uiScale.
+            public float statusOverlayScale = 1f;
+            // False until the user drags the header. X/Y are overlay logical units (top-left).
+            public bool statusOverlayPositionSet;
+            public float statusOverlayX;
+            public float statusOverlayY;
+            // Entry labels the user hid. Missing = show every row.
+            public List<string> statusOverlayHidden = new List<string>();
             public bool hideIdEnabled;
             public bool customDisplayIdEnabled;
             public string customDisplayId;

@@ -4045,6 +4045,13 @@ namespace HeartopiaMod
         private float nextRadarSettingsSaveAt = 0f;
         private bool blockGameUiWhenMenuOpen = false;
         private bool showStatusOverlay = false;
+        // Independent of uiScale. 1 = 100%. Missing/zero in an old config stays 1, not the menu scale.
+        private float statusOverlayScale = 1f;
+        // Set once the user drags the header. Until then the overlay keeps the centered formula.
+        // (0, 0) is a legal top-left, so the flag is the only "not placed yet" signal.
+        private bool statusOverlayPositionSet;
+        private float statusOverlayX;
+        private float statusOverlayY;
         private float blockInputReleaseUntil = 0f;
         private List<HeartopiaComplete.MenuNotification> menuNotifications = new List<HeartopiaComplete.MenuNotification>();
         private bool eventSystemBlockedByMenu = false;

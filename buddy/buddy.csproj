@@ -369,6 +369,7 @@
     <Compile Include="HeartopiaComplete.UguiResearchContent.cs" />
     <Compile Include="HeartopiaComplete.UguiOrderShopContent.cs" />
     <Compile Include="HeartopiaComplete.UguiSettingsMainContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiStatusOverlaySettings.cs" />
     <Compile Include="HeartopiaComplete.UguiKeybindsContent.cs" />
     <Compile Include="HeartopiaComplete.UguiThemeContent.cs" />
     <Compile Include="HeartopiaComplete.UguiTeleportContent.cs" />
