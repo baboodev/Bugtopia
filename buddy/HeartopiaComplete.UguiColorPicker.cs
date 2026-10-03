@@ -187,8 +187,23 @@ namespace HeartopiaMod
                 float targetScale = this.GetUiScale();
                 if (!Mathf.Approximately(targetScale, handle.LastSyncedUiScale))
                 {
+                    // Screen offset of the centre is anchoredPosition * scaleFactor. Apply the
+                    // new scale, then rewrite the position in the new canvas units so the window
+                    // stays where it was. SetUguiWindowScale clamps first, and that clamp's limit
+                    // is the drag-offscreen edge — feeding it the previous scale's units parks
+                    // the title bar above the screen.
+                    float oldScale = handle.Window.Scale >= 0.1f ? handle.Window.Scale : 1f;
+                    Vector2 anchored = handle.Window.PanelRt != null
+                        ? handle.Window.PanelRt.anchoredPosition
+                        : Vector2.zero;
                     handle.LastSyncedUiScale = targetScale;
                     this.SetUguiWindowScale(handle.Window, targetScale);
+                    float newScale = handle.Window.Scale >= 0.1f ? handle.Window.Scale : 1f;
+                    if (handle.Window.PanelRt != null && !Mathf.Approximately(oldScale, newScale))
+                    {
+                        handle.Window.PanelRt.anchoredPosition = anchored * (oldScale / newScale);
+                        this.ClampUguiWindowPosition(handle.Window);
+                    }
                 }
 
                 this.SyncUguiDyePickerToTarget(handle, target);
@@ -724,11 +739,19 @@ namespace HeartopiaMod
                 handle.StatusLabel = this.CreateUguiLabel(t, "Status", string.Empty, 10f, dim, false);
                 PlaceUguiTopLeft(handle.StatusLabel, UguiDyePad, y, UguiDyeSquareW, 30f);
 
+                // Scale first. Window.Scale is still the default 1 here, and a top-right point
+                // computed in those units falls outside the canvas once the real scale is applied;
+                // the clamp then snaps it to the drag-offscreen edge (title bar above the screen).
+                handle.LastSyncedUiScale = this.GetUiScale();
+                this.SetUguiWindowScale(handle.Window, handle.LastSyncedUiScale);
+
                 // Opening position: top-right, clear of the Move Panel's top-left corner.
-                float s = (handle.Window.Scale >= 0.1f) ? handle.Window.Scale : 1f;
+                float s = Mathf.Max(handle.Window.Scale, 0.1f);
+                float halfW = Screen.width / s * 0.5f;
+                float halfH = Screen.height / s * 0.5f;
                 handle.Window.PanelRt.anchoredPosition = new Vector2(
-                    Screen.width / s * 0.5f - UguiDyeW * 0.5f - 14f,
-                    Screen.height / s * 0.5f - 150f - UguiDyeH * 0.5f);
+                    halfW - UguiDyeW * 0.5f - 14f,
+                    halfH - 150f - UguiDyeH * 0.5f);
                 this.ClampUguiWindowPosition(handle.Window);
 
                 this.uguiDyePicker = handle;
