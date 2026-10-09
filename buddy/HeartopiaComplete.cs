@@ -4096,12 +4096,6 @@ namespace HeartopiaMod
             new HeartopiaComplete.FarmLocation("ShiiTake Spawn", new Vector3(57f, 18.3f, -131.5f), "mushroom"),
             new HeartopiaComplete.FarmLocation("Button Spawn", new Vector3(-156.3f, 18.8f, -115.2f), "mushroom"),
             new HeartopiaComplete.FarmLocation("Oyster Spawn", new Vector3(-139.8f, 21.3f, 205.2f), "mushroom"),
-            // Slab Mining dig sites, 远古召唤 / Ancient Summon (2026-08-29..2026-10-09). Both snapped
-            // from the running game 2026-08-29 while the gather histogram reported four nodes in
-            // range at each ("0/130027->x4" / "0/130028->x4"), so these are stood-on positions, not
-            // map guesses. They replace last season's four foraging-plant areas.
-            new HeartopiaComplete.FarmLocation("Capybara Slab Event Area", new Vector3(-117.367f, 22.262f, 225.887f), "event_capybara_slab"),
-            new HeartopiaComplete.FarmLocation("Oak-Oak Slab Event Area", new Vector3(188.783f, 19.126f, -0.313f), "event_oak_slab"),
             new HeartopiaComplete.FarmLocation("Meteor Spawn 1", new Vector3(78.566f, 20.045f, -99.045f), "meteor"),
             new HeartopiaComplete.FarmLocation("Meteor Spawn 2", new Vector3(-57.025f, 11.051f, -151.923f), "meteor"),
             new HeartopiaComplete.FarmLocation("Big Blueberry Field", new Vector3(-114.2f, 20.1f, 142f), "blueberry"),
@@ -4834,14 +4828,11 @@ namespace HeartopiaMod
         private bool showTruffleRadar = false;
         private bool radarMushroomsDropdownOpen = false;
         private bool radarBerriesDropdownOpen = false;
-        private bool radarEventsDropdownOpen = false;
         private bool radarUnderwaterDropdownOpen = false;
         private bool radarResourcesDropdownOpen = false;
         private bool radarTreesDropdownOpen = false;
         private bool radarDailyDropdownOpen = false;
         private bool radarMiscDropdownOpen = false;
-        private bool showCapybaraSlabRadar = false;
-        private bool showOakSlabRadar = false;
 
         // Underwater gatherables (2026-07-09 SeaWorld update, Fruit table 40601-40603):
         // Glasswort = p_gather_seaasparagus_00, Sea Grape = p_gather_seagrape_00,

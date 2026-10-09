@@ -716,8 +716,6 @@ namespace HeartopiaMod
                             bool flagStone = this.showStoneRadar;
                             bool flagOre = this.showOreRadar;
                             bool flagMeteor = this.showMeteorRadar;
-                            bool flagEventCapybaraSlab = this.showCapybaraSlabRadar;
-                            bool flagEventOakSlab = this.showOakSlabRadar;
                             // Any underwater radar category shares the sea-area waypoints so the farm
                             // can hop to a fresh sea region once the current one is cleared.
                             bool flagUnderwater = this.showContaminatedRadar || this.showGlasswortRadar
@@ -784,14 +782,6 @@ namespace HeartopiaMod
                                                 flag13 = true;
                                             }
                                             else if (farmLocation2.Type == "meteor" && flagMeteor)
-                                            {
-                                                flag13 = true;
-                                            }
-                                            else if (farmLocation2.Type == "event_capybara_slab" && flagEventCapybaraSlab)
-                                            {
-                                                flag13 = true;
-                                            }
-                                            else if (farmLocation2.Type == "event_oak_slab" && flagEventOakSlab)
                                             {
                                                 flag13 = true;
                                             }
@@ -3226,16 +3216,10 @@ namespace HeartopiaMod
                                         // markers were on the radar but no branch here matched the labels, so
                                         // the farm never targeted them — it kept touring rare trees instead.
                                         // Cooldown copies are already excluded above (markerOnCooldown).
-                                        // ⚠️ EQUALITY, not Contains: "Oak-Oak Slab" (the dig site,
-                                        // 130028) contains "Oak-Oak" (the roaming animal, 42001).
-                                        // With Contains here the roamer's toggle also swept up slab
-                                        // markers, which is a different resource in a different area
-                                        // reached by a different interaction.
+                                        // Equality, not Contains: a longer label can contain "Oak-Oak".
                                         || (this.showOakOakRadar && string.Equals(markerLabel, "Oak-Oak", StringComparison.Ordinal))
                                         || (this.showFluoriteRadar && markerLabel.Contains("Flawless Fluorite"))
-                                        || this.ShouldShowMushroomByLabel(markerLabel)
-                                        || (this.showCapybaraSlabRadar && markerLabel.Contains("Capybara Slab"))
-                                        || (this.showOakSlabRadar && markerLabel.Contains("Oak-Oak Slab"));
+                                        || this.ShouldShowMushroomByLabel(markerLabel);
                                     if (flag10)
                                     {
                                         flag9 = true;

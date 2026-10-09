@@ -494,15 +494,6 @@ namespace HeartopiaMod
             return this.GetRadarSelectionSummary(selected);
         }
 
-        // Radar.cs:1490-1495.
-        private string BuildUguiRadarEventsSummary()
-        {
-            List<string> selected = new List<string>();
-            if (this.showCapybaraSlabRadar) selected.Add("Capybara Slab");
-            if (this.showOakSlabRadar) selected.Add("Oak-Oak Slab");
-            return this.GetRadarSelectionSummary(selected);
-        }
-
         // Radar.cs:1530-1535.
         private string BuildUguiRadarUnderwaterSummary()
         {
@@ -615,20 +606,6 @@ namespace HeartopiaMod
                     {
                         new UguiRadarOptionBinding { Label = "Blueberries", Get = () => this.showBlueberryRadar, Set = v => this.showBlueberryRadar = v },
                         new UguiRadarOptionBinding { Label = "Raspberries", Get = () => this.showRaspberryRadar, Set = v => this.showRaspberryRadar = v },
-                    },
-                    AfterChanged = this.ApplyUguiRadarStandardGroupTail
-                },
-                // Events (Radar.cs:1488-1526).
-                new UguiRadarGroupSpec
-                {
-                    Title = "Events",
-                    Summary = this.BuildUguiRadarEventsSummary,
-                    GetOpen = () => this.radarEventsDropdownOpen,
-                    SetOpen = v => this.radarEventsDropdownOpen = v,
-                    Items = new UguiRadarOptionBinding[]
-                    {
-                        new UguiRadarOptionBinding { Label = "Capybara Slab", Get = () => this.showCapybaraSlabRadar, Set = v => this.showCapybaraSlabRadar = v },
-                        new UguiRadarOptionBinding { Label = "Oak-Oak Slab", Get = () => this.showOakSlabRadar, Set = v => this.showOakSlabRadar = v },
                     },
                     AfterChanged = this.ApplyUguiRadarStandardGroupTail
                 },
@@ -972,7 +949,6 @@ namespace HeartopiaMod
         {
             return (this.radarMushroomsDropdownOpen ? 1 : 0)
                  | (this.radarBerriesDropdownOpen ? 2 : 0)
-                 | (this.radarEventsDropdownOpen ? 4 : 0)
                  | (this.radarUnderwaterDropdownOpen ? 8 : 0)
                  | (this.radarResourcesDropdownOpen ? 16 : 0)
                  | (this.radarTreesDropdownOpen ? 32 : 0)
@@ -1159,8 +1135,6 @@ namespace HeartopiaMod
             this.showPennyBunRadar = true;
             this.showShiitakeRadar = true;
             this.showTruffleRadar = true;
-            this.showCapybaraSlabRadar = true;
-            this.showOakSlabRadar = true;
             this.showGlasswortRadar = true;
             this.showSeaGrapeRadar = true;
             this.showWakameRadar = true;
@@ -1208,8 +1182,6 @@ namespace HeartopiaMod
             this.showPennyBunRadar = false;
             this.showShiitakeRadar = false;
             this.showTruffleRadar = false;
-            this.showCapybaraSlabRadar = false;
-            this.showOakSlabRadar = false;
             this.showGlasswortRadar = false;
             this.showSeaGrapeRadar = false;
             this.showWakameRadar = false;
