@@ -110,6 +110,9 @@ namespace HeartopiaMod
                 // collectable-atlas sprite, so it rides the Furniture route (IsBigMapFurnitureLabel)
                 // and draws its NormalItem icon ui_item_normal_p_dogpoop_dogpoop001.
                 case "Dog Poop": return PetPoopItemId;
+                // Honey Mushroom drops only 48007 (MUSH1101-1103). Pinning keeps a neighbour
+                // from writing another icon into the label cache.
+                case "Honey Mushroom": return 48007;
                 default: return 0;
             }
         }
@@ -737,7 +740,8 @@ namespace HeartopiaMod
         private static bool IsBigMapFurnitureLabel(string label)
         {
             return string.Equals(label, "Meteor", StringComparison.Ordinal)
-                || string.Equals(label, "Dog Poop", StringComparison.Ordinal);
+                || string.Equals(label, "Dog Poop", StringComparison.Ordinal)
+                || string.Equals(label, "Honey Mushroom", StringComparison.Ordinal);
         }
 
         // Called when the ESP/Game segmented control changes.

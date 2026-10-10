@@ -1919,17 +1919,17 @@ namespace HeartopiaMod
             return IsDynamicBushStaticId(staticId);
         }
 
-        // The dynamic-bush family: mushrooms (130001-130018), last season's foraging plants
-        // (130019-130026) and this season's slab dig sites (130027/130028), plus the daily perch
-        // 130029. Everything in here GROWS, which is the whole point of the range — a member with
-        // no broadcast verdict is unconfirmed, not ripe.
+        // The dynamic-bush family: mushrooms (130001-130018), retired event bushes
+        // (130019-130028), Hollow Tree 130029 and Honey Mushroom 130030. Everything in
+        // here GROWS, which is the whole point of the range — a member with no broadcast
+        // verdict is unconfirmed, not ripe.
         //
-        // ⚠️ The bound was 130025 and the slab sites fell outside it, so all four in range were
-        // reported collectable the instant they were dug ("hid 0 not collectable" with growTime
-        // 60 s). Extend this whenever a new Dynamicbush id ships, not just its radar toggle.
+        // ⚠️ The bound was 130025 and later ids fell outside it, so in-range nodes were
+        // reported collectable the instant they were gathered. Extend this whenever a new
+        // Dynamicbush id ships, not just its radar toggle.
         internal static bool IsDynamicBushStaticId(int staticId)
         {
-            return staticId >= 130001 && staticId <= 130029;
+            return staticId >= 130001 && staticId <= 130030;
         }
 
         private bool IsFarmTargetUnconfirmed(Vector3 node, out int staticId)
@@ -3219,6 +3219,8 @@ namespace HeartopiaMod
                                         // Equality, not Contains: a longer label can contain "Oak-Oak".
                                         || (this.showOakOakRadar && string.Equals(markerLabel, "Oak-Oak", StringComparison.Ordinal))
                                         || (this.showFluoriteRadar && markerLabel.Contains("Flawless Fluorite"))
+                                        || (this.showHoneyMushroomRadar && markerLabel.Contains("Honey Mushroom"))
+                                        || (this.showHollowTreeRadar && string.Equals(markerLabel, "Hollow Tree", StringComparison.Ordinal))
                                         || this.ShouldShowMushroomByLabel(markerLabel);
                                     if (flag10)
                                     {
@@ -3262,7 +3264,9 @@ namespace HeartopiaMod
                                             {
                                                 flag9 = true;
                                             }
-                                            else if (markerLabel.Contains("Tree") && this.showTreeRadar)
+                                            else if (this.showTreeRadar
+                                                && markerLabel.Contains("Tree")
+                                                && !string.Equals(markerLabel, "Hollow Tree", StringComparison.Ordinal))
                                             {
                                                 flag9 = true;
                                             }

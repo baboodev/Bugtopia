@@ -1895,6 +1895,13 @@ namespace HeartopiaMod
                 return AuraTargetKind.Bush;
             }
 
+            // Honey Mushroom 130030 and Hollow Tree 130029. Both are Dynamicbush gathers
+            // (SendPickBushCommand). Not a range: 130026-130028 are puzzle bushes and slabs.
+            if (staticId == 130029 || staticId == 130030)
+            {
+                return AuraTargetKind.Bush;
+            }
+
             return AuraTargetKind.Unknown;
         }
 

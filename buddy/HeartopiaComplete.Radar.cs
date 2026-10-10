@@ -541,6 +541,10 @@ namespace HeartopiaMod
                 case "Truffle":
                 case "Black Truffle":
                     return "p_gather_truffle_00";
+                case "Honey Mushroom":
+                    return "p_gather_honeyfungus_00";
+                case "Hollow Tree":
+                    return "p_dynamicbush_deadtree_00_step1";
                 case "Blueberry":
                     return "p_fruit_blueberry";
                 case "Raspberry":
@@ -1032,6 +1036,7 @@ namespace HeartopiaMod
         {
             this.radarMushroomsDropdownOpen = false;
             this.radarBerriesDropdownOpen = false;
+            this.radarEventsDropdownOpen = false;
             this.radarResourcesDropdownOpen = false;
             this.radarTreesDropdownOpen = false;
             this.radarDailyDropdownOpen = false;
@@ -1874,6 +1879,7 @@ namespace HeartopiaMod
         private bool AnyRadarLootToggleEnabled()
         {
             return this.IsAnyMushroomRadarEnabled()
+                || this.showHoneyMushroomRadar || this.showHollowTreeRadar
                 || this.showGlasswortRadar || this.showSeaGrapeRadar || this.showWakameRadar || this.showContaminatedRadar
                 || this.showBlueberryRadar || this.showRaspberryRadar || this.showStoneRadar || this.showOreRadar
                 || this.showTreeRadar || this.showRareTreeRadar || this.showAppleTreeRadar || this.showOrangeTreeRadar
@@ -2403,10 +2409,20 @@ namespace HeartopiaMod
                     this.TryGetProduceItemId(entry.ProduceId, out itemId);
                 }
 
-                bool known;
-                string meshName = itemId > 0
-                    ? ResolveLandGatherMeshName(itemId, this, out known)
-                    : ResolveLandGatherMeshByStaticId(entry.StaticId, this, out known);
+                bool known = false;
+                string meshName = null;
+                if (itemId > 0)
+                {
+                    meshName = ResolveLandGatherMeshName(itemId, this, out known);
+                }
+
+                // A resolved produce item that this table does not know (Honey Mushroom 48007,
+                // Hollow Tree's PERCH01 gifts) must still fall through to the entity staticId.
+                // A known item with its toggle off stays off: known is true and meshName is null.
+                if (meshName == null && !known)
+                {
+                    meshName = ResolveLandGatherMeshByStaticId(entry.StaticId, this, out known);
+                }
                 // ⚠️ Key on the RAW pair, not the resolved itemId. "130013" looked like one unmapped
                 // item; it is almost certainly an ENTITY staticId that 122 mushroom entities fall
                 // back to because their itemTypeID is 0 — and a histogram keyed on the merged value
@@ -2677,6 +2693,13 @@ namespace HeartopiaMod
                 // Matsutake has no dedicated toggle of its own — master switch only.
                 case 130018:
                     return self.showMushroomRadar ? "mushroom" : null;
+
+                // Honey Mushroom (蜜环菌, item 48007). One id, no bizarre variants.
+                case 130030:
+                    return self.showHoneyMushroomRadar ? "p_gather_honeyfungus_00" : null;
+                // Hollow Tree (怪奇栖木). One collect, not a timber tree.
+                case 130029:
+                    return self.showHollowTreeRadar ? "p_dynamicbush_deadtree_00_step1" : null;
             }
 
             known = false;
@@ -3035,6 +3058,20 @@ namespace HeartopiaMod
                                                             icon = "?";
                                                             endColor = new Color(1f, 1f, 0.5f); // Light yellow
                                                             bgColor = new Color(0.5f, 0.5f, 0.1f, 0.85f);
+                                                        }
+                                                        else if (text.Contains("honeyfungus"))
+                                                        {
+                                                            text2 = "Honey Mushroom";
+                                                            icon = "[HM]";
+                                                            endColor = new Color(1f, 0.78f, 0.25f);
+                                                            bgColor = new Color(0.45f, 0.28f, 0.05f, 0.85f);
+                                                        }
+                                                        else if (text.Contains("deadtree"))
+                                                        {
+                                                            text2 = "Hollow Tree";
+                                                            icon = "[HT]";
+                                                            endColor = new Color(0.72f, 0.62f, 0.48f);
+                                                            bgColor = new Color(0.28f, 0.22f, 0.14f, 0.85f);
                                                         }
                                                         else if (text.Contains("seaasparagus") || text.Contains("glasswort"))
                                                         {

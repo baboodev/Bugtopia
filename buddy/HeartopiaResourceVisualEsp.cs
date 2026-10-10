@@ -442,6 +442,8 @@ namespace HeartopiaMod
                 case "Penny Bun":
                 case "Shiitake":
                 case "Truffle":
+                case "Honey Mushroom":
+                case "Hollow Tree":
                 case "Blueberry":
                 case "Raspberry":
                 case "Glasswort":
@@ -536,6 +538,8 @@ namespace HeartopiaMod
                 case "Penny Bun": return "PB";
                 case "Shiitake": return "SH";
                 case "Truffle": return "TF";
+                case "Honey Mushroom": return "HM";
+                case "Hollow Tree": return "HT";
                 case "Bubble": return "BP";
                 case "Bird": return "BR";
                 case "Player": return "PL";
@@ -577,6 +581,8 @@ namespace HeartopiaMod
                 case "Penny Bun": return new Color(0.86f, 0.72f, 1f);
                 case "Shiitake": return new Color(1f, 0.72f, 0.56f);
                 case "Truffle": return new Color(0.98f, 0.93f, 0.58f);
+                case "Honey Mushroom": return new Color(1f, 0.78f, 0.25f);
+                case "Hollow Tree": return new Color(0.72f, 0.62f, 0.48f);
                 case "Bubble": return new Color(0.9f, 0.56f, 1f);
                 case "Bird": return new Color(0.98f, 0.92f, 0.52f);
                 case "Player": return new Color(0.45f, 0.88f, 1f);
