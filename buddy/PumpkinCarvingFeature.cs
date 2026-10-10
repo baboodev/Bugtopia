@@ -89,6 +89,8 @@ namespace HeartopiaMod
         private uint pumpkinIgnoreRoughNetId;
         private bool pumpkinResultSeen;
         private bool pumpkinResultSuccess;
+        private uint pumpkinResultNetId;
+        private uint pumpkinCollectNetId;
         private bool pumpkinCollectPending;
         private string pumpkinStatus = "idle";
         private string pumpkinLastLoggedStatus = string.Empty;
@@ -269,6 +271,19 @@ namespace HeartopiaMod
             {
                 this.pumpkinResultSeen = true;
                 this.pumpkinResultSuccess = success;
+                // Hobby exp (TakePumpkinCarving) is granted for this finished entity, not the rough.
+                if (near)
+                {
+                    this.pumpkinResultNetId = netId;
+                }
+            }
+            else if (this.pumpkinCollectPending && this.pumpkinCollectNetId == 0U && success)
+            {
+                uint rough = this.pumpkinIgnoreRoughNetId;
+                if (rough != 0U && netId > rough && netId - rough <= 8U)
+                {
+                    this.pumpkinCollectNetId = netId;
+                }
             }
 
             this.PumpkinLogTiming("result pumpkin=" + netId + " success=" + success
@@ -330,8 +345,8 @@ namespace HeartopiaMod
                             return;
                         }
 
-                        // The finish view streams in after the rough is already gone. Retry
-                        // until pumpkinCollectUntil instead of placing on the first empty scan.
+                        // The finish view for the result entity streams in after the rough is gone.
+                        // Retry until pumpkinCollectUntil. Do not take a different carved pumpkin.
                         if (collectStatus == "no carved pumpkin" && Time.unscaledTime < this.pumpkinCollectUntil)
                         {
                             this.pumpkinNextActionAt = Time.unscaledTime + 0.05f;
@@ -339,6 +354,7 @@ namespace HeartopiaMod
                         }
 
                         this.pumpkinCollectPending = false;
+                        this.pumpkinCollectNetId = 0U;
                         this.PumpkinSetStatus(collectStatus);
                         if (this.autoPumpkinPlace
                             && (collectStatus.StartsWith("collected ") || collectStatus == "no carved pumpkin"))
@@ -371,6 +387,7 @@ namespace HeartopiaMod
                     this.pumpkinActiveNetId = pumpkinNetId;
                     this.pumpkinResultSeen = false;
                     this.pumpkinResultSuccess = false;
+                    this.pumpkinResultNetId = 0U;
                     this.PumpkinSetSessionSuppress(true);
                     this.pumpkinApiState = PumpkinApiState.Start;
                     return;
@@ -427,6 +444,7 @@ namespace HeartopiaMod
                     }
 
                     uint spentRough = this.pumpkinActiveNetId;
+                    uint finishedNetId = this.pumpkinResultNetId;
                     this.PumpkinEndSession();
                     if (spentRough != 0U)
                     {
@@ -435,9 +453,11 @@ namespace HeartopiaMod
 
                     if ((success || roughGone) && this.autoPumpkinCollect)
                     {
+                        this.pumpkinCollectNetId = finishedNetId;
                         this.pumpkinCollectPending = true;
                         this.pumpkinCollectUntil = waited + 0.4f;
                         this.pumpkinNextActionAt = waited;
+                        this.PumpkinLogTiming("collect target " + finishedNetId);
                         return;
                     }
 
@@ -479,6 +499,7 @@ namespace HeartopiaMod
             this.PumpkinSetSessionSuppress(false);
             this.pumpkinActiveNetId = 0U;
             this.pumpkinActiveBaseNetId = 0U;
+            this.pumpkinResultNetId = 0U;
             this.pumpkinApiState = PumpkinApiState.FindRough;
         }
 
@@ -789,6 +810,12 @@ namespace HeartopiaMod
         private unsafe bool TryPumpkinCollectOnce(out string status)
         {
             status = "no carved pumpkin";
+            uint target = this.pumpkinCollectNetId;
+            if (target == 0U)
+            {
+                return true;
+            }
+
             if (!this.TryResolveSelfPlayerNetId(out uint self) || self == 0U)
             {
                 status = "self netId unavailable";
@@ -838,14 +865,14 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    if (!this.TryHomelandFarmTryReadAuraMonoComponentNetId(view, out uint netId) || netId == 0U)
+                    if (!this.TryHomelandFarmTryReadAuraMonoComponentNetId(view, out uint netId) || netId != target)
                     {
                         continue;
                     }
 
                     if (!ownerByNet.TryGetValue(netId, out uint ownerId) || ownerId != self)
                     {
-                        continue;
+                        return true;
                     }
 
                     if (!this.TryPumpkinPoseDelete(netId, out status))
