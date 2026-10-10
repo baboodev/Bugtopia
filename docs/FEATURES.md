@@ -14,6 +14,7 @@ Complete feature catalog for **Bugtopia**. Works identically under MelonLoader a
 | 2 | **Resource Gathering** | Foraging, chop/mine, fishing, insects, birds |
 | 3 | **Features** | Automation utilities (food, repair, shops, cooking, puzzle, pets) |
 | 8 | **New Features** | Animal care, daily quests, homeland farm (crop-box automation) |
+| 12 | **Hobby** | Pumpkin carving, sand sculpture, snow sculpting. Sidebar slot is immediately after New Features |
 | 4 | **Radar** | World resource radar + visual ESP |
 | 5 | **Teleport** | Fast travel, NPCs, events, custom points |
 | 6 | **Bag / Warehouse** | Backpack ↔ warehouse transfer via `BackPackSystem` / `MoveBatchBackpackItems` |
@@ -46,7 +47,6 @@ Tab index **1** is unused in the main tab bar (historical gap).
 |---------|---------|
 | Main | Quick toggles, game speed, hide UI/player, bird vacuum, FOV, login helpers |
 | Food & Repair | Auto eat, auto repair, bag automation |
-| Snow Sculpting | Auto QTE, interact-icon start, move snowballs (id 5100) warehouse → bag |
 | Auto Buy | Cooking store purchase automation |
 | Auto Sell | Inventory sell automation |
 | Mass Cook | Network cooking at stoves; remote QTE + Permanent Stove Memory |
@@ -63,7 +63,14 @@ Tab index **1** is unused in the main tab bar (historical gap).
 | Pictures | Decrypt / re-encrypt `ScreenCapture` cache (Photo, Draw, …). Draw files get a color preview via game `ColorLut`; index maps kept in `Draw/.index/` |
 | Extras | Ice skating: network "Perfect Ice Skating" sequences (`IceSkatingSequenceFeature`) + real-time **Auto Ice Skating** bot (`AutoIceSkatingFeature`) |
 | Extra | Open Craft panel; **Clear Missed Calls** — empty the watch's missed-call list (`ClearMissedCallsFeature`); **Analog Move** gamepad-stick → character bridge (`MovementInputFeature`); **Carpet Stamp** — scan party carpets + send a single step-on/step-off (`CarpetStampFeature`) |
+
+**Hobby** (sidebar category immediately after New Features)
+
+| Sub-tab | Content |
+|---------|---------|
+| Pumpkin Carving | Network carve of a placed rough: start, report four perfect stage scores, optional pickup. The in-game carving panel is suppressed (`PumpkinCarvingFeature`) |
 | Sand Sculpture | Fully-automatic beach sand-sculpting: auto-place base + auto-sculpt correct model + auto-collect (`SandSculptureFeature`) |
+| Snow Sculpting | Auto QTE, interact-icon start, move snowballs (id 5100) warehouse → bag |
 
 Inventory scan / sort / filter rules for these (and Auto Sell, Bag transfer, pets): **[BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md)**.
 
@@ -1347,7 +1354,7 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 
 ### Snow Sculpting
 
-**Tab:** Features → **Snow Sculpting** (`UguiShellFeaturesSnowSculptingSubIndex`). Source: `buddy/SnowSculptureFeature.cs` (partial `HeartopiaComplete`); UI in `buddy/HeartopiaComplete.UguiFeaturesPuzzleSnowContent.cs`.
+**Tab:** Hobby → **Snow Sculpting** (`UguiShellHobbySnowSubIndex`). Source: `buddy/SnowSculptureFeature.cs` (partial `HeartopiaComplete`); UI in `buddy/HeartopiaComplete.UguiFeaturesPuzzleSnowContent.cs`.
 
 #### Auto Snow Sculpture
 
@@ -1384,7 +1391,7 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 
 ### Sand Sculpting
 
-**Tab:** New Features → **Sand Sculpture** (`UguiShellSandSculptureSubIndex`). Source: `buddy/SandSculptureFeature.cs` (partial `HeartopiaComplete`); UI in `buddy/HeartopiaComplete.UguiSandSculptureContent.cs`.
+**Tab:** Hobby → **Sand Sculpture** (`UguiShellHobbySandSubIndex`). Source: `buddy/SandSculptureFeature.cs` (partial `HeartopiaComplete`); UI in `buddy/HeartopiaComplete.UguiSandSculptureContent.cs`.
 
 #### Auto Sand Sculpture
 
@@ -1403,6 +1410,19 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 #### Debug
 
 - `MasterLogSandSculpture` in `SandSculptureFeature.cs` (default **true** while the feature is fresh) — verbose `[SandSculpture]` lines; deduped status logging stays on regardless.
+
+### Pumpkin Carving
+
+**Tab:** Hobby → **Pumpkin Carving** (`UguiShellHobbyTabIndex` / `UguiShellHobbyPumpkinSubIndex`). Source: `buddy/PumpkinCarvingFeature.cs`; UI in `buddy/HeartopiaComplete.UguiHobbyContent.cs`.
+
+- Needs a rough already placed on a pumpkin base (`EntityType.pumpkinrough = 802`). Cultivation and furniture placement are not part of this toggle.
+- Sends `StartMakingPumpkinCarving(baseNetId, pumpkinNetId)` and, in the same tick, `FinishMakingPumpkinCarving(pumpkinNetId, {100,100,100,100})`. The vanilla curve is 30–40 s; the report does not wait for it. Four stages for every rarity; 100 is rating id 5.
+- **Auto-place pumpkin from backpack:** when no own rough is nearby, places a `TablePumpkinbase` item in front of the player if no own base is in range, otherwise places a `TablePumpkinrough` item as a child of the nearest own base.
+- While the session runs, `JoinPumpkinCarvingEvent`, `InformPumpkinCarvingExpireEvent` and `InformPumpkinCarvingResultEvent` are swallowed, so the carving mode, the QTE panel and the result toast do not open. A manual carve during that window is swallowed too.
+- `InformPumpkinCarvingResultEvent` carries the finished entity id, not the rough (rough `N`, result `N+1`/`N+2`, `success=true`, same second as Finish). That nearby id counts as the session result, so collect and the next place are not held for the 8 s timeout. The spent rough id is ignored by the next scan so a lingering view cannot block placement. `[PumpkinCarving]` logs result (`match`/`near`), expire, and `rough gone <ms>`.
+- **Auto-collect carved pumpkin** takes the finished piece (`PumpkinFinishComponentData.createByCarving`, own build) with `CharacterProtocolManager.PoseDeleteBuild`. One take at a time.
+- **Hotkey:** Settings → Keybinds → **Auto Pumpkin Carving** (default unbound).
+- `MasterLogPumpkinCarving` (default false) adds the join line. Result, expire, and the rough-gone timing line are always logged. Status changes are logged once either way.
 
 ### Auto Buy
 
@@ -2231,7 +2251,7 @@ All default to **KeyCode.None** except menu toggle. Grouped as in Settings → K
 | Section | Keybinds |
 |---------|----------|
 | CORE | Toggle Menu (**Insert**), Toggle Radar, Bypass UI, Disable All, Inspect Player, Inspect Move |
-| AUTOMATION | Auto Foraging, Aura Farm, Water + Weed Radius, Auto Insect Farm, Auto Bird Farm, Fish Shadow Net, Mass Cook, Auto Puzzle, Auto Cat Play, Auto Dog Train, Auto Pet Wash, Feed All Cats, Feed All Dogs, Auto Snow Sculpture, Auto Sand Sculpture, Bird Vacuum, Spawn Bubble, Auto Repair, Auto Eat |
+| AUTOMATION | Auto Foraging, Aura Farm, Water + Weed Radius, Auto Insect Farm, Auto Bird Farm, Fish Shadow Net, Mass Cook, Auto Puzzle, Auto Cat Play, Auto Dog Train, Auto Pet Wash, Feed All Cats, Feed All Dogs, Auto Snow Sculpture, Auto Sand Sculpture, Auto Pumpkin Carving, Bird Vacuum, Spawn Bubble, Auto Repair, Auto Eat |
 | PLAYER | Noclip, Camera Toggle, Auto Ice Skating, Join My Town, Anti AFK, Bypass Overlap |
 | SPEED & TOOLS | Game Speed 1×/2×/5×/10×, Equip Axe / Net / Rod / Sprinkler / Bird Scanner / Pad |
 

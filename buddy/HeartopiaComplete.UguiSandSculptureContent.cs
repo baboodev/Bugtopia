@@ -17,10 +17,10 @@ namespace HeartopiaMod
     //    HeartopiaComplete via the SandSculptureFeature.cs partial; ZERO backend interop
     //    additions this round: 4 bools, 3 counters/timers, 1 enum, 4 status strings, 2
     //    collections, TryCloseSandModelDialog + SandLogStatus + AddMenuNotification).
-    //  - Wiring is by STATIC display-position index (UguiShellNewFeaturesTabIndex = 3 +
-    //    UguiShellSandSculptureSubIndex = 6, declared with their siblings in
-    //    UguiShellTabIndices.cs), never label comparison. The processor gates on the SAME
-    //    IsUguiShellNewFeaturesSubTabActive function Animal Care's round established.
+    //  - Wiring is by STATIC display-position index (UguiShellHobbyTabIndex +
+    //    UguiShellHobbySandSubIndex, declared with its siblings in
+    //    UguiShellTabIndices.cs), never label comparison. The processor gates on
+    //    IsUguiShellHobbySubTabActive.
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).
     //
@@ -316,7 +316,7 @@ namespace HeartopiaMod
         {
             UguiShellNewFeaturesSandSculptureHandle handle = this.uguiShellNewFeaturesSandSculpture;
             if (handle == null || handle.Root == null || handle.ErrorCount >= 3
-                || !this.IsUguiShellNewFeaturesSubTabActive(UguiShellSandSculptureSubIndex))
+                || !this.IsUguiShellHobbySubTabActive(UguiShellHobbySandSubIndex))
             {
                 return;
             }

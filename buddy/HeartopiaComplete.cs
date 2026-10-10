@@ -1173,6 +1173,12 @@ namespace HeartopiaMod
                     this.AddMenuNotification(this.L("Auto Sand Sculpture") + ": " + (this.autoSandEnabled ? this.L("On") : this.L("Off")),
                         this.autoSandEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                 }
+                if (this.TryGetModHotkeyDown(this.autoPumpkinHotkey))
+                {
+                    this.autoPumpkinEnabled = !this.autoPumpkinEnabled;
+                    this.AddMenuNotification(this.L("Auto Pumpkin Carving") + ": " + (this.autoPumpkinEnabled ? this.L("On") : this.L("Off")),
+                        this.autoPumpkinEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                }
                 if (this.TryGetModHotkeyDown(this.seaCleanQteHotkey))
                 {
                     this.seaCleanQteEnabled = !this.seaCleanQteEnabled;
@@ -1381,6 +1387,7 @@ namespace HeartopiaMod
             }
             this.ProcessSnowSculptureOnUpdate();
             this.ProcessSandSculptureOnUpdate();
+            this.ProcessPumpkinCarvingOnUpdate();
             this.ProcessSeaCleanQteOnUpdate();
             this.ProcessCorruptionCleanseOnUpdate();
             if (this.autoFishingFarmBreaker.ShouldRun(Time.unscaledTime))

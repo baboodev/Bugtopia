@@ -386,6 +386,7 @@
     <Compile Include="HeartopiaComplete.UguiRadarContent.cs" />
     <Compile Include="HeartopiaComplete.UguiNewFeaturesContent.cs" />
     <Compile Include="HeartopiaComplete.UguiSandSculptureContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiHobbyContent.cs" />
     <Compile Include="HeartopiaComplete.UguiPicturesContent.cs" />
     <Compile Include="HeartopiaComplete.UguiIceSkatingContent.cs" />
     <Compile Include="HeartopiaComplete.UguiExtraContent.cs" />
@@ -501,6 +502,7 @@
     <Compile Include="AutoIceSkatingFeature.cs" />
     <Compile Include="SnowSculptureFeature.cs" />
     <Compile Include="SandSculptureFeature.cs" />
+    <Compile Include="PumpkinCarvingFeature.cs" />
     <Compile Include="SandRoughSelectHook.cs" />
     <Compile Include="SeaCleanQteFeature.cs" />
     <Compile Include="CleanupBossFeature.cs" />

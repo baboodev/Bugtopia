@@ -23,10 +23,10 @@ namespace HeartopiaMod
     //    this.-accessible partial-class state; ZERO backend interop additions). Two independent
     //    rendering paths over one backend.
     //  - Wiring is by STATIC display-position index (UguiShellFeaturesTabIndex = 2 +
-    //    UguiShellFeaturesPuzzleSubIndex = 6 / UguiShellFeaturesSnowSculptingSubIndex = 2,
+    //    UguiShellFeaturesPuzzleSubIndex / UguiShellHobbySnowSubIndex,
     //    declared with their siblings in UguiShellTabIndices.cs), never label comparison. Both
-    //    processors gate on the SAME IsUguiShellFeaturesSubTabActive function the Main round
-    //    established — no new gate.
+    //    processors gate on IsUguiShellFeaturesSubTabActive (Puzzle) and
+    //    IsUguiShellHobbySubTabActive (Snow).
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs these builders).
     //
@@ -650,7 +650,7 @@ namespace HeartopiaMod
         {
             UguiShellFeaturesSnowHandle handle = this.uguiShellFeaturesSnow;
             if (handle == null || handle.Root == null || handle.ErrorCount >= 3
-                || !this.IsUguiShellFeaturesSubTabActive(UguiShellFeaturesSnowSculptingSubIndex))
+                || !this.IsUguiShellHobbySubTabActive(UguiShellHobbySnowSubIndex))
             {
                 return;
             }

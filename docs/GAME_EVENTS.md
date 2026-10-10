@@ -288,6 +288,9 @@ re-resolved from `staticId` at capture (`TryAddSynthesizedNetCookBurnerTargets`)
 | `ToolRestorerEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 8 | `itemNetId`(uint)@0, `staticId`(int)@4 | repair-kit throw approved by server (`CanPutRestorerResult`; fires for auto AND manual use). Opens the **repair-aura window** (see AutoEatRepair `EnsureRepairAuraEventHooks`) |
 | `ToolRestoreDestroyEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 4 | `ownerNetId`(uint)@0 | **misleading name**: dispatched from `ToolRestorerComponent.OnSpawned` when a restorer entity LANDS (tells the old one / throw action to clean up). Filter `ownerNetId == self`; refreshes the repair-aura window |
 | `UpdateBuffUiEvent` | `XDTDataAndProtocol.Events` | 4 | `buffId`(int)@0 | self buff add/UPDATE/remove — identical payload for all three, so no toggle-tracking; the game's SkillWidget (and our repair state) re-query `ToolSystem.HasToolRestoreBuff()` on it instead. Tool-restore buff ids are hardcoded **701-706** in that method |
+| `JoinPumpkinCarvingEvent` | `XDTDataAndProtocol.Events` | 8 | `playerNetId`(uint)@0, `pumpkinNetId`(uint)@4 | success reply of `StartMakingPumpkinCarving`. Local player enters `GamePumpkinCarvingMode` and opens `PumpkinStatusPanel`. Auto Pumpkin Carving suppresses it for the session |
+| `InformPumpkinCarvingExpireEvent` | `XDTDataAndProtocol.Events` | 8 | `pumpkinNetId`(uint)@0, `needReport`(bool)@4 | server QTE stop. Vanilla `PumpkinCarvingModule` Finishes with whatever scores it stored (empty if the panel never ran → error 458). Suppressed for the session; the mod reports `{100,100,100,100}` itself when `needReport` is set |
+| `InformPumpkinCarvingResultEvent` | `XDTDataAndProtocol.Events` | 8 | `pumpkinNetId`(uint)@0, `success`(bool)@4 | `Kind != Fail`. Vanilla module toasts 93733/93734. Suppressed for the session so that toast does not show |
 
 #### Fishing events (all global)
 

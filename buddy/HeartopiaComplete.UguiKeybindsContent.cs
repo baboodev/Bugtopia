@@ -9,7 +9,7 @@ namespace HeartopiaMod
     // UGUI SHELL — Phase 3 tab CONTENT, item 9 (migration plan: cosmic-waddling-rainbow.md):
     // Settings→Keybinds. UGUI mirror of the DrawSettingsTab fallthrough branch
     // (HeartopiaComplete.Config.cs:930, settingsSubTab == 1): "KEYBIND SETTINGS" header, four
-    // section panels (CORE 7 / AUTOMATION 22 / PLAYER 6 / SPEED & TOOLS 11 = 46 click-to-rebind
+    // section panels (CORE 7 / AUTOMATION 23 / PLAYER 6 / SPEED & TOOLS 11 = 47 click-to-rebind
     // rows), a DANGER reset button, and the capture-mode view that REPLACES the section list
     // while this.keyBindingActive is non-empty.
     //
@@ -116,6 +116,7 @@ namespace HeartopiaMod
                     new UguiKeybindRowBinding("Feed All Dogs", () => this.keyFeedAllDogs),
                     new UguiKeybindRowBinding("Auto Snow Sculpture", () => this.autoSnowHotkey),
                     new UguiKeybindRowBinding("Auto Sand Sculpture", () => this.autoSandHotkey),
+                    new UguiKeybindRowBinding("Auto Pumpkin Carving", () => this.autoPumpkinHotkey),
                     new UguiKeybindRowBinding("Auto Sea Clean QTE", () => this.seaCleanQteHotkey),
                     new UguiKeybindRowBinding("Bird Vacuum", () => this.keyBirdVacuum),
                     new UguiKeybindRowBinding("Spawn Bubble", () => this.keySpawnBubble),
@@ -225,11 +226,11 @@ namespace HeartopiaMod
             {
                 totalRows += (sections[s].Rows != null) ? sections[s].Rows.Length : 0;
             }
-            if (totalRows != 46)
+            if (totalRows != 47)
             {
                 // The IMGUI drawer has no shared row-count constant (BeginKeybindSection takes
                 // literals), so this only guards THIS array against local edits.
-                ModLogger.Msg("[UguiShell] Keybinds bindings (" + totalRows + ") != expected 46 — check BuildUguiKeybindSections");
+                ModLogger.Msg("[UguiShell] Keybinds bindings (" + totalRows + ") != expected 47 — check BuildUguiKeybindSections");
             }
 
             Color rowText = this.UguiKitTextColor();

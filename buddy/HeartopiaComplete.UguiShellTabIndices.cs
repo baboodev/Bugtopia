@@ -28,14 +28,14 @@ namespace HeartopiaMod
     {
         // Display-position wiring constants — see file header for the re-derivation. These match
         // positions in BuildUguiShell's tabLabels/subTabLabels arrays, NOT internal selectedTab ids.
-        private const int UguiShellResearchTabIndex = 7;        // Research (internal id 9)
+        private const int UguiShellResearchTabIndex = 8;        // Research (internal id 9)
         // Music (HeartopiaComplete.UguiMusicContent.cs) — a .bin note-track player with NO IMGUI
         // ancestor. Inserted at display position 8, ahead of Settings (which conventionally stays
         // last), so Settings moved 8 → 9. Nothing hardcodes those positions: every consumer reads
         // these constants, and the sidebar nav icon array (HeartopiaComplete.NavIcons.cs) is
         // indexed by display position, so a music-note glyph was inserted at 8 to match.
-        private const int UguiShellMusicTabIndex = 8;           // Music (internal id 10)
-        private const int UguiShellSettingsTabIndex = 9;        // Settings (internal id 7)
+        private const int UguiShellMusicTabIndex = 9;           // Music (internal id 10)
+        private const int UguiShellSettingsTabIndex = 10;       // Settings (internal id 7)
 
         // Agent (HeartopiaComplete.UguiAgentContent.cs) — the MCP bridge's own tab, visible only
         // while the bridge is listening. APPENDED after Settings rather than inserted before it, so
@@ -43,7 +43,14 @@ namespace HeartopiaMod
         // comes and goes with a marker file and a build flag, and an index that shifts with either
         // would put every constant in this file at the mercy of how the binary was compiled.
         // It also belongs at the bottom on merit — it is a developer surface, not a feature.
-        private const int UguiShellMcpTabIndex = 10;            // Agent (internal id 11)
+        private const int UguiShellMcpTabIndex = 11;            // Agent (internal id 11)
+
+        // Hobby is display position 4, immediately after New Features. Radar and everything
+        // below it shifted +1. Ice Skating stays on New Features.
+        private const int UguiShellHobbyTabIndex = 4;           // Hobby (internal id 12)
+        private const int UguiShellHobbyPumpkinSubIndex = 0;    // "Pumpkin Carving" within Hobby
+        private const int UguiShellHobbySandSubIndex = 1;       // "Sand Sculpture" within Hobby
+        private const int UguiShellHobbySnowSubIndex = 2;       // "Snow Sculpting" within Hobby
         private const int UguiShellSettingsMainSubIndex = 0;    // "Main" within Settings' subs (round 2)
         private const int UguiShellSettingsKeybindsSubIndex = 1; // "Keybinds" within Settings' subs — matches
                                                                  // settingsSubTab == 1 (HeartopiaComplete.cs:2424;
@@ -95,12 +102,12 @@ namespace HeartopiaMod
         // position 6 carries internal id 6 (UguiShellInternalTabIds[6]) = IMGUI selectedTab 6 =
         // DrawBulkSelectorTab (HeartopiaComplete.Gui.cs:1305). No sub-tabs (subTabLabels[6] is
         // empty) — wired in BuildUguiShell's no-subs branch, same shape as Research.
-        private const int UguiShellBagWarehouseTabIndex = 6;         // Bag / Warehouse (internal id 6)
+        private const int UguiShellBagWarehouseTabIndex = 7;         // Bag / Warehouse (internal id 6)
 
         // Teleport (round 3, HeartopiaComplete.UguiTeleportContent.cs): display position 5
         // carries internal id 5 = IMGUI selectedTab 5, and its nine sub-tab display indices
         // match teleportSubTab's own 0-8 exactly (SetTeleportSubTab, HeartopiaComplete.Teleport.cs).
-        private const int UguiShellTeleportTabIndex = 5;             // Teleport (internal id 5)
+        private const int UguiShellTeleportTabIndex = 6;             // Teleport (internal id 5)
         private const int UguiShellTeleportHomeSubIndex = 0;         // "Home"
         private const int UguiShellTeleportAnimalCareSubIndex = 1;   // "Animal Care"
         private const int UguiShellTeleportNpcsSubIndex = 2;         // "NPCs"
@@ -137,7 +144,7 @@ namespace HeartopiaMod
         // (HeartopiaComplete.UiKit.cs:531), and its sub array {"Main","Settings"} display indices
         // match radarSubTab's own 0/1 exactly (HeartopiaComplete.cs:2402-2403; DrawRadarTab
         // dispatches radarSubTab == 1 → DrawRadarSettingsTab, default → the main radar tab).
-        private const int UguiShellRadarTabIndex = 4;                // Radar (internal id 4)
+        private const int UguiShellRadarTabIndex = 5;                // Radar (internal id 4)
         private const int UguiShellRadarMainSubIndex = 0;            // "Main" within Radar's subs
         private const int UguiShellRadarSettingsSubIndex = 1;        // "Settings" within Radar's subs
 
@@ -172,11 +179,10 @@ namespace HeartopiaMod
         private const int UguiShellNewFeaturesTabIndex = 3;          // New Features (internal id 8)
         private const int UguiShellAnimalCareSubIndex = 0;           // "Animal Care" within its subs
         private const int UguiShellDailyQuestsSubIndex = 1;          // "Daily Quests" within its subs
-        private const int UguiShellSandSculptureSubIndex = 6;        // "Sand Sculpture" within its subs
         private const int UguiShellPicturesSubIndex = 3;             // "Pictures" within its subs
         private const int UguiShellIceSkatingSubIndex = 4;           // "Ice Skating" within its subs
         private const int UguiShellExtraSubIndex = 5;                // "Extra" within its subs
-        private const int UguiShellSeaCleanSubIndex = 7;             // "Sea Clean" within its subs
+        private const int UguiShellSeaCleanSubIndex = 6;             // "Sea Clean" within its subs
         private const int UguiShellHomelandFarmSubIndex = 2;         // "Homeland Farm" within its subs
 
         // Features (Phase 3 item 11 — split into rounds like Resource Gathering; round 1 = Main,
@@ -204,11 +210,10 @@ namespace HeartopiaMod
         private const int UguiShellFeaturesTabIndex = 2;             // Features (internal id 3)
         private const int UguiShellFeaturesMainSubIndex = 0;         // "Main" within its subs
         private const int UguiShellFeaturesFoodRepairSubIndex = 1;   // "Food & Repair" within its subs
-        private const int UguiShellFeaturesSnowSculptingSubIndex = 2; // "Snow Sculpting" within its subs
-        private const int UguiShellFeaturesAutoBuySubIndex = 3;      // "Auto Buy" within its subs
-        private const int UguiShellFeaturesAutoSellSubIndex = 4;     // "Auto Sell" within its subs
-        private const int UguiShellFeaturesMassCookSubIndex = 5;     // "Mass Cook" within its subs
-        private const int UguiShellFeaturesPuzzleSubIndex = 6;       // "Puzzle" within its subs
-        private const int UguiShellFeaturesPetCareSubIndex = 7;      // "Pet Care" within its subs
+        private const int UguiShellFeaturesAutoBuySubIndex = 2;      // "Auto Buy" within its subs
+        private const int UguiShellFeaturesAutoSellSubIndex = 3;     // "Auto Sell" within its subs
+        private const int UguiShellFeaturesMassCookSubIndex = 4;     // "Mass Cook" within its subs
+        private const int UguiShellFeaturesPuzzleSubIndex = 5;       // "Puzzle" within its subs
+        private const int UguiShellFeaturesPetCareSubIndex = 6;      // "Pet Care" within its subs
     }
 }

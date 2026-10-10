@@ -2230,7 +2230,7 @@ namespace HeartopiaMod
 
         // Build BuildPlaceData (BuildType=0, NetId=bagItemNetId — consume from backpack) and send.
         private unsafe bool TrySendSandBasePlace(uint bagItemNetId, uint buildRootNetId, ulong putZoneId,
-                                                 Vector3 localPos, int angle, out string status)
+                                                 Vector3 localPos, int angle, out string status, ulong virtualLink = 0)
         {
             status = "send unavailable";
 
@@ -2253,7 +2253,8 @@ namespace HeartopiaMod
             {
                 IntPtr elem = auraMonoArrayAddrWithSize(arrObj, 8, UIntPtr.Zero);
                 if (elem == IntPtr.Zero) { status = "array elem addr failed"; return false; }
-                Marshal.WriteInt64(elem, (long)putZoneId);
+                ulong linkId = virtualLink != 0UL ? virtualLink : putZoneId;
+                Marshal.WriteInt64(elem, (long)linkId);
 
                 // (b) BuildTransformData (boxed struct) + fields
                 tdObj = auraMonoObjectNew(domain, this.sandPlaceBuildTransformDataClass);

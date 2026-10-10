@@ -73,6 +73,7 @@ namespace HeartopiaMod
             public int keyBirdVacuum;
             public int keyAutoSnow;
             public int keyAutoSand;
+            public int keyAutoPumpkin;
             public int keySeaCleanQte;
             public int keyEquipSeaCleaner;
             // 0/absent = "use default" (radius can never legitimately be 0).

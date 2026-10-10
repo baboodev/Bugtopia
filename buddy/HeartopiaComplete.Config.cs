@@ -135,6 +135,7 @@ namespace HeartopiaMod
             data.keyBirdVacuum = (int)this.keyBirdVacuum;
             data.keyAutoSnow = (int)this.autoSnowHotkey;
             data.keyAutoSand = (int)this.autoSandHotkey;
+            data.keyAutoPumpkin = (int)this.autoPumpkinHotkey;
             data.keySeaCleanQte = (int)this.seaCleanQteHotkey;
             data.keyEquipSeaCleaner = (int)this.keyEquipSeaCleaner;
             data.seaCleanAutoRadius = this.seaCleanAutoRadius;
@@ -508,6 +509,7 @@ namespace HeartopiaMod
             this.keyBirdVacuum = (KeyCode)data.keyBirdVacuum;
             this.autoSnowHotkey = (KeyCode)data.keyAutoSnow;
             this.autoSandHotkey = (KeyCode)data.keyAutoSand;
+            this.autoPumpkinHotkey = (KeyCode)data.keyAutoPumpkin;
             this.seaCleanQteHotkey = (KeyCode)data.keySeaCleanQte;
             this.keyEquipSeaCleaner = (KeyCode)data.keyEquipSeaCleaner;
             this.seaCleanAutoRadius = data.seaCleanAutoRadius <= 0f
@@ -1087,6 +1089,7 @@ namespace HeartopiaMod
                         else if (line.Contains("keySeaCleanQte")) this.seaCleanQteHotkey = (KeyCode)GetJsonInt(line, "\"keySeaCleanQte\":");
                         else if (line.Contains("keyAutoSnow")) this.autoSnowHotkey = (KeyCode)GetJsonInt(line, "\"keyAutoSnow\":");
                         else if (line.Contains("keyAutoSand")) this.autoSandHotkey = (KeyCode)GetJsonInt(line, "\"keyAutoSand\":");
+                        else if (line.Contains("keyAutoPumpkin")) this.autoPumpkinHotkey = (KeyCode)GetJsonInt(line, "\"keyAutoPumpkin\":");
                         else if (line.Contains("keyJoinPublic")) this.keyJoinPublic = (KeyCode)GetJsonInt(line, "\"keyJoinPublic\":");
                         else if (line.Contains("keyJoinMyTown")) this.keyJoinMyTown = (KeyCode)GetJsonInt(line, "\"keyJoinMyTown\":");
                         else if (line.Contains("keyAutoInsectFarm")) this.keyAutoInsectFarm = (KeyCode)GetJsonInt(line, "\"keyAutoInsectFarm\":");
@@ -1321,6 +1324,7 @@ namespace HeartopiaMod
             this.keyAntiAfk = KeyCode.None;
             this.autoSnowHotkey = KeyCode.None;
             this.autoSandHotkey = KeyCode.None;
+            this.autoPumpkinHotkey = KeyCode.None;
             this.seaCleanQteHotkey = KeyCode.None;
             this.keyEquipSeaCleaner = KeyCode.None;
             this.keyBypassOverlap = KeyCode.None;
@@ -1453,6 +1457,7 @@ namespace HeartopiaMod
                 case "Auto Join Friend": this.keyAutoJoinFriend = newKey; break;
                 case "Auto Snow Sculpture": this.autoSnowHotkey = newKey; break;
                 case "Auto Sand Sculpture": this.autoSandHotkey = newKey; break;
+                case "Auto Pumpkin Carving": this.autoPumpkinHotkey = newKey; break;
                 case "Auto Sea Clean QTE": this.seaCleanQteHotkey = newKey; break;
                 case "Equip Sea Cleaner": this.keyEquipSeaCleaner = newKey; break;
                 case "Noclip": this.keyNoclip = newKey; break;

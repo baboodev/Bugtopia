@@ -109,10 +109,10 @@ namespace HeartopiaMod
         // Internal selectedTab id per display position (navIndices) — unused by the placeholder
         // chrome itself, but Phase 3 binds real content per INTERNAL id, so the mapping ships
         // with the shell instead of being rediscovered later.
-        // Music (display position 8) has NO IMGUI ancestor — it arrived after the menu was
+        // Music (display position 9) has NO IMGUI ancestor — it arrived after the menu was
         // retired — so it takes the next free internal id, 10. Its m2-era draft used 9, which is
         // Research's here; that collision is why it is renumbered rather than carried over.
-        private static readonly int[] UguiShellInternalTabIds = new int[] { 0, 2, 3, 8, 4, 5, 6, 9, 10, 7 };
+        private static readonly int[] UguiShellInternalTabIds = new int[] { 0, 2, 3, 8, 12, 4, 5, 6, 9, 10, 7, 11 };
 
         private const float UguiShellWindowW = 960f;
         private const float UguiShellWindowH = 640f;
@@ -233,6 +233,7 @@ namespace HeartopiaMod
             this.ProcessUguiShellRadarSettingsOnUpdate();
             this.ProcessUguiShellMusicOnUpdate();
             this.ProcessUguiShellMcpOnUpdate();
+            this.ProcessUguiShellHobbyPumpkinOnUpdate();
         }
 
         // Implemented in HeartopiaComplete.UguiAgentContent.cs, which is #if FEATURE_MCP. An
@@ -431,7 +432,7 @@ namespace HeartopiaMod
                 string[] tabLabels = new string[]
                 {
                     this.L("Self"), this.L("Resource Gathering"), this.L("Features"),
-                    this.L("New Features"), this.L("Radar"), this.L("Teleport"),
+                    this.L("New Features"), this.L("Hobby"), this.L("Radar"), this.L("Teleport"),
                     this.L("Bag / Warehouse"), this.L("Research / Order"), this.L("Music"),
                     this.L("Settings"), this.L("Agent")
                 };
@@ -439,6 +440,7 @@ namespace HeartopiaMod
                 {
                     this.L("Player, camera and input"), this.L("Aura farm and collection"),
                     this.L("Automation and helpers"), this.L("Experiments"),
+                    this.L("Seasonal hobbies"),
                     this.L("World scanner"), this.L("Locations and travel"),
                     this.L("Bulk item tools"), this.L("Institute and order machine"),
                     this.L("Play .bin note tracks"),
@@ -449,15 +451,16 @@ namespace HeartopiaMod
                 {
                     new string[] { this.L("Main"), this.L("Building"), this.L("Fun"), this.L("Privacy"), this.L("Game UI"), this.L("Game LOD"), this.L("Minimap") },
                     new string[] { this.L("Foraging"), this.L("Fishing"), this.L("Insects"), this.L("Birds"), this.L("Combined") },
-                    new string[] { this.L("Main"), this.L("Food & Repair"), this.L("Snow Sculpting"), this.L("Auto Buy"), this.L("Auto Sell"), this.L("Mass Cook"), this.L("Puzzle"), this.L("Pet Care") },
-                    new string[] { this.L("Animal Care"), this.L("Daily Quests"), this.L("homeland_farm.title"), this.L("pictures.title"), this.L("Ice Skating"), this.L("extra.title"), this.L("Sand Sculpture"), this.L("Sea Clean") },
+                    new string[] { this.L("Main"), this.L("Food & Repair"), this.L("Auto Buy"), this.L("Auto Sell"), this.L("Mass Cook"), this.L("Puzzle"), this.L("Pet Care") },
+                    new string[] { this.L("Animal Care"), this.L("Daily Quests"), this.L("homeland_farm.title"), this.L("pictures.title"), this.L("Ice Skating"), this.L("extra.title"), this.L("Sea Clean") },
+                    new string[] { this.L("Pumpkin Carving"), this.L("Sand Sculpture"), this.L("Snow Sculpting") },
                     new string[] { this.L("Main"), this.L("Settings") },
                     new string[] { this.L("Home"), this.L("Animal Care"), this.L("NPCs"), this.L("Locations"), this.L("Events"), this.L("House"), this.L("Custom"), this.L("XYZ"), this.L("Spawn Vehicle") },
                     new string[0], // Bag / Warehouse — no sub-tabs
                     new string[0], // Research / Order — no sub-tabs
                     new string[0], // Music — no sub-tabs
                     new string[] { this.L("Main"), this.L("Keybinds"), this.L("UI Theme"), this.L("About"), this.L("Logging"), this.L("Game Keys"), this.L("Status Overlay") },
-                    new string[0]  // Agent — sub-tabs are built at RUNTIME (plugins come and go), so
+                    new string[0], // Agent — sub-tabs are built at RUNTIME (plugins come and go), so
                                    // it takes the no-subs branch and owns its own rebuildable bar.
                 };
 
@@ -789,7 +792,7 @@ namespace HeartopiaMod
                                     subContents[j] = this.BuildUguiShellNewFeaturesAnimalCareContent(
                                         container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
-                                else if (i == UguiShellNewFeaturesTabIndex && j == UguiShellSandSculptureSubIndex)
+                                else if (i == UguiShellHobbyTabIndex && j == UguiShellHobbySandSubIndex)
                                 {
                                     // Phase 3 item 12, round 2 of 8: Sand Sculpture
                                     // (HeartopiaComplete.UguiSandSculptureContent.cs).
@@ -859,7 +862,7 @@ namespace HeartopiaMod
                                     subContents[j] = this.BuildUguiShellFeaturesMainContent(
                                         container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
-                                else if (i == UguiShellFeaturesTabIndex && j == UguiShellFeaturesSnowSculptingSubIndex)
+                                else if (i == UguiShellHobbyTabIndex && j == UguiShellHobbySnowSubIndex)
                                 {
                                     // Phase 3 item 11, rounds 2+3 of 8: Features → Snow
                                     // Sculpting (HeartopiaComplete.UguiFeaturesPuzzleSnowContent.cs).
@@ -909,6 +912,11 @@ namespace HeartopiaMod
                                     // (HeartopiaComplete.UguiFeaturesPetCareContent.cs) —
                                     // Features' last sub; the tab is fully migrated.
                                     subContents[j] = this.BuildUguiShellFeaturesPetCareContent(
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
+                                }
+                                else if (i == UguiShellHobbyTabIndex && j == UguiShellHobbyPumpkinSubIndex)
+                                {
+                                    subContents[j] = this.BuildUguiShellHobbyPumpkinContent(
                                         container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 // Every sub cell has a real builder above (the migration is
