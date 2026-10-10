@@ -530,6 +530,9 @@ namespace HeartopiaMod
             { 61904, 69317 }, { 63002, 69283 }, { 63003, 69284 },
             // Season 8 (2026-08) additions — the five hoopoe colour morphs.
             { 61232, 69343 }, { 61233, 69344 }, { 61234, 69345 }, { 61235, 69346 }, { 61236, 69347 },
+            // Harvest-festival ravens. birdPhotoId matches the photo card of the same suffix
+            // (p_birdphoto_birdphoto2101 is 69352, the truffle raven's card).
+            { 61241, 69352 }, { 61238, 69349 }, { 61240, 69351 }, { 61237, 69348 }, { 61239, 69350 },
         };
 
         // Bird PREFAB-suffix (the trailing number of p_bird_birdNNN / p_birdphoto_birdphotoNNN —
@@ -560,11 +563,14 @@ namespace HeartopiaMod
             { 1902, 69340 },
             // Season 8 (2026-08) additions — the five hoopoe colour morphs.
             { 239, 69343 }, { 240, 69344 }, { 241, 69345 }, { 242, 69346 }, { 243, 69347 },
+            // Harvest-festival ravens. Suffixes are shuffled vs bird ids (2101 -> 61241).
+            { 2101, 69352 }, { 2102, 69349 }, { 2103, 69351 }, { 2104, 69348 }, { 2105, 69350 },
         };
 
         // Insect PREFAB-suffix (trailing number of p_insect_insectNNN) -> insect ITEM id (== entity
         // staticId). Joined offline from the Insect table (145 wild-catchable prefabs, collision-
-        // free; the remaining table rows are variants without insectNNN prefabs; 150 as of season 8). Suffixes are
+        // free; the remaining table rows are variants without insectNNN prefabs; 155 including the
+        // harvest-festival dung beetles). Suffixes are
         // SHUFFLED vs ids here too (insect113 -> 51117, insect119 -> 51113) — never derive
         // numerically. PRIMARY insect resolve (no Mono calls); the live-entity path is the fallback.
         private static readonly Dictionary<int, int> InsectSuffixToItemId = new Dictionary<int, int>
@@ -590,6 +596,8 @@ namespace HeartopiaMod
             { 1805, 51709 },
             // Season 8 (2026-08) additions — 228/229 rhinoceros beetles, 230-232 fireflies.
             { 228, 51237 }, { 229, 51238 }, { 230, 51234 }, { 231, 51235 }, { 232, 51236 },
+            // Harvest-festival dung beetles. Suffixes are shuffled (1607 -> 51240, 1610 -> 51239).
+            { 1606, 51241 }, { 1607, 51240 }, { 1608, 51242 }, { 1609, 51243 }, { 1610, 51239 },
         };
 
         // Trailing number of a bird prefab/sprite name ("p_bird_bird101(clone)" -> 101). 0 = none.
