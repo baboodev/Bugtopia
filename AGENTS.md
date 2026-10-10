@@ -502,3 +502,14 @@ Full matrix: [DECOMPILED_SOURCE_MAP.md § 4](docs/DECOMPILED_SOURCE_MAP.md).
 ---
 
 *Last aligned with repo docs and aura meteor pipeline. After major game patches, re-read [TYPE_RESOLUTION.md](docs/TYPE_RESOLUTION.md) and regenerate dumps.*
+
+---
+
+## Cursor Cloud specific instructions
+
+Cloud agents run on Linux. Heartopia and the Win32 launcher (`BugtopiaLauncher`, `BugtopiaLaunch`, `InjectCli`) do not run in this environment. The install step provides the SDKs and the reference assemblies the mod compiles against.
+
+- .NET SDK 6, 8, and 10 are on `PATH`, plus PowerShell 7. `buddy/Version.targets` invokes `powershell`; that command is a symlink to `pwsh`.
+- Loader reference assemblies come from the public GitHub release `deps`, asset `unified-ci-deps.zip`, extracted to `ci/heartopia/` (gitignored). Install writes `buddy/Directory.Build.props` (gitignored; on Linux the lowercase name is the one MSBuild reads) so `HeartopiaDir` points at that tree. `dotnet build buddy/buddy.csproj -c Release -p:Loader=BepInEx` then resolves references. `Loader=Universal` and `Loader=MelonLoader` use the same tree.
+- That zip was packed on Windows. `unzip` warns about backslash separators and exits 1; the files still extract. Only an exit code above 1 is a failure.
+- Checks that do not need the game: `pwsh ci/crash-hardening-lint.ps1` (existing W1 warnings do not fail it), `dotnet build launcher/InteropGen/InteropGen.csproj -c Release` then `dotnet launcher/InteropGen/bin/Release/net8.0/InteropGen.dll --help`, and `dotnet build tools/BugtopiaMcp/BugtopiaMcp.csproj -c Release` followed by an MCP stdio handshake (`initialize`, `tools/list`, `tools/call` `game_ping`). With no game, `game_ping` returns an error that the endpoint file is missing. That is the offline result.
