@@ -100,8 +100,9 @@ namespace HeartopiaMod
 
         // Aura Farm means "collect everything in reach", so the running aura is the only switch
         // for pickup — no separate toggle to remember on a walk with the dogs. The foraging farm
-        // counts too: its walker targets droppings (HeartopiaComplete.Farm.cs, "node:poop"), and a
-        // walk to one is pointless unless the pickup runs when it gets there.
+        // counts too: its walker targets droppings when Dog Poop is selected on the radar
+        // (HeartopiaComplete.Farm.cs, "node:poop"), and a walk to one is pointless unless the
+        // pickup runs when it gets there.
         private bool IsPetPoopPickupActive => this.auraFarmEnabled || this.autoFarmActive;
 
         // Called from SetAuraFarmEnabled: the aura flipping on mid-session must run the pending

@@ -240,13 +240,14 @@ namespace HeartopiaMod
                             }
                         }
 
-                        // ZERO: a dropping the poop scan can see is always the next target — no
-                        // switch and no priority row, by the owner's call (2026-09-12): it is worth
-                        // more than any bush and it expires. Walk only. A dropping the router cannot
-                        // reach is parked, never warped to (rule 0.2a: a teleport is the emergency
-                        // exit for the ONLY target, and a dropping is never that). Walk-to-node mode
-                        // only: the teleport farm has nothing to offer a dropping.
+                        // ZERO: a dropping the poop scan can see is the next target when Dog Poop
+                        // is selected on the radar (showPetPoopRadar) — ahead of every priority row,
+                        // because it expires. Walk only. A dropping the router cannot reach is
+                        // parked, never warped to (rule 0.2a: a teleport is the emergency exit for
+                        // the ONLY target, and a dropping is never that). Walk-to-node mode only:
+                        // the teleport farm has nothing to offer a dropping.
                         if (this.farmWalkToNodeEnabled
+                            && this.showPetPoopRadar
                             && this.TryGetNearestPetPoopTarget(Camera.main.transform.position, out Vector3 poopPos, out uint poopNetId))
                         {
                             float poopDistance = Vector3.Distance(Camera.main.transform.position, poopPos);

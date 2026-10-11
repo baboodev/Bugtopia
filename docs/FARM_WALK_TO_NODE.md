@@ -323,8 +323,8 @@ Applying the rule to everything would park half the map.
 ### Dog poop is a target too, but not a resource
 
 A dog dropping (`PetPoopFeature.cs`, Entity 7100) is offered to the walker **before** every priority
-row and every regular node, with no switch: `TryGetNearestPetPoopTarget` → `node:poop` walk, dwell
-label `Dog Poop`. Two things make it unlike a resource:
+row and every regular node, but only while **Radar → Misc → Dog Poop** is on (`showPetPoopRadar`):
+`TryGetNearestPetPoopTarget` → `node:poop` walk, dwell label `Dog Poop`. Two things make it unlike a resource:
 
 * It is **not in the collectable scan** — the absence gate ("target is not there at all") must exempt
   it exactly the way it exempts bubbles (`FarmWalkTargetIsPetPoop`), or every poop walk dies 10 m out.
