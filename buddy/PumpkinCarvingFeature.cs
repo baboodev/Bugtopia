@@ -260,13 +260,13 @@ namespace HeartopiaMod
             uint netId = e.ReadUInt32(0);
             bool success = e.ReadBool(4);
             bool match = netId != 0U && netId == this.pumpkinActiveNetId;
-            // Stop reports the finished entity, not the rough (live: rough 19024996, result
-            // 19024997 success=True). A nearby id during this session is that reply.
+            // Stop reports the finished entity, not the rough. A plain carve is rough+1/+2.
+            // A high-rarity carve plays a result effect and allocates extra entities, so the
+            // finished id can be tens or thousands past the rough (live: +9, +13, +33, +4633).
             bool inSession = this.pumpkinActiveNetId != 0U
                 && (this.pumpkinApiState == PumpkinApiState.Start || this.pumpkinApiState == PumpkinApiState.WaitResult);
             bool near = inSession && success && !this.pumpkinResultSeen
-                && netId > this.pumpkinActiveNetId
-                && netId - this.pumpkinActiveNetId <= 8U;
+                && netId > this.pumpkinActiveNetId;
             if (match || near)
             {
                 this.pumpkinResultSeen = true;
@@ -280,7 +280,7 @@ namespace HeartopiaMod
             else if (this.pumpkinCollectPending && this.pumpkinCollectNetId == 0U && success)
             {
                 uint rough = this.pumpkinIgnoreRoughNetId;
-                if (rough != 0U && netId > rough && netId - rough <= 8U)
+                if (rough != 0U && netId > rough)
                 {
                     this.pumpkinCollectNetId = netId;
                 }
@@ -870,8 +870,17 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    if (!ownerByNet.TryGetValue(netId, out uint ownerId) || ownerId != self)
+                    if (!ownerByNet.TryGetValue(netId, out uint ownerId))
                     {
+                        return true;
+                    }
+
+                    // A later id from another player can arrive during the session. Drop it so the
+                    // next result can replace the collect target; keep waiting while the owner
+                    // field itself has not streamed yet.
+                    if (ownerId != self)
+                    {
+                        this.pumpkinCollectNetId = 0U;
                         return true;
                     }
 
