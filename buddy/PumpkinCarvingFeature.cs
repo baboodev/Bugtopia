@@ -24,6 +24,9 @@ namespace HeartopiaMod
         private const float PumpkinResultTimeoutSeconds = 8f;
         private const float PumpkinPlaceBackoffSeconds = 1.0f;
         private const float PumpkinScanRadius = 60f;
+        // Manual placement holds the rough entity 0.5 m above the base pivot. The placement
+        // ghost root sits another 0.2 m up (its surface_frame); that is not the entity position.
+        private const float PumpkinRoughAboveBaseMeters = 0.5f;
         private const int PumpkinStageCount = 4;
         private const int PumpkinPerfectScore = 100;
 
@@ -1027,10 +1030,12 @@ namespace HeartopiaMod
                 return false;
             }
 
-            Vector3 local = basePos;
+            Vector3 world = basePos;
+            world.y += PumpkinRoughAboveBaseMeters;
+            Vector3 local = world;
             if (this.TryGetFieldRootWorldToLocal(buildRoot, out Matrix4x4 worldToLocal))
             {
-                local = worldToLocal.MultiplyPoint3x4(basePos);
+                local = worldToLocal.MultiplyPoint3x4(world);
             }
 
             ulong parentLink = (ulong)baseNetId | (1UL << 32);
