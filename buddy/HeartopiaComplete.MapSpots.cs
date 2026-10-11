@@ -485,86 +485,50 @@ namespace HeartopiaMod
             public float DistanceSqr;
             public byte TrackType;
             public string Label;
-            // >0: species ITEM id (insect item / birdphoto card) — the game-map track switches to
-            // Furniture with this staticId so the big map shows the actual species picture.
+            // >0: species item id (insect item, or the bird entity id). The game-map track
+            // switches to Furniture with this staticId. GetIconName(birdId) is the portrait
+            // p_bird_birdNNN, the same picture the pictorial catalog uses.
             public int SpeciesItemId;
         }
 
-        // Bird staticId (Bird table / entity id) -> birdphoto ITEM id (the photo card whose
-        // NormalItem icon is the species picture). Joined offline from cn tables on the shared
-        // prefab suffix (p_bird_birdNNN <-> p_birdphoto_birdphotoNNN): 140/141 birds mapped.
-        // 63001 (p_bird_bird2001) is deliberately absent: the table gives it birdPhotoId 69201,
-        // which is ANOTHER bird's card (61101) — a wrong species picture is worse than the
-        // generic one, so it keeps the native icon.
-        // ⚠️ REGENERATE THESE THREE MAPS AFTER EVERY CONTENT UPDATE. They are baked joins over
-        // oversea_tables (Bird.normalPrefabId/birdPhotoId, Insect.normalPrefabId), and a species the
-        // update adds is simply absent here — the marker silently falls back to the category
-        // icon, which reads as "the new species have no icon". That is exactly how season 8
-        // shipped: 5 insects and 5 birds missing. Insects need no map — the insect entity
-        // staticId IS its bag-item id (Insect table id == Bagitem id, icons ui_item_normal_
-        // p_insect_insectNNN).
-        private static readonly Dictionary<int, int> BirdIdToPhotoItemId = new Dictionary<int, int>
+        // Bird PREFAB-suffix (trailing number of p_bird_birdNNN) -> bird entity id.
+        // The game-map pin is a Furniture track. RewardUtility.GetIconName(id) returns
+        // TableData.GetPrefabId, and EntityType.bird has isUseIdAsIconName = 0 with no
+        // EntityOverrideIcon in 61000-68999, so a bird id resolves to normalPrefabId
+        // (ui_item_normal_p_bird_birdNNN) — the portrait the pictorial catalog shows.
+        // A birdphoto card id resolves to p_birdphoto_birdphotoNNN instead.
+        // Joined offline from Bird.normalPrefabId: 146 rows, collision-free, including
+        // robin 63001 (p_bird_bird2001), whose birdPhotoId points at another species.
+        // Suffixes are shuffled vs ids (bird120 -> 61119). The tracked object name is
+        // the primary resolve; a live staticId is already the entity id, so it is used
+        // as-is. Regenerate with InsectSuffixToItemId after every content update.
+        private static readonly Dictionary<int, int> BirdSuffixToItemId = new Dictionary<int, int>
         {
-            { 61101, 69201 }, { 61102, 69202 }, { 61103, 69203 }, { 61104, 69209 }, { 61105, 69210 }, { 61106, 69219 },
-            { 61107, 69220 }, { 61108, 69221 }, { 61109, 69211 }, { 61110, 69222 }, { 61111, 69223 }, { 61112, 69224 },
-            { 61113, 69212 }, { 61114, 69225 }, { 61115, 69226 }, { 61116, 69213 }, { 61117, 69227 }, { 61118, 69228 },
-            { 61119, 69241 }, { 61120, 69242 }, { 61121, 69243 }, { 61122, 69244 }, { 61124, 69259 }, { 61125, 69260 },
-            { 61126, 69257 }, { 61127, 69267 }, { 61128, 69268 }, { 61129, 69269 }, { 61130, 69270 }, { 61131, 69271 },
-            { 61132, 69272 }, { 61133, 69273 }, { 61134, 69274 }, { 61135, 69281 }, { 61136, 69291 }, { 61137, 69292 },
-            { 61138, 69310 }, { 61139, 69311 }, { 61140, 69312 }, { 61141, 69313 }, { 61142, 69332 }, { 61143, 69333 },
-            { 61144, 69334 }, { 61145, 69335 }, { 61146, 69336 }, { 61201, 69207 }, { 61202, 69218 }, { 61203, 69245 },
-            { 61204, 69231 }, { 61205, 69232 }, { 61206, 69233 }, { 61207, 69246 }, { 61208, 69247 }, { 61209, 69248 },
-            { 61210, 69261 }, { 61211, 69256 }, { 61212, 69288 }, { 61213, 69289 }, { 61214, 69290 }, { 61215, 69293 },
-            { 61216, 69300 }, { 61217, 69301 }, { 61218, 69302 }, { 61219, 69303 }, { 61220, 69304 }, { 61221, 69305 },
-            { 61222, 69306 }, { 61223, 69307 }, { 61224, 69308 }, { 61225, 69309 }, { 61226, 69314 }, { 61227, 69327 },
-            { 61228, 69328 }, { 61229, 69329 }, { 61230, 69330 }, { 61231, 69331 }, { 61301, 69206 }, { 61302, 69217 },
-            { 61303, 69240 }, { 61304, 69258 }, { 61305, 69280 }, { 61306, 69294 }, { 61307, 69318 }, { 61308, 69319 },
-            { 61309, 69320 }, { 61310, 69321 }, { 61311, 69322 }, { 61401, 69204 }, { 61402, 69214 }, { 61403, 69249 },
-            { 61404, 69250 }, { 61405, 69251 }, { 61406, 69252 }, { 61407, 69262 }, { 61408, 69255 }, { 61409, 69275 },
-            { 61410, 69276 }, { 61411, 69277 }, { 61412, 69278 }, { 61501, 69205 }, { 61502, 69215 }, { 61503, 69229 },
-            { 61504, 69216 }, { 61505, 69263 }, { 61506, 69264 }, { 61507, 69337 }, { 61508, 69338 }, { 61509, 69339 },
-            { 61510, 69340 }, { 61511, 69341 }, { 61512, 69342 }, { 61701, 69234 }, { 61702, 69235 }, { 61703, 69236 },
-            { 61704, 69265 }, { 61705, 69282 }, { 61706, 69285 }, { 61707, 69286 }, { 61708, 69287 }, { 61709, 69315 },
-            { 61710, 69316 }, { 61711, 69323 }, { 61712, 69324 }, { 61713, 69325 }, { 61714, 69326 }, { 61801, 69238 },
-            { 61802, 69239 }, { 61803, 69253 }, { 61804, 69279 }, { 61901, 69208 }, { 61902, 69254 }, { 61903, 69266 },
-            { 61904, 69317 }, { 63002, 69283 }, { 63003, 69284 },
-            // Season 8 (2026-08) additions — the five hoopoe colour morphs.
-            { 61232, 69343 }, { 61233, 69344 }, { 61234, 69345 }, { 61235, 69346 }, { 61236, 69347 },
-            // Harvest-festival ravens. birdPhotoId matches the photo card of the same suffix
-            // (p_birdphoto_birdphoto2101 is 69352, the truffle raven's card).
-            { 61241, 69352 }, { 61238, 69349 }, { 61240, 69351 }, { 61237, 69348 }, { 61239, 69350 },
-        };
-
-        // Bird PREFAB-suffix (the trailing number of p_bird_birdNNN / p_birdphoto_birdphotoNNN —
-        // both share the same NNN) -> birdphoto ITEM id. Joined offline from the Birdphoto table
-        // (137 rows, collision-free). This is the PRIMARY bird resolve: it needs only the tracked
-        // GameObject's name (or the ESP's already-resolved sprite key) — zero Mono calls — while
-        // the staticId path above depends on BirdFarm aura helpers that idle when the farm is off.
-        // NOTE: suffixes are SHUFFLED vs bird staticIds (61119 -> bird120), never derive numerically.
-        private static readonly Dictionary<int, int> BirdSuffixToPhotoItemId = new Dictionary<int, int>
-        {
-            { 1, 69298 }, { 2, 69299 }, { 101, 69201 }, { 102, 69202 }, { 103, 69203 }, { 104, 69209 }, { 105, 69210 }, { 106, 69219 },
-            { 107, 69220 }, { 108, 69221 }, { 109, 69211 }, { 110, 69222 }, { 111, 69223 }, { 112, 69224 }, { 113, 69212 }, { 114, 69225 },
-            { 115, 69226 }, { 116, 69213 }, { 117, 69227 }, { 118, 69228 }, { 119, 69283 }, { 120, 69241 }, { 121, 69242 }, { 122, 69243 },
-            { 123, 69244 }, { 124, 69260 }, { 125, 69259 }, { 126, 69257 }, { 127, 69292 }, { 128, 69291 }, { 129, 69267 }, { 130, 69268 },
-            { 131, 69269 }, { 132, 69270 }, { 133, 69271 }, { 134, 69272 }, { 135, 69273 }, { 136, 69274 }, { 141, 69332 }, { 142, 69333 },
-            { 143, 69334 }, { 144, 69335 }, { 145, 69336 }, { 201, 69207 }, { 202, 69218 }, { 204, 69231 }, { 205, 69232 }, { 206, 69233 },
-            { 207, 69248 }, { 208, 69246 }, { 209, 69245 }, { 210, 69247 }, { 211, 69261 }, { 212, 69256 }, { 218, 69314 }, { 219, 69293 },
-            { 222, 69310 }, { 223, 69311 }, { 224, 69312 }, { 225, 69313 }, { 226, 69288 }, { 227, 69289 }, { 228, 69290 }, { 229, 69305 },
-            { 230, 69306 }, { 231, 69307 }, { 232, 69308 }, { 233, 69309 }, { 234, 69327 }, { 235, 69328 }, { 236, 69329 }, { 237, 69330 },
-            { 238, 69331 }, { 301, 69206 }, { 302, 69217 }, { 303, 69240 }, { 304, 69258 }, { 309, 69280 }, { 310, 69294 }, { 311, 69322 },
-            { 401, 69204 }, { 402, 69214 }, { 403, 69249 }, { 404, 69250 }, { 406, 69251 }, { 407, 69252 }, { 408, 69262 }, { 409, 69255 },
-            { 410, 69275 }, { 411, 69276 }, { 412, 69277 }, { 413, 69278 }, { 414, 69323 }, { 415, 69324 }, { 416, 69325 }, { 417, 69326 },
-            { 501, 69205 }, { 502, 69215 }, { 503, 69229 }, { 504, 69216 }, { 505, 69263 }, { 506, 69264 }, { 507, 69282 }, { 510, 69337 },
-            { 511, 69338 }, { 701, 69234 }, { 702, 69235 }, { 703, 69236 }, { 704, 69265 }, { 705, 69341 }, { 706, 69342 }, { 801, 69238 },
-            { 802, 69239 }, { 803, 69253 }, { 804, 69279 }, { 901, 69208 }, { 902, 69266 }, { 903, 69254 }, { 904, 69317 }, { 1102, 69281 },
-            { 1501, 69318 }, { 1502, 69319 }, { 1503, 69320 }, { 1504, 69321 }, { 1601, 69284 }, { 1701, 69315 }, { 1702, 69316 }, { 1703, 69285 },
-            { 1704, 69286 }, { 1705, 69287 }, { 1801, 69300 }, { 1802, 69301 }, { 1803, 69302 }, { 1804, 69303 }, { 1805, 69304 }, { 1901, 69339 },
-            { 1902, 69340 },
-            // Season 8 (2026-08) additions — the five hoopoe colour morphs.
-            { 239, 69343 }, { 240, 69344 }, { 241, 69345 }, { 242, 69346 }, { 243, 69347 },
-            // Harvest-festival ravens. Suffixes are shuffled vs bird ids (2101 -> 61241).
-            { 2101, 69352 }, { 2102, 69349 }, { 2103, 69351 }, { 2104, 69348 }, { 2105, 69350 },
+            { 101, 61101 }, { 102, 61102 }, { 103, 61103 }, { 104, 61104 }, { 105, 61105 }, { 106, 61106 },
+            { 107, 61107 }, { 108, 61108 }, { 109, 61109 }, { 110, 61110 }, { 111, 61111 }, { 112, 61112 },
+            { 113, 61113 }, { 114, 61114 }, { 115, 61115 }, { 116, 61116 }, { 117, 61117 }, { 118, 61118 },
+            { 119, 63002 }, { 120, 61119 }, { 121, 61120 }, { 122, 61121 }, { 123, 61122 }, { 124, 61125 },
+            { 125, 61124 }, { 126, 61126 }, { 127, 61137 }, { 128, 61136 }, { 129, 61127 }, { 130, 61128 },
+            { 131, 61129 }, { 132, 61130 }, { 133, 61131 }, { 134, 61132 }, { 135, 61133 }, { 136, 61134 },
+            { 141, 61142 }, { 142, 61143 }, { 143, 61144 }, { 144, 61145 }, { 145, 61146 }, { 201, 61201 },
+            { 202, 61202 }, { 204, 61204 }, { 205, 61205 }, { 206, 61206 }, { 207, 61209 }, { 208, 61207 },
+            { 209, 61203 }, { 210, 61208 }, { 211, 61210 }, { 212, 61211 }, { 218, 61226 }, { 219, 61215 },
+            { 222, 61138 }, { 223, 61139 }, { 224, 61140 }, { 225, 61141 }, { 226, 61212 }, { 227, 61213 },
+            { 228, 61214 }, { 229, 61221 }, { 230, 61222 }, { 231, 61223 }, { 232, 61224 }, { 233, 61225 },
+            { 234, 61227 }, { 235, 61228 }, { 236, 61229 }, { 237, 61230 }, { 238, 61231 }, { 239, 61232 },
+            { 240, 61233 }, { 241, 61234 }, { 242, 61235 }, { 243, 61236 }, { 301, 61301 }, { 302, 61302 },
+            { 303, 61303 }, { 304, 61304 }, { 309, 61305 }, { 310, 61306 }, { 311, 61311 }, { 401, 61401 },
+            { 402, 61402 }, { 403, 61403 }, { 404, 61404 }, { 406, 61405 }, { 407, 61406 }, { 408, 61407 },
+            { 409, 61408 }, { 410, 61409 }, { 411, 61410 }, { 412, 61411 }, { 413, 61412 }, { 414, 61711 },
+            { 415, 61712 }, { 416, 61713 }, { 417, 61714 }, { 501, 61501 }, { 502, 61502 }, { 503, 61503 },
+            { 504, 61504 }, { 505, 61505 }, { 506, 61506 }, { 507, 61705 }, { 510, 61507 }, { 511, 61508 },
+            { 701, 61701 }, { 702, 61702 }, { 703, 61703 }, { 704, 61704 }, { 705, 61511 }, { 706, 61512 },
+            { 801, 61801 }, { 802, 61802 }, { 803, 61803 }, { 804, 61804 }, { 901, 61901 }, { 902, 61903 },
+            { 903, 61902 }, { 904, 61904 }, { 1102, 61135 }, { 1501, 61307 }, { 1502, 61308 }, { 1503, 61309 },
+            { 1504, 61310 }, { 1601, 63003 }, { 1701, 61709 }, { 1702, 61710 }, { 1703, 61706 }, { 1704, 61707 },
+            { 1705, 61708 }, { 1801, 61216 }, { 1802, 61217 }, { 1803, 61218 }, { 1804, 61219 }, { 1805, 61220 },
+            { 1901, 61509 }, { 1902, 61510 }, { 2001, 63001 }, { 2101, 61241 }, { 2102, 61238 }, { 2103, 61240 },
+            { 2104, 61237 }, { 2105, 61239 },
         };
 
         // Insect PREFAB-suffix (trailing number of p_insect_insectNNN) -> insect ITEM id (== entity
@@ -628,9 +592,9 @@ namespace HeartopiaMod
 
         // Species ITEM id for a Bird/Insect radar marker (game-map icon). Resolved once per marker
         // (metadata persists — tracked markers), retried every 5s while the target's entity is
-        // still streaming in. Insects: the entity staticId IS the item id. Birds: entity staticId
-        // -> BirdIdToPhotoItemId (the photo card). All resolves are the SAME helpers the ESP
-        // species icons already use; failures leave 0 => the native category icon stays.
+        // still streaming in. Insects: the entity staticId IS the item id. Birds: the entity
+        // staticId IS the portrait id too (GetIconName returns normalPrefabId). Failures leave
+        // 0 => the native category icon stays.
         private int GetMapSpeciesItemIdForMarker(GameObject markerGo, RadarMarkerMetadata metadata, string label)
         {
             if (metadata == null)
@@ -667,7 +631,7 @@ namespace HeartopiaMod
                     }
                     if (suffix > 0)
                     {
-                        BirdSuffixToPhotoItemId.TryGetValue(suffix, out itemId);
+                        BirdSuffixToItemId.TryGetValue(suffix, out itemId);
                     }
 
                     if (itemId <= 0 && target != null)
@@ -681,9 +645,9 @@ namespace HeartopiaMod
                             }
                         }
 
-                        if (birdId > 0 && BirdIdToPhotoItemId.TryGetValue(birdId, out int photoItemId))
+                        if (birdId > 0)
                         {
-                            itemId = photoItemId;
+                            itemId = birdId;
                         }
                     }
                 }
@@ -1091,7 +1055,7 @@ namespace HeartopiaMod
                     && cand.SpeciesItemId > 0)
                 {
                     // Species picture on the big map: Furniture track with the species ITEM id
-                    // (insect item / birdphoto card) instead of the game's generic category pin.
+                    // (insect item / bird entity id, whose icon is the portrait) instead of the game's generic category pin.
                     // Unresolved species (entity still streaming) keep the native icon.
                     type = MapTrackTypeFurniture;
                     staticId = cand.SpeciesItemId;
