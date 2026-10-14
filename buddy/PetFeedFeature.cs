@@ -1,9 +1,11 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using UnityEngine;
 
 namespace HeartopiaMod
@@ -64,9 +66,14 @@ namespace HeartopiaMod
         private float petFeedNextFoodScanAllowedAt = 0f;
         private float petFeedNextFullBackpackFoodScanAt = 0f;
         private readonly Dictionary<int, int> petFeedFoodFullnessCache = new Dictionary<int, int>();
-        private int petFeedSelectedFoodStaticId = 0;
-        private string petFeedSelectedFoodName = "Any Food";
+        // Per-pet food choice. The key is breed:eye:white:sex from the saved pet record
+        // (PetComponentData), not the room netId, which is reassigned on a world change.
+        // The value is a food staticId. The stack is chosen at feed time.
+        private readonly Dictionary<string, int> petFeedFoodStaticIdByPet = new Dictionary<string, int>(StringComparer.Ordinal);
+        private string petFeedFoodPickerKey = string.Empty;
+        private string petFeedFoodPickerPetName = string.Empty;
         private bool petFeedSkipFiveStarFood = true;
+        private bool petFeedSkipRareFood = true;
         private readonly List<PetFeedFavoriteUiRow> petFeedFavoriteUiRows = new List<PetFeedFavoriteUiRow>();
         private Vector2 petFeedFavoriteUiScroll = Vector2.zero;
 
@@ -120,6 +127,9 @@ namespace HeartopiaMod
             public bool IsDog;
             public string Name;
             public int BreedId;
+            public int EyeId;
+            public int WhiteId;
+            public int Sex;
             public int FavoriteGroupId;
             public string PetTextureId;
             public string PetAvatarIconKey;
@@ -154,6 +164,84 @@ namespace HeartopiaMod
             this.petFeedAllCoroutine = ModCoroutines.Start(this.PetFeedAllStartRoutine(dog));
         }
 
+        private void StartPetFeedOne(PetCareEntry entry)
+        {
+            if (entry == null || entry.NetId == 0U)
+            {
+                return;
+            }
+
+            string name = string.IsNullOrWhiteSpace(entry.Name) ? (entry.IsDog ? "dog" : "cat") : entry.Name.Trim();
+            if (this.petFeedAllCoroutine != null)
+            {
+                string activeLabel = string.IsNullOrWhiteSpace(this.petFeedAllActiveLabel) ? "pets" : this.petFeedAllActiveLabel;
+                this.AddMenuNotification("Feed " + name + ": feed " + activeLabel + " is already running", new Color(0.45f, 0.88f, 1f));
+                return;
+            }
+
+            if (Time.realtimeSinceStartup < this.petFeedAllBusyUntil)
+            {
+                float remaining = Mathf.Max(0f, this.petFeedAllBusyUntil - Time.realtimeSinceStartup);
+                this.AddMenuNotification("Feed " + name + ": wait " + remaining.ToString("F1") + "s", new Color(0.45f, 0.88f, 1f));
+                return;
+            }
+
+            this.petFeedAllActiveLabel = name;
+            this.petFeedAllBusyUntil = Time.realtimeSinceStartup + PetFeedActionCooldownSeconds;
+            this.petFeedAllCoroutine = ModCoroutines.Start(this.PetFeedOneStartRoutine(entry, name));
+        }
+
+        private IEnumerator PetFeedOneStartRoutine(PetCareEntry entry, string name)
+        {
+            yield return null;
+
+            if (entry == null || entry.NetId == 0U)
+            {
+                this.petFeedAllCoroutine = null;
+                this.petFeedAllActiveLabel = string.Empty;
+                this.petFeedAllBusyUntil = Time.realtimeSinceStartup + PetFeedActionCooldownSeconds;
+                yield break;
+            }
+
+            if (!this.TryBuildPetFeedPlan(entry.IsDog, out List<PetFeedTarget> targets, out List<PetFeedFoodSupply> foods, out int visibleCount, out string status))
+            {
+                this.AddMenuNotification("Feed " + name + ": " + status, new Color(1f, 0.58f, 0.42f));
+                this.PetFeedLog("Single plan failed: " + status);
+                this.petFeedAllCoroutine = null;
+                this.petFeedAllActiveLabel = string.Empty;
+                this.petFeedAllBusyUntil = Time.realtimeSinceStartup + PetFeedActionCooldownSeconds;
+                yield break;
+            }
+
+            PetFeedTarget target = null;
+            for (int i = 0; i < targets.Count; i++)
+            {
+                PetFeedTarget candidate = targets[i];
+                if (candidate != null && candidate.NetId == entry.NetId)
+                {
+                    target = candidate;
+                    break;
+                }
+            }
+
+            if (target == null)
+            {
+                this.AddMenuNotification("Feed " + name + ": not hungry or out of range", new Color(0.45f, 0.88f, 1f));
+                FeatureLog.Life("PetFeed", "Feed " + name + " skipped: not in feedable set visible=" + visibleCount);
+                this.petFeedAllCoroutine = null;
+                this.petFeedAllActiveLabel = string.Empty;
+                this.petFeedAllBusyUntil = Time.realtimeSinceStartup + PetFeedActionCooldownSeconds;
+                yield break;
+            }
+
+            List<PetFeedTarget> one = new List<PetFeedTarget>(1) { target };
+            IEnumerator routine = this.PetFeedAllRoutine(entry.IsDog, one, foods, visibleCount, "Feed " + name);
+            while (routine.MoveNext())
+            {
+                yield return routine.Current;
+            }
+        }
+
         private IEnumerator PetFeedAllStartRoutine(bool dog)
         {
             string label = dog ? "dogs" : "cats";
@@ -179,17 +267,18 @@ namespace HeartopiaMod
                 yield break;
             }
 
-            IEnumerator routine = this.PetFeedAllRoutine(dog, targets, foods, visibleCount);
+            IEnumerator routine = this.PetFeedAllRoutine(dog, targets, foods, visibleCount, null);
             while (routine.MoveNext())
             {
                 yield return routine.Current;
             }
         }
 
-        private IEnumerator PetFeedAllRoutine(bool dog, List<PetFeedTarget> targets, List<PetFeedFoodSupply> foods, int visibleCount)
+        private IEnumerator PetFeedAllRoutine(bool dog, List<PetFeedTarget> targets, List<PetFeedFoodSupply> foods, int visibleCount, string notifyTitle)
         {
             string label = dog ? "dogs" : "cats";
             string petKind = dog ? "dog" : "cat";
+            string title = string.IsNullOrEmpty(notifyTitle) ? "Feed all " + label : notifyTitle;
             string status;
 
             int fed = 0;
@@ -246,9 +335,9 @@ namespace HeartopiaMod
                     yield return ModWait.Realtime(0.45f);
                 }
 
-                FeatureLog.Life("PetFeed", "Feed all " + label + " complete: visible=" + visibleCount + " hungry=" + targets.Count + " fed=" + fed + " probed=" + probed + " skipped=" + skipped);
+                FeatureLog.Life("PetFeed", title + " complete: visible=" + visibleCount + " hungry=" + targets.Count + " fed=" + fed + " probed=" + probed + " skipped=" + skipped);
                 this.AddMenuNotification(
-                    "Feed all " + label + ": fed " + (fed + probed)
+                    title + ": fed " + (fed + probed)
                     + (skipped > 0 ? ", skipped " + skipped : string.Empty),
                     new Color(0.45f, 1f, 0.55f));
             }
@@ -451,17 +540,6 @@ namespace HeartopiaMod
                     return a.StaticId.CompareTo(b.StaticId);
                 });
                 this.RegisterPetFeedFoodOptions(foods);
-
-                if (targets.Count > 0 && foods.Count == 0)
-                {
-                    status = "AuraMono no usable pet food";
-                    return false;
-                }
-                if (!this.ApplyPetFeedSelectedFoodFilter(foods, targets.Count > 0, out string filterStatus))
-                {
-                    status = "AuraMono " + filterStatus;
-                    return false;
-                }
 
                 foreach (PetFeedTarget target in targets)
                 {
@@ -769,6 +847,24 @@ namespace HeartopiaMod
                 this.TryGetMonoIntMember(animalData, "_breedId", out breedId);
             }
 
+            int eyeId = 0;
+            if (!this.TryGetMonoIntMember(petData, "eyeId", out eyeId))
+            {
+                this.TryGetMonoIntMember(petData, "_eyeId", out eyeId);
+            }
+
+            int whiteId = 0;
+            if (!this.TryGetMonoIntMember(petData, "whiteId", out whiteId))
+            {
+                this.TryGetMonoIntMember(petData, "_whiteId", out whiteId);
+            }
+
+            int sex = 0;
+            if (!this.TryGetMonoIntMember(animalData, "sex", out sex))
+            {
+                this.TryGetMonoIntMember(animalData, "_sex", out sex);
+            }
+
             string name = string.Empty;
             if (!this.TryGetMonoStringMember(animalData, "name", out name))
             {
@@ -790,6 +886,9 @@ namespace HeartopiaMod
                 FavoriteSource = favoriteFoods != null && favoriteFoods.Count > 0 ? "properties" : null,
                 Name = name,
                 BreedId = breedId,
+                EyeId = eyeId,
+                WhiteId = whiteId,
+                Sex = sex,
                 PetTextureId = textureId
             };
             this.TryPopulatePetFeedTableFavoriteFoodsAuraMono(target);
@@ -1394,9 +1493,12 @@ namespace HeartopiaMod
                                 {
                                     existing.PetAvatarIconKey = target.PetAvatarIconKey;
                                 }
-                                if (existing.BreedId == 0 && target.BreedId != 0)
+                                if (target.BreedId != 0)
                                 {
                                     existing.BreedId = target.BreedId;
+                                    existing.EyeId = target.EyeId;
+                                    existing.WhiteId = target.WhiteId;
+                                    existing.Sex = target.Sex;
                                 }
                                 if (existing.FavoriteGroupId == 0 && target.FavoriteGroupId != 0)
                                 {
@@ -1644,34 +1746,6 @@ namespace HeartopiaMod
             this.ClampPetFeedFoodDropdownScrollIndex();
         }
 
-        private bool ApplyPetFeedSelectedFoodFilter(List<PetFeedFoodSupply> foods, bool requireFood, out string status)
-        {
-            status = string.Empty;
-            if (this.petFeedSelectedFoodStaticId <= 0)
-            {
-                return true;
-            }
-
-            string selectedLabel = this.GetPetFeedSelectedFoodLabel();
-            if (foods != null)
-            {
-                foods.RemoveAll(food => food == null || food.StaticId != this.petFeedSelectedFoodStaticId);
-            }
-
-            if ((foods == null || foods.Count == 0) && this.TryAppendCachedPetFeedFoodSupplies(this.petFeedSelectedFoodStaticId, foods))
-            {
-                return true;
-            }
-
-            if (requireFood && (foods == null || foods.Count == 0))
-            {
-                status = "selected pet food unavailable: " + selectedLabel;
-                return false;
-            }
-
-            return true;
-        }
-
         private bool TryAppendCachedPetFeedFoodSupplies(int staticId, List<PetFeedFoodSupply> foods)
         {
             if (staticId <= 0 || foods == null || this.autoSellBagItems == null || this.autoSellBagItems.Count == 0)
@@ -1723,7 +1797,15 @@ namespace HeartopiaMod
 
         private List<PetFeedFoodSupply> GetPetFeedFoodsForTarget(List<PetFeedFoodSupply> foods, PetFeedTarget target)
         {
-            if (foods == null || foods.Count == 0 || target == null)
+            if (target == null)
+            {
+                return new List<PetFeedFoodSupply>();
+            }
+
+            int selectedStaticId = target.IsMine == true
+                ? this.GetPetFeedSavedFoodStaticId(this.GetPetFeedFoodPrefKey(target))
+                : 0;
+            if ((foods == null || foods.Count == 0) && selectedStaticId <= 0)
             {
                 return new List<PetFeedFoodSupply>();
             }
@@ -1745,23 +1827,53 @@ namespace HeartopiaMod
             }
 
             List<PetFeedFoodSupply> candidates = new List<PetFeedFoodSupply>();
-            foreach (PetFeedFoodSupply food in foods)
+            if (foods != null)
             {
-                if (food == null || food.Count <= 0 || food.Fullness <= 0 || food.NetId == 0U || food.IsLock)
+                foreach (PetFeedFoodSupply food in foods)
                 {
-                    continue;
-                }
+                    if (food == null || food.Count <= 0 || food.Fullness <= 0 || food.NetId == 0U || food.IsLock)
+                    {
+                        continue;
+                    }
 
-                if (food.StaticId > 0 && dislikes.Contains(food.StaticId))
-                {
-                    continue;
-                }
+                    if (selectedStaticId > 0)
+                    {
+                        if (food.StaticId != selectedStaticId)
+                        {
+                            continue;
+                        }
+                    }
+                    else if (food.StaticId > 0 && dislikes.Contains(food.StaticId))
+                    {
+                        continue;
+                    }
 
-                candidates.Add(food);
+                    candidates.Add(food);
+                }
             }
 
-            bool hungry = target.CurrentFullness < target.MaxFullness;
-            candidates = this.FilterPetFeedFiveStarCandidates(candidates, hungry);
+            if (selectedStaticId > 0 && candidates.Count == 0)
+            {
+                this.TryAppendCachedPetFeedFoodSupplies(selectedStaticId, candidates);
+            }
+
+            this.RemovePetFeedRareCandidates(candidates);
+            candidates = this.FilterPetFeedFiveStarCandidates(candidates, false);
+
+            if (selectedStaticId > 0)
+            {
+                candidates.Sort((a, b) =>
+                {
+                    int cmp = PetFeedStarSortKey(a).CompareTo(PetFeedStarSortKey(b));
+                    if (cmp != 0)
+                    {
+                        return cmp;
+                    }
+
+                    return a.NetId.CompareTo(b.NetId);
+                });
+                return candidates;
+            }
 
             candidates.Sort((a, b) =>
             {
@@ -1778,10 +1890,38 @@ namespace HeartopiaMod
                     return cmp;
                 }
 
+                cmp = PetFeedStarSortKey(a).CompareTo(PetFeedStarSortKey(b));
+                if (cmp != 0)
+                {
+                    return cmp;
+                }
+
                 return a.StaticId.CompareTo(b.StaticId);
             });
 
             return candidates;
+        }
+
+        private static int PetFeedStarSortKey(PetFeedFoodSupply food)
+        {
+            if (food == null || food.StarRate <= 0)
+            {
+                return 99;
+            }
+
+            return food.StarRate;
+        }
+
+        private void RemovePetFeedRareCandidates(List<PetFeedFoodSupply> candidates)
+        {
+            if (!this.petFeedSkipRareFood || candidates == null || candidates.Count == 0)
+            {
+                return;
+            }
+
+            candidates.RemoveAll(food => food != null
+                && food.StaticId > 0
+                && WildAnimalFeedRareFishStaticIds.Contains(food.StaticId));
         }
 
         private HashSet<int> BuildPetFeedStaticIdSet(List<int> staticIds)
@@ -1906,12 +2046,25 @@ namespace HeartopiaMod
 
         private string GetPetFeedSelectedFoodLabel()
         {
-            if (this.petFeedSelectedFoodStaticId <= 0)
+            if (string.IsNullOrEmpty(this.petFeedFoodPickerKey))
+            {
+                return "Select a pet";
+            }
+
+            string petName = string.IsNullOrWhiteSpace(this.petFeedFoodPickerPetName)
+                ? "Pet"
+                : this.petFeedFoodPickerPetName;
+            return petName + ": " + this.GetPetFeedFoodLabelForStaticId(this.GetPetFeedSavedFoodStaticId(this.petFeedFoodPickerKey));
+        }
+
+        private string GetPetFeedFoodLabelForStaticId(int staticId)
+        {
+            if (staticId <= 0)
             {
                 return "Any Food";
             }
 
-            return this.GetPetFeedFoodDisplayName(this.petFeedSelectedFoodStaticId, this.petFeedSelectedFoodName);
+            return this.GetPetFeedFoodDisplayName(staticId, string.Empty);
         }
 
         private string GetPetFeedFoodDisplayName(int staticId, string name)
@@ -2205,44 +2358,135 @@ namespace HeartopiaMod
 
         private void SelectPetFeedFood(int staticId, string name)
         {
-            this.petFeedSelectedFoodStaticId = Math.Max(0, staticId);
-            this.petFeedSelectedFoodName = this.petFeedSelectedFoodStaticId <= 0
-                ? "Any Food"
-                : this.GetPetFeedFoodDisplayName(this.petFeedSelectedFoodStaticId, name);
+            if (string.IsNullOrEmpty(this.petFeedFoodPickerKey))
+            {
+                this.petFeedFoodDropdownOpen = false;
+                return;
+            }
+
+            int chosen = Math.Max(0, staticId);
+            if (chosen <= 0)
+            {
+                this.petFeedFoodStaticIdByPet.Remove(this.petFeedFoodPickerKey);
+            }
+            else
+            {
+                this.petFeedFoodStaticIdByPet[this.petFeedFoodPickerKey] = chosen;
+                this.GetPetFeedFoodDisplayName(chosen, name);
+            }
+
             this.petFeedFoodDropdownOpen = false;
+            try { this.SaveKeybinds(false); }
+            catch (Exception ex) { ModLogger.Msg("[PetFeed] food pref save failed: " + ex.Message); }
         }
 
-        private void TrySelectDefaultPetFeedFood()
+        private static string BuildPetFeedFoodPrefKey(int breedId, int eyeId, int whiteId, int sex)
         {
-            if (this.petFeedFoodOptions == null || this.petFeedFoodOptions.Count == 0)
+            if (breedId <= 0)
+            {
+                return string.Empty;
+            }
+
+            return breedId.ToString(CultureInfo.InvariantCulture)
+                + ":" + eyeId.ToString(CultureInfo.InvariantCulture)
+                + ":" + whiteId.ToString(CultureInfo.InvariantCulture)
+                + ":" + sex.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private string GetPetFeedFoodPrefKey(PetFeedTarget target)
+        {
+            return target == null
+                ? string.Empty
+                : BuildPetFeedFoodPrefKey(target.BreedId, target.EyeId, target.WhiteId, target.Sex);
+        }
+
+        private string GetPetFeedFoodPrefKey(PetCareEntry entry)
+        {
+            return entry == null
+                ? string.Empty
+                : BuildPetFeedFoodPrefKey(entry.BreedId, entry.EyeId, entry.WhiteId, entry.Sex);
+        }
+
+        private int GetPetFeedSavedFoodStaticId(string key)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                return 0;
+            }
+
+            return this.petFeedFoodStaticIdByPet.TryGetValue(key, out int staticId) ? staticId : 0;
+        }
+
+        private string SerializePetFeedFoodPrefs()
+        {
+            if (this.petFeedFoodStaticIdByPet.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            StringBuilder sb = new StringBuilder();
+            foreach (KeyValuePair<string, int> pair in this.petFeedFoodStaticIdByPet)
+            {
+                if (string.IsNullOrEmpty(pair.Key) || pair.Value <= 0 || pair.Key.IndexOf('=') >= 0 || pair.Key.IndexOf(';') >= 0)
+                {
+                    continue;
+                }
+
+                if (sb.Length > 0)
+                {
+                    sb.Append(';');
+                }
+
+                sb.Append(pair.Key).Append('=').Append(pair.Value.ToString(CultureInfo.InvariantCulture));
+            }
+
+            return sb.ToString();
+        }
+
+        private void DeserializePetFeedFoodPrefs(string raw)
+        {
+            this.petFeedFoodStaticIdByPet.Clear();
+            if (string.IsNullOrWhiteSpace(raw))
             {
                 return;
             }
 
-            bool selectedExists = this.petFeedSelectedFoodStaticId > 0
-                && this.petFeedFoodOptions.Any(option => option != null && option.StaticId == this.petFeedSelectedFoodStaticId);
-            if (selectedExists && !string.Equals(this.petFeedSelectedFoodName, "Any Food", StringComparison.OrdinalIgnoreCase))
+            foreach (string entry in raw.Split(';'))
             {
+                if (string.IsNullOrWhiteSpace(entry))
+                {
+                    continue;
+                }
+
+                int eq = entry.LastIndexOf('=');
+                if (eq <= 0 || eq >= entry.Length - 1)
+                {
+                    continue;
+                }
+
+                string key = entry.Substring(0, eq);
+                if (int.TryParse(entry.Substring(eq + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int staticId)
+                    && staticId > 0)
+                {
+                    this.petFeedFoodStaticIdByPet[key] = staticId;
+                }
+            }
+        }
+
+        private void ArmPetFeedFoodPicker(PetCareEntry entry)
+        {
+            string key = this.GetPetFeedFoodPrefKey(entry);
+            if (string.IsNullOrEmpty(key))
+            {
+                this.AddMenuNotification("Pet food: this pet has no saved id yet", new Color(1f, 0.72f, 0.42f));
                 return;
             }
 
-            PetFeedFoodOption universal = this.petFeedFoodOptions.FirstOrDefault(option =>
-                option != null
-                && option.StaticId > 0
-                && string.Equals(this.GetPetFeedFoodDisplayName(option.StaticId, option.Name), "Universal Animal Food", StringComparison.OrdinalIgnoreCase));
-            if (universal == null)
-            {
-                universal = this.petFeedFoodOptions.FirstOrDefault(option =>
-                    option != null
-                    && option.StaticId > 0
-                    && this.GetPetFeedFoodDisplayName(option.StaticId, option.Name).IndexOf("Universal Animal Food", StringComparison.OrdinalIgnoreCase) >= 0);
-            }
-
-            if (universal != null)
-            {
-                this.petFeedSelectedFoodStaticId = universal.StaticId;
-                this.petFeedSelectedFoodName = this.GetPetFeedFoodDisplayName(universal.StaticId, universal.Name);
-            }
+            this.petFeedFoodPickerKey = key;
+            this.petFeedFoodPickerPetName = entry == null || string.IsNullOrWhiteSpace(entry.Name)
+                ? ("#" + (entry == null ? 0 : entry.NetId))
+                : entry.Name;
+            this.petFeedFoodDropdownOpen = true;
         }
 
         private int GetPetFeedFoodDropdownOptionCount()
@@ -2362,8 +2606,6 @@ namespace HeartopiaMod
                     this.RestoreMissingPetFeedFoodOptions(previousOptions);
                     cachedAdded = Math.Max(0, this.petFeedFoodOptions.Count - cachedBefore);
                 }
-                this.TrySelectDefaultPetFeedFood();
-
                 int count = this.petFeedFoodOptions.Count;
                 this.ClampPetFeedFoodDropdownScrollIndex();
                 this.PetFeedLog("Food scan complete: source=" + (usedPetFoodList ? "petSystem" : "backpackFallback")

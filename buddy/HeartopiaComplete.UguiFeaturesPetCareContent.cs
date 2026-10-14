@@ -180,6 +180,11 @@ namespace HeartopiaMod
             public GameObject PlayButton;     // idle state pair (:363-375)
             public GameObject WashButton;
             public GameObject EnergyButton;   // this port's own — standalone energy-snack feed
+            public GameObject FeedButton;
+            public GameObject SelectFoodButton;
+            public GameObject FoodLabel;
+            public string FoodShown;
+            public int FeedEnabledShown = -1;
             public PetCareEntry BoundEntry;   // rebound every frame — clicks act on the live entry
             public int ActiveSessionShown = -1;   // -1 forces the first apply
             public int PlayWashEnabledShown = -1;
@@ -257,6 +262,7 @@ namespace HeartopiaMod
             public GameObject FeedCatsButton;
             public GameObject FeedDogsButton;
             public Toggle SkipFiveStarToggle;
+            public Toggle SkipRareToggle;
             public Slider ScanRadiusSlider;
             public GameObject ScanRadiusValueLabel;
             public string ScanRadiusShown;
@@ -277,12 +283,12 @@ namespace HeartopiaMod
         // from 224 down is owned by the relayout (three of the four remaining blocks resize).
         private const float UguiPetCareConditionalTopY = 224f;
         private const float UguiPetCarePetRowsTopY = 110f;    // :334 — rows at petsRect.y + 110
-        private const float UguiPetCarePetRowStep = 72f;      // :334 — i * 72
+        private const float UguiPetCarePetRowStep = 104f;     // 72px source row + a food-type button
         private const float UguiPetCareFoodRowStep = 36f;     // :383 petFoodOptionHeight
         private const float UguiPetCareFoodPanelHeight = 300f; // ≈ source :454 (34 + 7*36 + 14)
         private const float UguiPetCareFoodCardClosedHeight = 86f; // :387 — EXACT source formula
         private const float UguiPetCareFoodCardOpenHeight = 386f;  // this port's own (file header)
-        private const float UguiPetCareFeedCardHeight = 202f;      // :590's 160 + this port's SCAN RADIUS row
+        private const float UguiPetCareFeedCardHeight = 238f;      // 202 + Skip Rare Food row
 
         // ----------------------------------------------------------------------------------------
         // Live layout signature — list visibility, dropdown-open, pet-row count and favorite
@@ -572,9 +578,14 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiFeaturesPetCareSkipFiveStarToggled));
             PlaceUguiTopLeft(handle.SkipFiveStarToggle.gameObject, 16f, 78f, rowW - 32f, 28f); // :610
 
+            handle.SkipRareToggle = this.CreateUguiCheckbox(handle.FeedCard.transform, "SkipRareToggle",
+                this.L("Skip Rare Food"), this.petFeedSkipRareFood,
+                new System.Action<bool>(this.OnUguiFeaturesPetCareSkipRareToggled));
+            PlaceUguiTopLeft(handle.SkipRareToggle.gameObject, 16f, 110f, rowW - 32f, 28f);
+
             GameObject favFoodButton = this.CreateUguiPrimaryButton(handle.FeedCard.transform, "FavFoodButton",
                 this.L("Show pets favorite food"), new System.Action(this.OnUguiFeaturesPetCareShowFavoritesClicked));
-            PlaceUguiTopLeft(favFoodButton, 16f, 112f, rowW - 32f, 30f); // :619
+            PlaceUguiTopLeft(favFoodButton, 16f, 148f, rowW - 32f, 30f); // :619
 
             // SCAN RADIUS — this port's OWN row (no IMGUI twin: the source card had no radius
             // control because the scan had no radius at all). Mass Cook's slider row verbatim
@@ -582,15 +593,15 @@ namespace HeartopiaMod
             GameObject radiusLabel = this.CreateUguiLabel(handle.FeedCard.transform, "ScanRadiusLabel",
                 this.L("SCAN RADIUS"), 11f, new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.78f), false);
             this.TrySetUguiLabelBold(radiusLabel);
-            PlaceUguiTopLeft(radiusLabel, 16f, 150f, (rowW - 32f) * 0.55f, 18f);
+            PlaceUguiTopLeft(radiusLabel, 16f, 186f, (rowW - 32f) * 0.55f, 18f);
             handle.ScanRadiusShown = string.Format("{0:F0}m", this.GetPetFeedScanRadiusMeters());
             handle.ScanRadiusValueLabel = this.CreateUguiLabel(handle.FeedCard.transform, "ScanRadiusValue",
                 handle.ScanRadiusShown, 12f, Color.white, false);
-            PlaceUguiTopLeft(handle.ScanRadiusValueLabel, 16f + (rowW - 32f) * 0.55f, 150f, (rowW - 32f) * 0.45f, 18f);
+            PlaceUguiTopLeft(handle.ScanRadiusValueLabel, 16f + (rowW - 32f) * 0.55f, 186f, (rowW - 32f) * 0.45f, 18f);
             handle.ScanRadiusSlider = this.CreateUguiSlider(handle.FeedCard.transform, "ScanRadiusSlider",
                 PetFeedMinScanRadiusMeters, PetFeedMaxScanRadiusMeters, this.GetPetFeedScanRadiusMeters(), true,
                 new System.Action<float>(this.OnUguiFeaturesPetCareScanRadiusChanged));
-            PlaceUguiTopLeft(handle.ScanRadiusSlider.gameObject, 16f, 170f, rowW - 32f, 20f);
+            PlaceUguiTopLeft(handle.ScanRadiusSlider.gameObject, 16f, 206f, rowW - 32f, 20f);
 
             // -------- FAVORITE FOODS card (PetFeedFeature.cs:4503-4571 — zero-when-empty) --------
             handle.FavCard = this.CreateUguiGo("FavCard", scrollContent);
@@ -769,6 +780,16 @@ namespace HeartopiaMod
                 new System.Action(() => this.OnUguiFeaturesPetCarePetEnergyClicked(captured)));
             PlaceUguiTopLeft(row.EnergyButton, rowW - 264f, 0f, 80f, 26f);
 
+            row.FoodShown = this.L("Any Food");
+            row.FeedButton = this.CreateUguiPrimaryButton(root.transform, "FeedButton", this.L("Feed"),
+                new System.Action(() => this.OnUguiFeaturesPetCarePetFeedClicked(captured)));
+            PlaceUguiTopLeft(row.FeedButton, 16f, 68f, 64f, 26f);
+            row.SelectFoodButton = this.CreateUguiPrimaryButton(root.transform, "SelectFoodButton", this.L("Select food"),
+                new System.Action(() => this.OnUguiFeaturesPetCarePetFoodClicked(captured)));
+            PlaceUguiTopLeft(row.SelectFoodButton, 86f, 68f, 108f, 26f);
+            row.FoodLabel = this.CreateUguiLabel(root.transform, "FoodLabel", row.FoodShown, 11f, this.UguiKitTextColor(), false);
+            PlaceUguiTopLeft(row.FoodLabel, 202f, 68f, Mathf.Max(40f, rowW - 218f), 26f);
+
             row.Root = root;
             return row;
         }
@@ -816,6 +837,15 @@ namespace HeartopiaMod
                     BuildUguiFeaturesPetCarePetStatsLine(entry));
                 this.SyncUguiSelfLabelText(row.MessageLabel, ref row.MessageShown,
                     entry.Message ?? string.Empty); // :353
+                string foodLabel = this.GetPetFeedFoodLabelForStaticId(this.GetPetFeedSavedFoodStaticId(this.GetPetFeedFoodPrefKey(entry)));
+                this.SyncUguiSelfLabelText(row.FoodLabel, ref row.FoodShown, foodLabel);
+                bool feedBusy = petCareBusy || this.petFeedAllCoroutine != null || Time.realtimeSinceStartup < this.petFeedAllBusyUntil;
+                int feedState = feedBusy ? 0 : 1;
+                if (feedState != row.FeedEnabledShown)
+                {
+                    row.FeedEnabledShown = feedState;
+                    this.SetUguiButtonInteractable(row.FeedButton, feedState == 1);
+                }
 
                 // The 2-real-state tail (:355-375), diffed per row.
                 bool rowIsActiveSession = petCareBusy && this.IsPetCareEntryActiveSession(entry.NetId);
@@ -946,9 +976,12 @@ namespace HeartopiaMod
             }
 
             // Selection diffs per bind — an IMGUI-twin pick or a scan's default-select moves it.
+            int armedStaticId = string.IsNullOrEmpty(this.petFeedFoodPickerKey)
+                ? -1
+                : this.GetPetFeedSavedFoodStaticId(this.petFeedFoodPickerKey);
             bool selected = staticId <= 0
-                ? this.petFeedSelectedFoodStaticId <= 0   // :498 — Any Food
-                : staticId == this.petFeedSelectedFoodStaticId; // :521
+                ? armedStaticId <= 0
+                : staticId == armedStaticId;
             if (selected != row.SelectedShown)
             {
                 row.SelectedShown = selected;
@@ -1135,7 +1168,9 @@ namespace HeartopiaMod
 
             // :433-439 — icon only while a real food with a cached texture is selected; the value
             // label's left inset flips 12↔34 (the source's +24 shift).
-            int selectedId = this.petFeedSelectedFoodStaticId;
+            int selectedId = string.IsNullOrEmpty(this.petFeedFoodPickerKey)
+                ? 0
+                : this.GetPetFeedSavedFoodStaticId(this.petFeedFoodPickerKey);
             bool wantLookup = selectedId > 0
                 && (selectedId != handle.FoodHeaderIconShownId
                     || (!handle.FoodHeaderIconGo.activeSelf && allowIconRetry));
@@ -1200,6 +1235,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.AutoWashToggle, this.petPlayAutoWashEnabled);
                 this.SyncUguiToggleFromField(handle.TrainLoopToggle, this.petCareTrainLoopEnabled);
                 this.SyncUguiToggleFromField(handle.SkipFiveStarToggle, this.petFeedSkipFiveStarFood);
+                this.SyncUguiToggleFromField(handle.SkipRareToggle, this.petFeedSkipRareFood);
 
                 // MY PETS live pieces: status label (:284) + the caption swap (:286).
                 this.SyncUguiSelfLabelText(handle.PetsStatusLabel, ref handle.PetsStatusShown,
@@ -1445,6 +1481,12 @@ namespace HeartopiaMod
         {
             try
             {
+                if (string.IsNullOrEmpty(this.petFeedFoodPickerKey))
+                {
+                    this.AddMenuNotification(this.L("Select a pet"), new Color(1f, 0.72f, 0.42f));
+                    return;
+                }
+
                 this.petFeedFoodDropdownOpen = !this.petFeedFoodDropdownOpen;
                 UguiShellFeaturesPetCareHandle handle = this.uguiShellFeaturesPetCare;
                 if (handle == null || handle.Root == null)
@@ -1595,6 +1637,58 @@ namespace HeartopiaMod
                 return;
             }
             this.petFeedSkipFiveStarFood = value;
+        }
+
+        private void OnUguiFeaturesPetCareSkipRareToggled(bool value)
+        {
+            if (value == this.petFeedSkipRareFood)
+            {
+                return;
+            }
+
+            this.petFeedSkipRareFood = value;
+            try { this.SaveKeybinds(false); }
+            catch (Exception ex) { ModLogger.Msg("[UguiShell] Pet Care skip rare save failed: " + ex); }
+        }
+
+        private void OnUguiFeaturesPetCarePetFeedClicked(UguiPetCarePetRowHandle row)
+        {
+            if (row == null || row.BoundEntry == null)
+            {
+                return;
+            }
+
+            try
+            {
+                this.StartPetFeedOne(row.BoundEntry);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiShell] Pet Care single feed error: " + ex.Message);
+            }
+        }
+
+        private void OnUguiFeaturesPetCarePetFoodClicked(UguiPetCarePetRowHandle row)
+        {
+            if (row == null || row.BoundEntry == null)
+            {
+                return;
+            }
+
+            try
+            {
+                this.ArmPetFeedFoodPicker(row.BoundEntry);
+                UguiShellFeaturesPetCareHandle handle = this.uguiShellFeaturesPetCare;
+                if (handle != null && handle.Root != null && this.petFeedFoodDropdownOpen)
+                {
+                    try { this.SyncUguiFeaturesPetCareFoodRows(handle); } catch { }
+                    this.RefreshUguiFeaturesPetCareLayout(handle);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiShell] Pet Care food picker error: " + ex.Message);
+            }
         }
 
         // :619-622 — populates petFeedFavoriteUiRows (+ logs/toasts internally); the table's

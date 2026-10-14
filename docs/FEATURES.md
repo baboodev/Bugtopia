@@ -1599,8 +1599,8 @@ Reuse a captured stove set on every start **without re-scanning**, so you can ru
   With no player anchor the radius is not applied and the log says so.
 - Cooldown between bulk feed runs.
 - Per-pet single feed from UI list.
-- Food list from `PetSystem.GetFoods()` (not a full-bag scan); sorts by **lowest fullness** first, then `staticId`.
-- Optional selected-food filter in UI.
+- Food list from `PetSystem.GetFoods()` (not a full-bag scan). With no per-pet choice, sorts by favorite rank, then **lowest fullness**, then **lowest star**, then `staticId`.
+- Each owned pet remembers a food **type** (`staticId`), keyed by `breedId:eyeId:whiteId:sex` from the saved pet record. The choice does not pin a backpack stack. At feed time the mod takes that type's lowest-star stack. **Skip 5 star food** drops `starRate == 5` with no fallback. **Skip Rare Food** (persisted, default on) drops the same fish staticIds as animal troughs. A pet with no choice still uses the favorite ranking, under both filters.
 
 See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
 

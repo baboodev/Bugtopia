@@ -82,6 +82,10 @@ namespace HeartopiaMod
             public int MotionsUnlocked = -1;
             public int MotionsLearned = -1;
             public string Message = string.Empty;
+            public int BreedId;
+            public int EyeId;
+            public int WhiteId;
+            public int Sex;
         }
 
         private readonly List<PetCareEntry> petCareEntries = new List<PetCareEntry>();
@@ -930,7 +934,11 @@ namespace HeartopiaMod
                     NetId = pet.NetId,
                     Name = pet.Name ?? string.Empty,
                     IsDog = pet.IsDog,
-                    Fullness = pet.CurrentFullness
+                    Fullness = pet.CurrentFullness,
+                    BreedId = pet.BreedId,
+                    EyeId = pet.EyeId,
+                    WhiteId = pet.WhiteId,
+                    Sex = pet.Sex
                 };
                 this.TryLoadPetCareStats(entry);
                 this.TryLoadPetCareMotionCounts(entry);
