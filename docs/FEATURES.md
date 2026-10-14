@@ -497,13 +497,62 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
   by 0.2–0.7 mm even along the grid axes, and a piece standing at 45° to the floor grid missed by
   4.3 cm. A tolerance artefact, not an obstacle.
 - **Lever:** one Mono NativeDetour on `BuildSystemBaseMode.RayDetection(in Ray, Vector3, Quaternion,
-  bool)` that calls the original, then — only for a `CrafeMode_Moving` instance (class read off the
-  vtable), `force == true`, `alignment.result == Success` and a snap of at most 0.1 m — sets the
-  alignment's XZ back to the requested destination. The push then runs the game's whole path (path
-  box-cast, confirm, save) and, because `ExecuteTask` succeeds, `CastSkill` plays the push animation.
-  Real refusals keep their own codes (`CantMoveIfObstacle` 94156, `MovingPathHasBlocked` 93200,
-  no zone at the destination), and a larger snap is left to the game.
+  bool)` that calls the original, then — for a `CrafeMode_Moving` instance (class read off the
+  vtable) with `force == true` — sets the alignment's XZ back to the requested destination at any
+  distance, and rewrites `OutOfPutZoneXZ` (309) to Success. The same toast is also
+  `GenConfirmOptions` → `BuildSingle.IsOutOfFieldBounds` returning 309; a second detour drops that
+  309 for the confirm just armed (`CancelCraftResult` clears the arm). A destination ray that
+  misses the surface nulls `placeZone` (`NoBuildingZone` / `NotMatchPutFlag`), and the confirm
+  forces 94157 on that null; the detour then calls the original again from the piece position
+  already in `_dstPosition` (the mode's ray is only 0.2 m, so that call widens it) and writes the
+  requested XZ back.
+  The path box-cast (93200) and the destination overlap (94156) are the next two toggles.
 - Live status counts the pushes it let through. Source: `buddy/PushSnapFixFeature.cs`.
+
+### Push Path Clear
+
+- Self tab toggle **Push items without the "obstacles in the path" refusal** (default off, independent
+  of Push Snap Fix). Skips **"Obstacles in the movement path."** = `ErrorCode.MovingPathHasBlocked`
+  (93200) on a ChestMove push.
+- **Why the game refuses:** after the snap check, `CrafeMode_Moving.Input_ConfirmMoveTowards` box-casts
+  from the destination back to the piece (`craftBox.boxSize * 0.4`, `LayerMasks.Building`). A
+  non-trigger hit that is not the piece itself sets 93200.
+- **Lever:** one Mono NativeDetour on `PhysicsExtension.BoxCastNonAlloc(Vector3, Vector3, Vector3,
+  XDRaycastHitArrayWrapper, Quaternion, float, int)` — the 7-argument overload, whose only caller is
+  that cast. The hook calls the original; while the toggle is on and the cast hit something, it
+  returns 0 so the 93200 loop does not run. Vehicle and ice casts use other overloads.
+  A destination that overlaps something is the next toggle (`CantMoveIfObstacle` 94156).
+- Live status counts blocked paths it cleared. Source: `buddy/PushPathClearFeature.cs`.
+
+### Push Obstacle Ahead
+
+- Self tab toggle **Push items without the "obstacle ahead" refusal** (default off, independent of
+  the two toggles above). Skips **"Obstacle ahead. Try another direction!"** =
+  `ErrorCode.CantMoveIfObstacle` (94156) on a ChestMove push.
+- **Why the game refuses:** `Input_ConfirmMoveTowards` remaps `ErrorCode.HasCollision` (92349) to
+  94156. The value comes from the destination probe (`RayDetection` stores it on the alignment) or,
+  when that probe succeeded, from `IntersectionTesting.Test` inside `GenConfirmOptions`. The 0.1 mm
+  snap check runs first: a snap miss is still 94157 and never reaches this toast.
+- **Lever:** the RayDetection detour rewrites a push-mode HasCollision result to Success, and arms
+  a one-shot only when the snap check will pass. `IntersectionTesting.Test(3)` then turns a
+  HasCollision result into Success while that arm is set. `BuildFocus.CancelCraftResult` (the
+  push's `finally`) clears the arm. Other error codes, and every placement test outside that
+  window, are unchanged.
+- Live status counts the obstacle refusals it cleared. Source: `buddy/PushObstacleAheadFeature.cs`.
+
+### Push Out Of Range
+
+- Self tab toggle **Push items without the "out of placement range" refusal** (default off,
+  independent). Skips **"Out of placement range."** Localization id 346 is
+  `ErrorCode.AlignmentInValidGrid`, not `OutOfHomeLandXZ` (314, which reads "Target outside Home
+  boundaries").
+- **Why the game refuses:** `Alignment.DetectAdsorption` returns 346 when every snapped cell fails
+  `_IsAlignmentPosInArea`. The confirm copies `alignment.result` into the tip. A piece re-ray that
+  finds a zone and then fails that grid snap leaves 346 on the alignment.
+- **Lever:** the RayDetection detour, while this toggle is on, writes that 346 back to Success and
+  puts the requested XZ on the alignment so the snap check does not turn it into 94157. A near
+  piece re-ray with 346 is accepted the same way. 314, 331 and 332 stay enforced.
+- Live status counts the range refusals it cleared. Source: `buddy/PushSnapFixFeature.cs`.
 
 ### Auto-learn Recipes
 

@@ -262,6 +262,9 @@ namespace HeartopiaMod
             public bool craftDirectSendEnabled;
             public bool interactObstacleBypassEnabled;
             public bool pushSnapFixEnabled;
+            public bool pushPathClearEnabled;
+            public bool pushObstacleAheadEnabled;
+            public bool pushOutOfRangeEnabled;
             public bool interactBuildModeBypassEnabled;
             public bool petHeightLimitBypassEnabled;
             public bool persistentHudEnabled;

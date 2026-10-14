@@ -67,6 +67,9 @@ namespace HeartopiaMod
             "Direct Craft Send",
             "Interact Obstacle Bypass",
             "Push Snap Fix",
+            "Push Path Clear",
+            "Push Obstacle Ahead",
+            "Push Out Of Range",
             "Interact Build-Mode Bypass",
             "Pet Height Limit Bypass",
             "Minimap Zoom",
@@ -413,6 +416,21 @@ namespace HeartopiaMod
             if (this.pushSnapFixEnabled)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Push Snap Fix", this.pushSnapFixStatus));
+            }
+
+            if (this.pushPathClearEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Push Path Clear", this.pushPathClearStatus));
+            }
+
+            if (this.pushObstacleAheadEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Push Obstacle Ahead", this.pushObstacleAheadStatus));
+            }
+
+            if (this.pushOutOfRangeEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Push Out Of Range", this.pushOutOfRangeStatus));
             }
 
             if (this.interactBuildModeBypassEnabled)

@@ -128,6 +128,9 @@ namespace HeartopiaMod
             public Toggle InteractObstacleToggle;
             public Toggle InteractBuildModeToggle;
             public Toggle PushSnapFixToggle;
+            public Toggle PushPathClearToggle;
+            public Toggle PushObstacleAheadToggle;
+            public Toggle PushOutOfRangeToggle;
             public Toggle PetHeightLimitToggle;
             public Toggle BlockTutorialsToggle;
             public Toggle AutoLearnRecipesToggle;
@@ -422,6 +425,15 @@ namespace HeartopiaMod
             handle.PushSnapFixToggle = this.CreateUguiCheckbox(scrollContent, "PushSnapFixToggle",
                 this.L("Push items without the \"too crowded\" refusal"), this.pushSnapFixEnabled,
                 new System.Action<bool>(this.OnUguiSelfPushSnapFixToggled));
+            handle.PushPathClearToggle = this.CreateUguiCheckbox(scrollContent, "PushPathClearToggle",
+                this.L("Push items without the \"obstacles in the path\" refusal"), this.pushPathClearEnabled,
+                new System.Action<bool>(this.OnUguiSelfPushPathClearToggled));
+            handle.PushObstacleAheadToggle = this.CreateUguiCheckbox(scrollContent, "PushObstacleAheadToggle",
+                this.L("Push items without the \"obstacle ahead\" refusal"), this.pushObstacleAheadEnabled,
+                new System.Action<bool>(this.OnUguiSelfPushObstacleAheadToggled));
+            handle.PushOutOfRangeToggle = this.CreateUguiCheckbox(scrollContent, "PushOutOfRangeToggle",
+                this.L("Push items without the \"out of placement range\" refusal"), this.pushOutOfRangeEnabled,
+                new System.Action<bool>(this.OnUguiSelfPushOutOfRangeToggled));
             handle.PetHeightLimitToggle = this.CreateUguiCheckbox(scrollContent, "PetHeightLimitToggle",
                 this.L("Pet cats and dogs from any height"), this.petHeightLimitBypassEnabled,
                 new System.Action<bool>(this.OnUguiSelfPetHeightLimitToggled));
@@ -735,6 +747,24 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.PushPathClearToggle != null)
+            {
+                PlaceUguiTopLeft(handle.PushPathClearToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
+            if (handle.PushObstacleAheadToggle != null)
+            {
+                PlaceUguiTopLeft(handle.PushObstacleAheadToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
+            if (handle.PushOutOfRangeToggle != null)
+            {
+                PlaceUguiTopLeft(handle.PushOutOfRangeToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             if (handle.PetHeightLimitToggle != null)
             {
                 PlaceUguiTopLeft(handle.PetHeightLimitToggle.gameObject, rowX, yCur, rowW, 24f);
@@ -817,6 +847,9 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.InteractObstacleToggle, this.interactObstacleBypassEnabled);
                 this.SyncUguiToggleFromField(handle.InteractBuildModeToggle, this.interactBuildModeBypassEnabled);
                 this.SyncUguiToggleFromField(handle.PushSnapFixToggle, this.pushSnapFixEnabled);
+                this.SyncUguiToggleFromField(handle.PushPathClearToggle, this.pushPathClearEnabled);
+                this.SyncUguiToggleFromField(handle.PushObstacleAheadToggle, this.pushObstacleAheadEnabled);
+                this.SyncUguiToggleFromField(handle.PushOutOfRangeToggle, this.pushOutOfRangeEnabled);
                 this.SyncUguiToggleFromField(handle.PetHeightLimitToggle, this.petHeightLimitBypassEnabled);
                 this.SyncUguiToggleFromField(handle.BlockTutorialsToggle, this.blockTutorials);
                 this.SyncUguiToggleFromField(handle.AutoLearnRecipesToggle, this.autoLearnRecipes);
@@ -1357,6 +1390,36 @@ namespace HeartopiaMod
                 return;
             }
             this.SetPushSnapFixEnabled(value);
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfPushPathClearToggled(bool value)
+        {
+            if (value == this.pushPathClearEnabled)
+            {
+                return;
+            }
+            this.SetPushPathClearEnabled(value);
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfPushObstacleAheadToggled(bool value)
+        {
+            if (value == this.pushObstacleAheadEnabled)
+            {
+                return;
+            }
+            this.SetPushObstacleAheadEnabled(value);
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfPushOutOfRangeToggled(bool value)
+        {
+            if (value == this.pushOutOfRangeEnabled)
+            {
+                return;
+            }
+            this.SetPushOutOfRangeEnabled(value);
             try { this.SaveKeybinds(false); } catch { }
         }
 
