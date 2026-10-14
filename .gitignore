@@ -1,4 +1,5 @@
 Directory.Build.Props
+Directory.Build.props
 # The launcher's is not the machine-local one this rule is for: it splits the two build flavours
 # into their own output folders and has to be in the repository.
 !launcher/Directory.Build.props
