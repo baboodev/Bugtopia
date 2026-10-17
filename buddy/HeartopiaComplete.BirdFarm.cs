@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -1334,6 +1334,11 @@ namespace HeartopiaMod
                         continue;
                     }
 
+                    if (!this.IsBirdSpeciesAllowed(candidateStaticId))
+                    {
+                        continue;
+                    }
+
                     if (!this.TryGetAuraMonoEntityPosition(entityObj, out Vector3 candidatePosition))
                     {
                         candidatePosition = playerPos;
@@ -1807,6 +1812,11 @@ namespace HeartopiaMod
                         continue;
                     }
 
+                    if (!this.IsBirdSpeciesAllowed(candidateStaticId))
+                    {
+                        continue;
+                    }
+
                     if (candidateIsPerchBird && candidateBirdStandNetId == 0U)
                     {
                         continue;
@@ -1938,8 +1948,24 @@ namespace HeartopiaMod
                 return false;
             }
 
-            BirdFarmAuraCandidate best = this.cachedBirdFarmAuraCandidates[0];
-            this.cachedBirdFarmAuraCandidates.RemoveAt(0);
+            BirdFarmAuraCandidate best = null;
+            for (int i = 0; i < this.cachedBirdFarmAuraCandidates.Count; i++)
+            {
+                BirdFarmAuraCandidate candidate = this.cachedBirdFarmAuraCandidates[i];
+                if (candidate == null || !this.IsBirdSpeciesAllowed(candidate.StaticId))
+                {
+                    continue;
+                }
+
+                best = candidate;
+                this.cachedBirdFarmAuraCandidates.RemoveAt(i);
+                break;
+            }
+
+            if (best == null)
+            {
+                return false;
+            }
             netId = best.NetId;
             staticId = best.StaticId;
             distance = best.Distance;
@@ -2307,6 +2333,11 @@ namespace HeartopiaMod
                         continue;
                     }
 
+                    if (!this.IsBirdSpeciesAllowed(candidateStaticId))
+                    {
+                        continue;
+                    }
+
                     Vector3 candidatePosition = playerPos;
                     this.TryExtractBirdEntityPosition(entityObj, out candidatePosition);
                     float candidateDistance = Vector3.Distance(playerPos, candidatePosition);
@@ -2477,6 +2508,11 @@ namespace HeartopiaMod
                     }
 
                     if (!this.TryResolveBirdStaticIdFromScannable(entityObj, birdScannable, candidateNetId, out int candidateStaticId, out string staticSource))
+                    {
+                        continue;
+                    }
+
+                    if (!this.IsBirdSpeciesAllowed(candidateStaticId))
                     {
                         continue;
                     }
@@ -3642,6 +3678,12 @@ namespace HeartopiaMod
             if (!this.IsBirdFarmStaticIdLikelyBird(staticId))
             {
                 status = $"Skipping non-bird staticId {staticId}";
+                return false;
+            }
+
+            if (!this.IsBirdSpeciesAllowed(staticId))
+            {
+                status = "Skipping bird " + staticId + " (filter)";
                 return false;
             }
 

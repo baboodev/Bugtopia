@@ -144,9 +144,11 @@ namespace HeartopiaMod
         // (HeartopiaComplete.UiKit.cs:531), and its sub array {"Main","Settings"} display indices
         // match radarSubTab's own 0/1 exactly (HeartopiaComplete.cs:2402-2403; DrawRadarTab
         // dispatches radarSubTab == 1 → DrawRadarSettingsTab, default → the main radar tab).
+        // Filter is appended at 2 so Main and Settings stay put.
         private const int UguiShellRadarTabIndex = 5;                // Radar (internal id 4)
         private const int UguiShellRadarMainSubIndex = 0;            // "Main" within Radar's subs
         private const int UguiShellRadarSettingsSubIndex = 1;        // "Settings" within Radar's subs
+        private const int UguiShellRadarFilterSubIndex = 2;          // "Filter" within Radar's subs
 
         // New Features (Phase 3 item 12 — split into rounds like Resource Gathering; round 1 =
         // Animal Care, HeartopiaComplete.UguiNewFeaturesContent.cs): display position 3 carries

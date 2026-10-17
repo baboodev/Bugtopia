@@ -384,6 +384,7 @@
     <Compile Include="HeartopiaComplete.UguiCombinedFarmContent.cs" />
     <Compile Include="HeartopiaComplete.UguiBirdsContent.cs" />
     <Compile Include="HeartopiaComplete.UguiRadarContent.cs" />
+    <Compile Include="HeartopiaComplete.UguiRadarFilterContent.cs" />
     <Compile Include="HeartopiaComplete.UguiNewFeaturesContent.cs" />
     <Compile Include="HeartopiaComplete.UguiSandSculptureContent.cs" />
     <Compile Include="HeartopiaComplete.UguiHobbyContent.cs" />

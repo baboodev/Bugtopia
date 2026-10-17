@@ -1738,6 +1738,12 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
   `IsSameType` widening), and the ESP tag (code GA, pink) crops it out of the loaded `SpriteAtlas`
   (`TryGetRadarIconFromSpriteAtlas`). Only animals streamed in around the player can be seen.
 - Toggle per category; select all / clear all.
+- **Filter** sub-tab — icon grids of known insects and birds. An empty selection shows and
+  collects every species. A selection is an allow-list: Radar markers for that category, and
+  Insect Farm / Bird Farm (including Combined Farm), keep only those species. Saved in
+  `RadarConfigData` (`insectSpeciesFilter`, `birdSpeciesFilter`). Settings → Reset Defaults
+  does not clear it. While a list is non-empty the status overlay shows `Birds` / `Insects`
+  with `N filtered`; each row has a checkbox on Settings → Status Overlay.
 - Max distance slider (25–1000 m, default 75 m).
 - Marker styles: **Default** (icon markers) or **Simple Text**.
 - Force refresh scan button.

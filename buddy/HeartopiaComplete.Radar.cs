@@ -52,6 +52,8 @@ namespace HeartopiaMod
             data.resourceVisualEspMaxMarkers = this.resourceVisualEspMaxMarkers;
             data.priorityCapybaraSlab = this.priorityCapybaraSlab;
             data.priorityOakSlab = this.priorityOakSlab;
+            data.insectSpeciesFilter = new List<int>(this.radarInsectSpeciesFilterList);
+            data.birdSpeciesFilter = new List<int>(this.radarBirdSpeciesFilterList);
         }
 
         private void ApplyRadarConfig(RadarConfigData data)
@@ -87,6 +89,8 @@ namespace HeartopiaMod
             this.resourceVisualEspMaxMarkers = Mathf.Clamp(data.resourceVisualEspMaxMarkers <= 0 ? 120 : data.resourceVisualEspMaxMarkers, 20, 200);
             this.priorityCapybaraSlab = data.priorityCapybaraSlab;
             this.priorityOakSlab = data.priorityOakSlab;
+            this.ReplaceRadarSpeciesFilter(data.insectSpeciesFilter, this.radarInsectSpeciesFilterList, this.radarInsectSpeciesFilter);
+            this.ReplaceRadarSpeciesFilter(data.birdSpeciesFilter, this.radarBirdSpeciesFilterList, this.radarBirdSpeciesFilter);
         }
 
         private string GetRadarSettingsPath()
@@ -2120,6 +2124,11 @@ namespace HeartopiaMod
                         continue;
                     }
 
+                    if (!this.IsRadarInsectObjectAllowed(insectObject))
+                    {
+                        continue;
+                    }
+
                     int insectInstanceId = insectObject.GetInstanceID();
                     if (!this.trackedObjectMarkers.ContainsKey(insectInstanceId))
                     {
@@ -2183,6 +2192,7 @@ namespace HeartopiaMod
                             if (!candidate.activeInHierarchy) continue;
                             if (Vector3.Distance(position, candidate.transform.position) > maxBirdRange2) continue;
                             if (!this.ShouldTrackBirdObject(candidate.name.ToLowerInvariant())) continue;
+                            if (!this.IsRadarBirdObjectAllowed(candidate)) continue;
                             int instanceID = candidate.GetInstanceID();
                             if (!this.trackedObjectMarkers.ContainsKey(instanceID))
                             {

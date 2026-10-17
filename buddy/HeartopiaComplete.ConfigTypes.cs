@@ -583,6 +583,11 @@ namespace HeartopiaMod
             public int resourceVisualEspMaxMarkers = 120;
             public bool priorityCapybaraSlab;
             public bool priorityOakSlab;
+            // Species allow-lists for Radar → Filter. Empty = no restriction. Values are insect
+            // item ids and bird entity ids (the same ids InsectSuffixToItemId / BirdSuffixToItemId
+            // resolve to). Absent on old configs, which leaves the initializer and means "all".
+            public List<int> insectSpeciesFilter = new List<int>();
+            public List<int> birdSpeciesFilter = new List<int>();
         }
 
         [Serializable]

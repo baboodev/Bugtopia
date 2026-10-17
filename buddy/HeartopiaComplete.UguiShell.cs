@@ -231,6 +231,7 @@ namespace HeartopiaMod
             this.ProcessUguiShellFeaturesPetCareOnUpdate();
             this.ProcessUguiShellRadarMainOnUpdate();
             this.ProcessUguiShellRadarSettingsOnUpdate();
+            this.ProcessUguiShellRadarFilterOnUpdate();
             this.ProcessUguiShellMusicOnUpdate();
             this.ProcessUguiShellMcpOnUpdate();
             this.ProcessUguiShellHobbyPumpkinOnUpdate();
@@ -454,7 +455,7 @@ namespace HeartopiaMod
                     new string[] { this.L("Main"), this.L("Food & Repair"), this.L("Auto Buy"), this.L("Auto Sell"), this.L("Mass Cook"), this.L("Puzzle"), this.L("Pet Care") },
                     new string[] { this.L("Animal Care"), this.L("Daily Quests"), this.L("homeland_farm.title"), this.L("pictures.title"), this.L("Ice Skating"), this.L("extra.title"), this.L("Sea Clean") },
                     new string[] { this.L("Pumpkin Carving"), this.L("Sand Sculpture"), this.L("Snow Sculpting") },
-                    new string[] { this.L("Main"), this.L("Settings") },
+                    new string[] { this.L("Main"), this.L("Settings"), this.L("Filter") },
                     new string[] { this.L("Home"), this.L("Animal Care"), this.L("NPCs"), this.L("Locations"), this.L("Events"), this.L("House"), this.L("Custom"), this.L("XYZ"), this.L("Spawn Vehicle") },
                     new string[0], // Bag / Warehouse — no sub-tabs
                     new string[0], // Research / Order — no sub-tabs
@@ -781,6 +782,11 @@ namespace HeartopiaMod
                                     // Phase 3 item 7: Radar Settings sub-tab — with it, Radar's
                                     // whole sub range (0-1) has real content.
                                     subContents[j] = this.BuildUguiShellRadarSettingsContent(
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
+                                }
+                                else if (i == UguiShellRadarTabIndex && j == UguiShellRadarFilterSubIndex)
+                                {
+                                    subContents[j] = this.BuildUguiShellRadarFilterContent(
                                         container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellNewFeaturesTabIndex && j == UguiShellAnimalCareSubIndex)

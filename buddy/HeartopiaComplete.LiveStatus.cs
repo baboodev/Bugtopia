@@ -23,6 +23,8 @@ namespace HeartopiaMod
         private static readonly string[] StatusOverlayEntryLabels =
         {
             "Radar",
+            "Birds",
+            "Insects",
             "Foraging",
             "Aura Farm",
             "Combined Farm",
@@ -118,6 +120,11 @@ namespace HeartopiaMod
             return shown;
         }
 
+        private string FormatSpeciesFilterStatus(int count)
+        {
+            return count.ToString() + " " + this.L("filtered");
+        }
+
         private List<LiveFeatureStatusEntry> CollectLiveFeatureStatusEntries()
         {
             List<LiveFeatureStatusEntry> entries = new List<LiveFeatureStatusEntry>(24);
@@ -125,6 +132,20 @@ namespace HeartopiaMod
             if (this.isRadarActive)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Radar", "Active"));
+            }
+
+            // Radar → Filter counts. Hidden from the overlay by the Settings → Status Overlay
+            // checkboxes (same catalog labels). The in-menu LIVE rail is not filtered by those.
+            int birdFilterCount = this.radarBirdSpeciesFilter.Count;
+            if (birdFilterCount > 0)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Birds", this.FormatSpeciesFilterStatus(birdFilterCount)));
+            }
+
+            int insectFilterCount = this.radarInsectSpeciesFilter.Count;
+            if (insectFilterCount > 0)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Insects", this.FormatSpeciesFilterStatus(insectFilterCount)));
             }
 
             if (this.autoFarmActive)

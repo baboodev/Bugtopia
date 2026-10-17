@@ -242,6 +242,7 @@ namespace HeartopiaMod
             { "Raspberries", "Raspberries" },
             { "Bubbles", "Bubbles" },
             { "Birds", "Birds" },
+            { "filtered", "filtered" },
             // Food & repair options
             { "Repair Kit", "Repair Kit" },
             { "Crafty Repair Kit", "Crafty Repair Kit" },
@@ -1484,6 +1485,7 @@ namespace HeartopiaMod
             { "Raspberries", "Frambuesas" },
             { "Bubbles", "Burbujas" },
             { "Birds", "Aves" },
+            { "filtered", "filtrados" },
             // Food & repair options
             { "Repair Kit", "Caja de reparación" },
             { "Crafty Repair Kit", "Caja vivaz de reparación" },
@@ -2758,6 +2760,7 @@ namespace HeartopiaMod
             { "Capybara Slab", "水豚石板" },
             { "Oak-Oak Slab", "橡走走石板" },
             { "Birds", "鸟类" },
+            { "filtered", "已筛选" },
             // Food & repair options
             { "Repair Kit", "修理包" },
             { "Crafty Repair Kit", "工匠修理包" },
@@ -4179,6 +4182,7 @@ namespace HeartopiaMod
             // Backfilled translations
             { "Bird", "Pássaro" },
             { "Birds", "Pássaros" },
+            { "filtered", "filtrados" },
             { "Equip Bird Scanner", "Equipar scanner de pássaros" },
             { "Auto Bird Farm", "Farm automático de pássaros" },
             { "Use Bait", "Usar isca" },
@@ -5266,6 +5270,7 @@ namespace HeartopiaMod
             { "Raspberries", "ราสเบอร์รี่" },
             { "Bubbles", "ฟอง" },
             { "Birds", "นก" },
+            { "filtered", "ที่กรอง" },
             { "Repair Kit", "ชุดซ่อม" },
             { "Crafty Repair Kit", "ชุดซ่อมพิเศษ" },
             { "Bad Food", "อาหารเสีย" },
@@ -6553,6 +6558,7 @@ namespace HeartopiaMod
             { "Raspberries", "라즈베리" },
             { "Bubbles", "버블" },
             { "Birds", "조류" },
+            { "filtered", "필터됨" },
             // Food & repair options
             { "Repair Kit", "수리 키트" },
             { "Crafty Repair Kit", "신속 수리 키트" },

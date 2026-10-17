@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -97,6 +97,7 @@ namespace HeartopiaMod
                 string componentsStatus;
                 if (this.TryGetLoadedInsectTargetsViaGetComponents(ids, positions, out componentsStatus))
                 {
+                    this.FilterLoadedInsectTargets(ids, positions);
                     detectedCount = ids.Count;
                     status = componentsStatus;
                     return detectedCount > 0;
@@ -105,6 +106,7 @@ namespace HeartopiaMod
                 string auraStatus;
                 if (this.TryGetLoadedInsectTargetsAuraMono(ids, positions, out auraStatus))
                 {
+                    this.FilterLoadedInsectTargets(ids, positions);
                     detectedCount = ids.Count;
                     status = auraStatus;
                     return detectedCount > 0;
@@ -170,6 +172,7 @@ namespace HeartopiaMod
                     this.InsectFarmNetLog($"Loaded insect target netId={netId} via {netSource} pos={position}");
                 }
 
+                this.FilterLoadedInsectTargets(ids, positions);
                 detectedCount = ids.Count;
                 status = detectedCount > 0
                     ? $"Loaded insect targets ready ({detectedCount}/{inspected})"
@@ -892,6 +895,11 @@ namespace HeartopiaMod
             HashSet<uint> seen = new HashSet<uint>();
             foreach ((uint id, Vector3 pos, float dist) item in collected)
             {
+                if (!this.IsInsectNetIdAllowed(item.id))
+                {
+                    continue;
+                }
+
                 if (ids.Count >= batchSize)
                 {
                     break;
@@ -1001,6 +1009,11 @@ namespace HeartopiaMod
                 HashSet<uint> seen = new HashSet<uint>();
                 foreach (var item in collected)
                 {
+                    if (!this.IsInsectNetIdAllowed(item.id))
+                    {
+                        continue;
+                    }
+
                     if (ids.Count >= batchSize)
                     {
                         break;
