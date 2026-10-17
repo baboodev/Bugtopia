@@ -846,6 +846,15 @@ namespace HeartopiaMod
                 }
             }
 
+            // A species key is already requested (variant owls/bats included). The category
+            // diamond below is cached forever by the ESP the moment it is returned — the same
+            // reason Contaminated has no fallback. Leave the badge up until the portrait lands.
+            if (!string.IsNullOrWhiteSpace(specificIconKey))
+            {
+                texture = null;
+                return false;
+            }
+
             texture = this.GetRadarIconFallbackTexture(canonicalLabel);
             return texture != null;
         }
