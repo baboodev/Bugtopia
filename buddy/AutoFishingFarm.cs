@@ -150,7 +150,7 @@ namespace HeartopiaMod
         // backs off instead of spending budget). **0 = UNLIMITED**: throw for as long as the bag
         // holds out. The budget refills on enable, on a max change, and via the Reset button.
         public enum AutoBaitChoice { Bait = 0, Attractor = 1 }
-        private const float AutoBaitNoFishSecondsMin = 3f;
+        private const float AutoBaitNoFishSecondsMin = 1f;
         private const float AutoBaitNoFishSecondsMax = 60f;
         private const float AutoBaitNoFishSecondsDefault = 10f;
         private const int AutoBaitMaxCountDefault = 10;

@@ -130,8 +130,8 @@ namespace HeartopiaMod
         private const float UguiFishingBaitBlockTop = 488f;
 
         // The IMGUI No-fish slider bounds — mirror AutoFishingFarm.AutoBaitNoFishSecondsMin/Max
-        // (private consts 3f/60f; a numeric range, deliberately not exposed for this).
-        private const float UguiFishingNoFishMin = 3f;
+        // (private consts 1f/60f; a numeric range, deliberately not exposed for this).
+        private const float UguiFishingNoFishMin = 1f;
         private const float UguiFishingNoFishMax = 60f;
 
         // ----------------------------------------------------------------------------------------
