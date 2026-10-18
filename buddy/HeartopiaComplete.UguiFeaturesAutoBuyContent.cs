@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -109,9 +110,29 @@ namespace HeartopiaMod
     // ============================================================================================
     public partial class HeartopiaComplete
     {
+        private const float UguiShopBuyCellH = 112f;
+        private const float UguiShopBuyGridMaxH = 336f;
+        private const int UguiShopBuyColumns = 5;
+
         // ----------------------------------------------------------------------------------------
         // Handle (per-instance state — assigned LAST in the builder, Research idiom)
         // ----------------------------------------------------------------------------------------
+
+        private sealed class UguiShopBuyCell
+        {
+            public GameObject Root;
+            public Image Bg;
+            public Image Ring;
+            public GameObject IconGo;
+            public Image Icon;
+            public GameObject InitialsLabel;
+            public GameObject NameLabel;
+            public GameObject StockLabel;
+            public InputField QtyField;
+            public bool HasIcon;
+            public string ShownName;
+            public string ShownMeta;
+        }
 
         private sealed class UguiShellFeaturesAutoBuyHandle
         {
@@ -155,7 +176,22 @@ namespace HeartopiaMod
             public GameObject ForceOpenStatusLabel;
             public string ForceOpenStatusShown;
 
-            public int LayoutSignature = -1;      // reason-row-visible bit
+            public GameObject GridHeader;
+            public GameObject GridScroll;
+            public Transform GridContent;
+            public GameObject GridHint;
+            public string GridHintShown;
+            public string BuyButtonShown;
+            public readonly List<UguiShopBuyCell> Cells = new List<UguiShopBuyCell>();
+            public int GridIdentity = int.MinValue;
+            public Color CellFill;
+            public Color CellSelectedFill;
+            public Color CellText;
+            public Color CellMuted;
+            public Color RingNormal;
+            public Color RingSelected;
+
+            public int LayoutSignature = -1;      // reason row + grid size
             public float NextSlowSyncAt;          // 0.5s tick for InputField re-syncs (header)
             public int ErrorCount;                // per-frame sync disabled at 3 (LIVE rail idiom)
         }
@@ -171,7 +207,12 @@ namespace HeartopiaMod
         {
             bool supported = this.IsForceShopBuyAllSupported(this.forceOpenShopSelectedIndex,
                 out string blockReason);
-            return (!supported && !string.IsNullOrEmpty(blockReason)) ? 1 : 0;
+            int reason = (!supported && !string.IsNullOrEmpty(blockReason)) ? 1 : 0;
+            int mode = this.shopBuyGridShowList ? 2 : (string.IsNullOrEmpty(this.ShopBuyGridHintText()) ? 0 : 1);
+            int rows = this.shopBuyGridShowList
+                ? Mathf.CeilToInt(this.shopBuyGridRows.Count / (float)UguiShopBuyColumns)
+                : 0;
+            return reason | (mode << 2) | (rows << 8);
         }
 
         // ----------------------------------------------------------------------------------------
@@ -264,11 +305,38 @@ namespace HeartopiaMod
                 handle.MaxPerItemSeen, 8, new System.Action<string>(this.OnUguiFeaturesAutoBuyMaxPerItemEdited));
             PlaceUguiTopLeft(handle.MaxPerItemField.gameObject, 138f, 156f, 80f, 22f);
 
-            // -------- BUY ALL (COIN) (:1203-1208 — gated primary 220x32 at 186) --------
+            Color accent = this.UguiKitAccent();
+            handle.CellFill = this.UguiKitContentBg();
+            handle.CellSelectedFill = new Color(accent.r, accent.g, accent.b, 0.18f);
+            handle.CellText = bodyColor;
+            handle.CellMuted = mutedColor;
+            handle.RingNormal = new Color(1f, 1f, 1f,
+                Mathf.Clamp(0.05f + (this.uiPanelAlpha * 0.05f), 0.05f, 0.10f));
+            handle.RingSelected = new Color(accent.r, accent.g, accent.b, 0.8f);
+            handle.GridHeader = this.CreateUguiLabel(card.transform, "ShopItemsHeader",
+                this.L("Shop items"), 12f, bodyColor, false);
+            handle.GridScroll = this.CreateUguiScrollView(card.transform, "ShopItemGrid", 1f, out Transform gridContent);
+            handle.GridContent = gridContent;
+            try
+            {
+                Image gridBg = handle.GridScroll.GetComponent<Image>();
+                if (gridBg != null)
+                {
+                    gridBg.color = Color.clear;
+                }
+            }
+            catch { }
+            handle.GridHintShown = string.Empty;
+            handle.GridHint = this.CreateUguiLabel(card.transform, "ShopItemsHint",
+                string.Empty, 12f, mutedColor, false);
+            this.TrySetUguiLabelWrapped(handle.GridHint);
+
+            // -------- BUY ALL / BUY SELECTED — position owned by the relayout --------
+            handle.BuyButtonShown = this.L("BUY ALL (COIN)");
             handle.BuyAllButton = this.CreateUguiPrimaryButton(card.transform, "BuyAllButton",
-                this.L("BUY ALL (COIN)"),
+                handle.BuyButtonShown,
                 new System.Action(this.OnUguiFeaturesAutoBuyBuyAllClicked));
-            PlaceUguiTopLeft(handle.BuyAllButton, 14f, 186f, 220f, 32f);
+            PlaceUguiTopLeft(handle.BuyAllButton, 14f, 186f, 260f, 32f);
             bool initialSupported = this.IsForceShopBuyAllSupported(this.forceOpenShopSelectedIndex,
                 out string initialBlockReason);
             this.SetUguiButtonInteractable(handle.BuyAllButton,
@@ -365,7 +433,36 @@ namespace HeartopiaMod
             bool reasonVisible = !supported && !string.IsNullOrEmpty(blockReason);
             float forceWidth = handle.ForceWidth;
 
-            float yCur = 222f;
+            float yCur = 186f;
+            bool showGrid = this.shopBuyGridShowList && this.shopBuyGridRows.Count > 0;
+            string hint = this.ShopBuyGridHintText();
+            bool showHint = !showGrid && !string.IsNullOrEmpty(hint);
+            SetUguiGoActive(handle.GridHeader, showGrid);
+            SetUguiGoActive(handle.GridScroll, showGrid);
+            SetUguiGoActive(handle.GridHint, showHint);
+            if (showGrid)
+            {
+                PlaceUguiTopLeft(handle.GridHeader, 14f, yCur, forceWidth, 20f);
+                yCur += 22f;
+                int rowCount = Mathf.CeilToInt(this.shopBuyGridRows.Count / (float)UguiShopBuyColumns);
+                float listH = Mathf.Min(rowCount * UguiShopBuyCellH, UguiShopBuyGridMaxH);
+                PlaceUguiTopLeft(handle.GridScroll, 14f, yCur, forceWidth, listH);
+                this.SetUguiScrollContentHeight(handle.GridContent, rowCount * UguiShopBuyCellH);
+                yCur += listH + 8f;
+            }
+            else if (showHint)
+            {
+                this.SyncUguiSelfLabelText(handle.GridHint, ref handle.GridHintShown, hint);
+                PlaceUguiTopLeft(handle.GridHint, 14f, yCur, forceWidth, 36f);
+                yCur += 40f;
+            }
+
+            if (handle.BuyAllButton != null)
+            {
+                PlaceUguiTopLeft(handle.BuyAllButton, 14f, yCur, 260f, 32f);
+            }
+            yCur += 40f;
+
             SetUguiGoActive(handle.BlockReasonLabel, reasonVisible);
             if (reasonVisible)
             {
@@ -517,6 +614,17 @@ namespace HeartopiaMod
                 this.SyncUguiSelfLabelText(handle.ForceOpenStatusLabel, ref handle.ForceOpenStatusShown,
                     this.forceOpenShopStatus ?? "No shop selected.");
 
+                this.TickShopBuyGrid();
+                this.SyncUguiShopBuyGrid(handle);
+                string buyLabel = (this.shopBuyGridStoreId > 0 && this.CountShopBuyPicks(this.shopBuyGridStoreId) > 0)
+                    ? this.L("BUY SELECTED (COIN)")
+                    : this.L("BUY ALL (COIN)");
+                if (!string.Equals(buyLabel, handle.BuyButtonShown, StringComparison.Ordinal))
+                {
+                    handle.BuyButtonShown = buyLabel;
+                    this.SetUguiButtonLabel(handle.BuyAllButton, buyLabel);
+                }
+
                 // InputField external re-syncs (IMGUI-twin edits) — 0.5s tick; diffed against
                 // the *Seen caches so in-progress UGUI typing is never clobbered.
                 if (Time.unscaledTime >= handle.NextSlowSyncAt)
@@ -537,7 +645,7 @@ namespace HeartopiaMod
                 }
 
                 // Conditional-layout signature (the reason row shifts everything below it).
-                int signature = (!supported && !string.IsNullOrEmpty(blockReason)) ? 1 : 0;
+                int signature = this.ComputeUguiFeaturesAutoBuyLayoutSignature();
                 if (signature != handle.LayoutSignature)
                 {
                     handle.LayoutSignature = signature;
@@ -572,6 +680,7 @@ namespace HeartopiaMod
             this.forceOpenShopStatus = index == 0
                 ? "No shop selected."
                 : ("Selected: " + this.forceOpenShopOptions[index]);
+            this.MarkShopBuyGridDirty();
         }
 
         // Gui.cs:1172-1184 — the SAME out-string is stored into forceOpenShopStatus AND shown as
@@ -780,6 +889,339 @@ namespace HeartopiaMod
             {
                 this.forceOpenShopStatus = manualNameStatus;
                 this.AddMenuNotification(manualNameStatus, new Color(1f, 0.55f, 0.55f));
+            }
+        }
+
+        private void ClearUguiShopBuyCells(UguiShellFeaturesAutoBuyHandle handle)
+        {
+            for (int i = 0; i < handle.Cells.Count; i++)
+            {
+                UguiShopBuyCell cell = handle.Cells[i];
+                if (cell != null && cell.Root != null)
+                {
+                    UnityEngine.Object.Destroy(cell.Root);
+                }
+            }
+
+            handle.Cells.Clear();
+            handle.GridIdentity = int.MinValue;
+        }
+
+        private int ComputeShopBuyGridIdentity()
+        {
+            unchecked
+            {
+                int hash = this.shopBuyGridStoreId;
+                for (int i = 0; i < this.shopBuyGridRows.Count; i++)
+                {
+                    hash = (hash * 31) + this.shopBuyGridRows[i].Item.SlotId;
+                    hash = (hash * 31) + this.shopBuyGridRows[i].Item.ItemId;
+                }
+
+                return hash;
+            }
+        }
+
+        private void SyncUguiShopBuyGrid(UguiShellFeaturesAutoBuyHandle handle)
+        {
+            if (handle == null)
+            {
+                return;
+            }
+
+            string hint = this.ShopBuyGridHintText();
+            this.SyncUguiSelfLabelText(handle.GridHint, ref handle.GridHintShown, hint);
+            if (!this.shopBuyGridShowList || this.shopBuyGridRows.Count == 0 || handle.GridContent == null)
+            {
+                if (handle.Cells.Count > 0)
+                {
+                    this.ClearUguiShopBuyCells(handle);
+                }
+
+                return;
+            }
+
+            int identity = this.ComputeShopBuyGridIdentity();
+            if (identity != handle.GridIdentity || handle.Cells.Count != this.shopBuyGridRows.Count)
+            {
+                this.RebuildUguiShopBuyCells(handle, identity);
+            }
+
+            this.RebindUguiShopBuyCells(handle);
+        }
+
+        private void RebuildUguiShopBuyCells(UguiShellFeaturesAutoBuyHandle handle, int identity)
+        {
+            this.ClearUguiShopBuyCells(handle);
+            handle.GridIdentity = identity;
+            float stride = Mathf.Max(1f, (handle.ForceWidth - 22f) / UguiShopBuyColumns);
+            float cellW = Mathf.Max(1f, stride - 8f);
+            for (int i = 0; i < this.shopBuyGridRows.Count; i++)
+            {
+                int col = i % UguiShopBuyColumns;
+                int row = i / UguiShopBuyColumns;
+                UguiShopBuyCell cell = this.BuildUguiShopBuyCell(handle, i, cellW);
+                PlaceUguiTopLeft(cell.Root, col * stride + 2f, row * UguiShopBuyCellH + 2f, cellW, UguiShopBuyCellH - 8f);
+                handle.Cells.Add(cell);
+            }
+        }
+
+        private UguiShopBuyCell BuildUguiShopBuyCell(UguiShellFeaturesAutoBuyHandle handle, int index, float cellW)
+        {
+            UguiShopBuyCell cell = new UguiShopBuyCell();
+            GameObject root = this.CreateUguiGo("ShopItem" + index, handle.GridContent);
+            cell.Root = root;
+            cell.Bg = this.AddUguiImage(root, handle.CellFill, true, 1.5f);
+            cell.Bg.raycastTarget = true;
+            Button button = root.AddComponent<Button>();
+            button.targetGraphic = cell.Bg;
+            button.transition = Selectable.Transition.None;
+            int captured = index;
+            this.WireUguiClick(button.onClick, new System.Action(() => this.OnUguiShopBuyCellClicked(captured)));
+            this.AddUguiRingOverlay(root, handle.RingNormal, 1.5f);
+            Transform ringT = root.transform.Find("Ring");
+            cell.Ring = (ringT != null) ? ringT.GetComponent<Image>() : null;
+
+            float iconSize = 42f;
+            float iconX = Mathf.Max(0f, (cellW - iconSize) * 0.5f);
+            cell.IconGo = this.CreateUguiGo("Icon", root.transform);
+            PlaceUguiTopLeft(cell.IconGo, iconX, 4f, iconSize, iconSize);
+            cell.Icon = cell.IconGo.AddComponent<Image>();
+            cell.Icon.raycastTarget = false;
+            try { cell.Icon.preserveAspect = true; } catch { }
+            cell.IconGo.SetActive(false);
+
+            cell.InitialsLabel = this.CreateUguiLabel(root.transform, "Initials", "", 14f, handle.CellText, true);
+            this.TrySetUguiLabelBold(cell.InitialsLabel);
+            PlaceUguiTopLeft(cell.InitialsLabel, iconX, 4f, iconSize, iconSize);
+
+            cell.StockLabel = this.CreateUguiLabel(root.transform, "Stock", "", 10f, handle.CellMuted, false);
+            this.TrySetUguiLabelRightAligned(cell.StockLabel);
+            PlaceUguiTopLeft(cell.StockLabel, cellW - 30f, 2f, 26f, 14f);
+
+            cell.NameLabel = this.CreateUguiLabel(root.transform, "Name", "", 10f, handle.CellText, true);
+            this.TrySetUguiTransferNameWrapped(cell.NameLabel);
+            PlaceUguiTopLeft(cell.NameLabel, 2f, 48f, Mathf.Max(1f, cellW - 4f), 24f);
+
+            string initialQty = "1";
+            if (index >= 0 && index < this.shopBuyGridRows.Count)
+            {
+                ShopBuyGridRow gridRow = this.shopBuyGridRows[index];
+                if (this.TryGetShopBuyPickCount(gridRow.Item.StoreId, gridRow.Item.SlotId, gridRow.Item.ItemId, out int saved) && saved > 0)
+                {
+                    initialQty = saved.ToString();
+                }
+            }
+
+            cell.QtyField = this.CreateUguiInputField(root.transform, "Qty", initialQty, 6, null);
+            if (cell.QtyField != null)
+            {
+                cell.QtyField.contentType = InputField.ContentType.IntegerNumber;
+                try { cell.QtyField.SetTextWithoutNotify(initialQty); } catch { }
+                this.TryWireUguiEvent(cell.QtyField.onValueChanged,
+                    new System.Action<string>(text => this.OnUguiShopBuyQtyEdited(captured, text)), "ShopBuyQty");
+                // The kit field's 8px/3px text inset plus a 13px font clips the glyph to nothing
+                // inside a ~58px tile (measured: text rect 38x14). Shrink the inset, center the
+                // digit, and lift the fill off the cell color so the box reads as an input.
+                PlaceUguiTopLeft(cell.QtyField.gameObject, 2f, 74f, Mathf.Max(1f, cellW - 4f), 26f);
+                Image qtyBg = cell.QtyField.GetComponent<Image>();
+                if (qtyBg != null)
+                {
+                    Color lift = handle.CellText;
+                    qtyBg.color = new Color(lift.r, lift.g, lift.b, 0.16f);
+                    try { qtyBg.pixelsPerUnitMultiplier = 3.5f; } catch { }
+                }
+                if (cell.QtyField.textComponent != null)
+                {
+                    cell.QtyField.textComponent.fontSize = 12;
+                    cell.QtyField.textComponent.alignment = TextAnchor.MiddleCenter;
+                    cell.QtyField.textComponent.horizontalOverflow = HorizontalWrapMode.Overflow;
+                    cell.QtyField.textComponent.verticalOverflow = VerticalWrapMode.Overflow;
+                    StretchUguiFill(cell.QtyField.textComponent.gameObject, 1f, 0f, 1f, 0f);
+                }
+            }
+
+            return cell;
+        }
+
+        private void RebindUguiShopBuyCells(UguiShellFeaturesAutoBuyHandle handle)
+        {
+            int count = Math.Min(handle.Cells.Count, this.shopBuyGridRows.Count);
+            for (int i = 0; i < count; i++)
+            {
+                this.BindUguiShopBuyCell(handle, handle.Cells[i], this.shopBuyGridRows[i]);
+            }
+        }
+
+        private void BindUguiShopBuyCell(UguiShellFeaturesAutoBuyHandle handle, UguiShopBuyCell cell, ShopBuyGridRow row)
+        {
+            if (cell == null || cell.Root == null)
+            {
+                return;
+            }
+
+            ShopBuyAllCandidate item = row.Item;
+            bool selected = this.TryGetShopBuyPickCount(item.StoreId, item.SlotId, item.ItemId, out int saved) && saved > 0;
+            bool unavailable = row.AlreadyOwned || (!item.UnlimitedStock && item.LeftCount <= 0);
+            if (cell.Bg != null)
+            {
+                cell.Bg.color = selected ? handle.CellSelectedFill : handle.CellFill;
+            }
+
+            if (cell.Ring != null)
+            {
+                cell.Ring.color = selected ? handle.RingSelected : handle.RingNormal;
+            }
+
+            string name = this.ShopBuyCellName(item.ItemStaticId, row.Name);
+            if (!string.Equals(cell.ShownName, name, StringComparison.Ordinal))
+            {
+                cell.ShownName = name;
+                this.SetUguiLabelText(cell.NameLabel, name);
+            }
+
+            string stock = (item.UnlimitedStock && !row.AlreadyOwned) ? "∞" : ("x" + item.LeftCount.ToString());
+            if (!string.Equals(cell.ShownMeta, stock, StringComparison.Ordinal))
+            {
+                cell.ShownMeta = stock;
+                this.SetUguiLabelText(cell.StockLabel, stock);
+            }
+
+            Texture2D tex = null;
+            bool hasIcon = item.ItemStaticId > 0 && this.TryGetShopBuyItemTexture(item.ItemStaticId, out tex) && tex != null;
+            Sprite sprite = hasIcon ? this.GetOrCreateUguiTransferSprite(tex) : null;
+            hasIcon = sprite != null;
+            cell.HasIcon = hasIcon;
+            if (cell.Icon != null)
+            {
+                if (hasIcon)
+                {
+                    cell.Icon.sprite = sprite;
+                }
+                SetUguiGoActive(cell.IconGo, hasIcon);
+            }
+            SetUguiGoActive(cell.InitialsLabel, !hasIcon);
+            if (!hasIcon)
+            {
+                this.SetUguiLabelText(cell.InitialsLabel, this.GetAutoSellItemInitials(name));
+            }
+
+            if (unavailable)
+            {
+                try
+                {
+                    Text nameText = (cell.NameLabel != null) ? cell.NameLabel.GetComponent<Text>() : null;
+                    if (nameText != null)
+                    {
+                        nameText.color = handle.CellMuted;
+                    }
+                }
+                catch { }
+            }
+
+            if (selected && cell.QtyField != null)
+            {
+                bool focused = false;
+                try { focused = cell.QtyField.isFocused; } catch { }
+                string want = saved.ToString();
+                if (!focused && !string.Equals(cell.QtyField.text, want, StringComparison.Ordinal))
+                {
+                    try { cell.QtyField.SetTextWithoutNotify(want); } catch { }
+                }
+            }
+        }
+
+        private bool TryGetShopBuyItemTexture(int staticId, out Texture2D texture)
+        {
+            texture = null;
+            if (staticId <= 0)
+            {
+                return false;
+            }
+
+            string idKey = staticId.ToString();
+            if (this.autoSellBagItemTextures.TryGetValue(idKey, out texture) && texture != null)
+            {
+                return true;
+            }
+
+            if (this.TryGetRadarStaticIdIconKey(staticId, out string spriteKey) && !string.IsNullOrWhiteSpace(spriteKey))
+            {
+                string normalized = this.NormalizeRadarIconSpriteKey(spriteKey);
+                if (!string.IsNullOrWhiteSpace(normalized)
+                    && this.autoSellBagItemTextures.TryGetValue(normalized, out texture)
+                    && texture != null)
+                {
+                    return true;
+                }
+
+                string match = this.NormalizeAutoSellMatchKey(spriteKey);
+                if (!string.IsNullOrWhiteSpace(match)
+                    && this.autoSellBagItemTextures.TryGetValue(match, out texture)
+                    && texture != null)
+                {
+                    return true;
+                }
+            }
+
+            this.RequestGameItemIconByStaticId(staticId, idKey);
+            return false;
+        }
+
+        private void OnUguiShopBuyCellClicked(int index)
+        {
+            if (this.shopBuyAllRunning || index < 0 || index >= this.shopBuyGridRows.Count)
+            {
+                return;
+            }
+
+            ShopBuyGridRow row = this.shopBuyGridRows[index];
+            ShopBuyAllCandidate item = row.Item;
+            if (this.TryGetShopBuyPickCount(item.StoreId, item.SlotId, item.ItemId, out _))
+            {
+                this.SetShopBuyPick(item.StoreId, item.SlotId, item.ItemId, 0, true);
+                return;
+            }
+
+            int qty = 1;
+            UguiShellFeaturesAutoBuyHandle handle = this.uguiShellFeaturesAutoBuy;
+            if (handle != null && index < handle.Cells.Count && handle.Cells[index] != null && handle.Cells[index].QtyField != null)
+            {
+                string text = handle.Cells[index].QtyField.text;
+                if (int.TryParse(text, out int parsed))
+                {
+                    qty = Mathf.Clamp(parsed, 1, 999999);
+                }
+            }
+
+            this.SetShopBuyPick(item.StoreId, item.SlotId, item.ItemId, qty, true);
+        }
+
+        private void OnUguiShopBuyQtyEdited(int index, string text)
+        {
+            if (index < 0 || index >= this.shopBuyGridRows.Count)
+            {
+                return;
+            }
+
+            if (!int.TryParse(text, out int parsed))
+            {
+                return;
+            }
+
+            ShopBuyAllCandidate item = this.shopBuyGridRows[index].Item;
+            int qty = Mathf.Clamp(parsed, 1, 999999);
+            this.SetShopBuyPick(item.StoreId, item.SlotId, item.ItemId, qty, true);
+            UguiShellFeaturesAutoBuyHandle handle = this.uguiShellFeaturesAutoBuy;
+            if (handle == null || index >= handle.Cells.Count || handle.Cells[index] == null || handle.Cells[index].QtyField == null)
+            {
+                return;
+            }
+
+            string normalized = qty.ToString();
+            if (!string.Equals(normalized, text ?? string.Empty, StringComparison.Ordinal))
+            {
+                try { handle.Cells[index].QtyField.SetTextWithoutNotify(normalized); } catch { }
             }
         }
     }

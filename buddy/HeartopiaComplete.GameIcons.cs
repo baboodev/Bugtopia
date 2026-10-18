@@ -205,10 +205,18 @@ namespace HeartopiaMod
 
             try
             {
+                // Same miss MapSpots already handles. ByFullName is hint-driven and first-image-only:
+                // namespace XDTGameSystem.* is mapped to the XDTGameSystem image, that image is
+                // loaded, so the probe stops there. RewardUtility is compiled into XDTDataAndProtocol
+                // (ilspy-dumps/XDTDataAndProtocol/XDTGameSystem.Utilities). The across-assemblies
+                // fallback only sees MonoHost's BCL list. AnySpelling would find it by sweeping
+                // every image; that sweep is for unknown types, not a per-staticId icon lookup.
                 IntPtr rewardUtilityClass = this.FindAuraMonoClassByFullName("XDTGameSystem.Utilities.RewardUtility");
                 if (rewardUtilityClass == IntPtr.Zero)
                 {
-                    rewardUtilityClass = this.FindAuraMonoClassAcrossLoadedAssemblies("XDTGameSystem.Utilities", "RewardUtility");
+                    rewardUtilityClass = this.FindAuraMonoClassInImages(
+                        "XDTGameSystem.Utilities", "RewardUtility",
+                        new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll" });
                 }
                 if (rewardUtilityClass == IntPtr.Zero)
                 {

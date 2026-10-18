@@ -54,8 +54,31 @@ namespace HeartopiaMod
             public int RewardType;
             public int RewardId;
             public bool IsLimitedOne;
+            public bool UnlimitedStock;
             public string Name;
         }
+
+        private struct ShopBuyGridRow
+        {
+            public ShopBuyAllCandidate Item;
+            public string Name;
+            public bool AlreadyOwned;
+        }
+
+        private const string ShopItemUpdateEventName = "XDTDataAndProtocol.Events.ShopItemUpdate";
+        private const float ShopBuyGridCollectInterval = 0.5f;
+
+        private readonly List<ShopBuyPickEntry> shopBuyPicks = new List<ShopBuyPickEntry>();
+        private readonly List<ShopBuyGridRow> shopBuyGridRows = new List<ShopBuyGridRow>();
+        private readonly Dictionary<int, string> shopBuyNameCache = new Dictionary<int, string>();
+        private readonly Dictionary<int, float> shopBuyNameRetryAt = new Dictionary<int, float>();
+        private int shopBuyGridStoreId = -1;
+        private bool shopBuyGridDirty = true;
+        private bool shopBuyGridShowList;
+        private float shopBuyGridNextCollectAt;
+        private bool shopBuyGridHookArmed;
+        private string shopBuyGridHintKey = string.Empty;
+        private string shopBuyGridHintRaw = string.Empty;
 
         private void ShopBuyAllLog(string message, bool always = false)
         {
@@ -96,7 +119,10 @@ namespace HeartopiaMod
 
             this.shopBuyAllStatus = "Preparing: " + label + " (id " + storeId + ")...";
             this.shopBuyAllRunning = true;
-            this.shopBuyAllCoroutine = ModCoroutines.Start(this.ShopBuyAllGoldRoutine(storeId, label));
+            bool selected = this.CountShopBuyPicks(storeId) > 0;
+            this.shopBuyAllCoroutine = ModCoroutines.Start(selected
+                ? this.ShopBuySelectedRoutine(storeId, label)
+                : this.ShopBuyAllGoldRoutine(storeId, label));
         }
 
         private static string ShopBuyAllFormatName(in ShopBuyAllCandidate candidate)
@@ -181,32 +207,40 @@ namespace HeartopiaMod
             }
 
             List<IntPtr> elements = new List<IntPtr>();
-            if (!this.TryEnumerateAuraMonoCollectionItems(listObj, elements) || elements.Count == 0)
-            {
-                error = "Aura shop item list empty.";
-                return false;
-            }
-
+            List<uint> pins = new List<uint>();
             int added = 0;
-            for (int i = 0; i < elements.Count; i++)
+            try
             {
-                if (!this.TryReadAuraShopItemData(elements[i], out ShopBuyAllCandidate candidate))
+                if (!this.TryEnumerateAuraMonoCollectionItems(listObj, elements, pins) || elements.Count == 0)
                 {
-                    continue;
+                    error = "Aura shop item list empty.";
+                    return false;
                 }
 
-                if (candidate.StoreId > 0 && candidate.StoreId != storeId)
+                for (int i = 0; i < elements.Count; i++)
                 {
-                    continue;
-                }
+                    if (!this.TryReadAuraShopItemData(elements[i], out ShopBuyAllCandidate candidate))
+                    {
+                        continue;
+                    }
 
-                if (!this.IsShopBuyAllPurchasableCoinItem(in candidate) || this.IsShopBuyAllAlreadyOwned(null, in candidate))
-                {
-                    continue;
-                }
+                    if (candidate.StoreId > 0 && candidate.StoreId != storeId)
+                    {
+                        continue;
+                    }
 
-                items.Add(candidate);
-                added++;
+                    if (!this.IsShopBuyAllPurchasableCoinItem(in candidate) || this.IsShopBuyAllAlreadyOwned(null, in candidate))
+                    {
+                        continue;
+                    }
+
+                    items.Add(candidate);
+                    added++;
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
             }
 
             if (added <= 0)
@@ -240,19 +274,20 @@ namespace HeartopiaMod
             candidate.ItemStaticId = this.TryReadAuraMonoStructNestedIntField(itemObj, "rewardData", "staticId");
             candidate.RewardType = this.TryReadAuraMonoStructNestedIntField(itemObj, "rewardData", "rewardType");
             candidate.RewardId = this.TryReadAuraMonoStructNestedIntField(itemObj, "rewardData", "rewardId");
-            candidate.LeftCount = this.TryReadAuraMonoStructIntField(itemObj, "_leftCount");
-            if (candidate.LeftCount <= 0)
+            int rawLeft = this.TryReadAuraMonoStructIntField(itemObj, "_leftCount");
+            int reserve = this.TryReadAuraMonoStructIntField(itemObj, "reserve");
+            candidate.LeftCount = rawLeft;
+            if (candidate.LeftCount <= 0 && reserve > 0)
             {
-                int reserve = this.TryReadAuraMonoStructIntField(itemObj, "reserve");
-                if (reserve > 0)
-                {
-                    candidate.LeftCount = Mathf.Max(0, reserve - candidate.BoughtCount);
-                }
+                candidate.LeftCount = Mathf.Max(0, reserve - candidate.BoughtCount);
             }
 
-            if (candidate.IsLimitedOne && candidate.ItemStaticId > 0 && this.TryGetPlayerItemCount(candidate.ItemStaticId, out int ownedCount))
+            // buyCount == 0 in the table: _leftCount and reserve both stay <= 0 and IsSellOut is false.
+            candidate.UnlimitedStock = rawLeft <= 0 && reserve <= 0;
+            if (candidate.IsLimitedOne && candidate.ItemStaticId > 0 && this.TryGetPlayerItemCount(candidate.ItemStaticId, out int ownedCount) && ownedCount > 0)
             {
                 candidate.LeftCount = Mathf.Max(0, candidate.LeftCount - ownedCount);
+                candidate.UnlimitedStock = false;
             }
 
             candidate.Name = ShopBuyAllFormatName(in candidate);
@@ -949,8 +984,7 @@ namespace HeartopiaMod
                     this.shopBuyAllStatus = prepError;
                     this.ShopBuyAllLog(prepError, always: true);
                     this.AddMenuNotification(prepError, new Color(1f, 0.55f, 0.45f));
-                    this.shopBuyAllRunning = false;
-                    this.shopBuyAllCoroutine = null;
+                    this.FinishShopBuyAllRun();
                     yield break;
                 }
             }
@@ -960,8 +994,7 @@ namespace HeartopiaMod
                 FeatureLog.Fail("ShopBuyAll", this.shopBuyAllStatus);
                 this.ShopBuyAllLog(this.shopBuyAllStatus, always: true);
                 this.AddMenuNotification(this.shopBuyAllStatus, new Color(1f, 0.55f, 0.45f));
-                this.shopBuyAllRunning = false;
-                this.shopBuyAllCoroutine = null;
+                this.FinishShopBuyAllRun();
                 yield break;
             }
 
@@ -1029,8 +1062,585 @@ namespace HeartopiaMod
             this.shopBuyAllStatus = "Done (" + label + "): bought " + bought + ", skipped " + skipped + ".";
             FeatureLog.Life("ShopBuyAll", this.shopBuyAllStatus);
             this.AddMenuNotification(this.shopBuyAllStatus, new Color(0.55f, 1f, 0.65f));
+            this.FinishShopBuyAllRun();
+        }
+
+        private void FinishShopBuyAllRun()
+        {
+            this.shopBuyGridDirty = true;
+            this.shopBuyGridNextCollectAt = 0f;
             this.shopBuyAllRunning = false;
             this.shopBuyAllCoroutine = null;
+        }
+
+        private void EnsureShopBuyGridHook()
+        {
+            if (this.shopBuyGridHookArmed)
+            {
+                return;
+            }
+
+            this.shopBuyGridHookArmed = true;
+            this.RegisterGameEventHook(ShopItemUpdateEventName, 0, this.OnShopItemUpdate);
+        }
+
+        private void OnShopItemUpdate(GameEventSnapshot snapshot)
+        {
+            this.shopBuyGridDirty = true;
+        }
+
+        private void MarkShopBuyGridDirty()
+        {
+            this.shopBuyGridDirty = true;
+            this.shopBuyGridNextCollectAt = 0f;
+        }
+
+        private string ShopBuyPickKey(int slotId, int itemId)
+        {
+            return slotId.ToString() + ":" + itemId.ToString();
+        }
+
+        private int FindShopBuyPick(int storeId, int slotId, int itemId)
+        {
+            for (int i = 0; i < this.shopBuyPicks.Count; i++)
+            {
+                ShopBuyPickEntry entry = this.shopBuyPicks[i];
+                if (entry != null && entry.StoreId == storeId && entry.SlotId == slotId && entry.ItemId == itemId)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private int CountShopBuyPicks(int storeId)
+        {
+            int count = 0;
+            for (int i = 0; i < this.shopBuyPicks.Count; i++)
+            {
+                ShopBuyPickEntry entry = this.shopBuyPicks[i];
+                if (entry != null && entry.StoreId == storeId && entry.Count > 0)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private bool TryGetShopBuyPickCount(int storeId, int slotId, int itemId, out int count)
+        {
+            int index = this.FindShopBuyPick(storeId, slotId, itemId);
+            if (index < 0)
+            {
+                count = 0;
+                return false;
+            }
+
+            count = this.shopBuyPicks[index].Count;
+            return count > 0;
+        }
+
+        private void SetShopBuyPick(int storeId, int slotId, int itemId, int count, bool save)
+        {
+            if (storeId <= 0 || slotId <= 0 || itemId <= 0)
+            {
+                return;
+            }
+
+            int index = this.FindShopBuyPick(storeId, slotId, itemId);
+            if (count <= 0)
+            {
+                if (index < 0)
+                {
+                    return;
+                }
+
+                this.shopBuyPicks.RemoveAt(index);
+            }
+            else
+            {
+                int clamped = Mathf.Clamp(count, 1, 999999);
+                if (index >= 0)
+                {
+                    if (this.shopBuyPicks[index].Count == clamped)
+                    {
+                        return;
+                    }
+
+                    this.shopBuyPicks[index].Count = clamped;
+                }
+                else
+                {
+                    this.shopBuyPicks.Add(new ShopBuyPickEntry
+                    {
+                        StoreId = storeId,
+                        SlotId = slotId,
+                        ItemId = itemId,
+                        Count = clamped
+                    });
+                }
+            }
+
+            if (!save)
+            {
+                return;
+            }
+
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private List<ShopBuyPickEntry> CopyShopBuyPicks()
+        {
+            List<ShopBuyPickEntry> copy = new List<ShopBuyPickEntry>(this.shopBuyPicks.Count);
+            for (int i = 0; i < this.shopBuyPicks.Count; i++)
+            {
+                ShopBuyPickEntry entry = this.shopBuyPicks[i];
+                if (entry == null || entry.StoreId <= 0 || entry.SlotId <= 0 || entry.ItemId <= 0 || entry.Count <= 0)
+                {
+                    continue;
+                }
+
+                copy.Add(new ShopBuyPickEntry
+                {
+                    StoreId = entry.StoreId,
+                    SlotId = entry.SlotId,
+                    ItemId = entry.ItemId,
+                    Count = Mathf.Clamp(entry.Count, 1, 999999)
+                });
+            }
+
+            return copy;
+        }
+
+        private void ReplaceShopBuyPicks(List<ShopBuyPickEntry> source)
+        {
+            this.shopBuyPicks.Clear();
+            if (source == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < source.Count; i++)
+            {
+                ShopBuyPickEntry entry = source[i];
+                if (entry == null || entry.StoreId <= 0 || entry.SlotId <= 0 || entry.ItemId <= 0 || entry.Count <= 0)
+                {
+                    continue;
+                }
+
+                int index = this.FindShopBuyPick(entry.StoreId, entry.SlotId, entry.ItemId);
+                int clamped = Mathf.Clamp(entry.Count, 1, 999999);
+                if (index >= 0)
+                {
+                    this.shopBuyPicks[index].Count = clamped;
+                }
+                else
+                {
+                    this.shopBuyPicks.Add(new ShopBuyPickEntry
+                    {
+                        StoreId = entry.StoreId,
+                        SlotId = entry.SlotId,
+                        ItemId = entry.ItemId,
+                        Count = clamped
+                    });
+                }
+            }
+        }
+
+        private Dictionary<string, int> SnapshotShopBuyPicks(int storeId)
+        {
+            Dictionary<string, int> map = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (int i = 0; i < this.shopBuyPicks.Count; i++)
+            {
+                ShopBuyPickEntry entry = this.shopBuyPicks[i];
+                if (entry == null || entry.StoreId != storeId || entry.Count <= 0)
+                {
+                    continue;
+                }
+
+                map[this.ShopBuyPickKey(entry.SlotId, entry.ItemId)] = Mathf.Clamp(entry.Count, 1, 999999);
+            }
+
+            return map;
+        }
+
+        private void SetShopBuyGridHint(string key, string raw)
+        {
+            this.shopBuyGridHintKey = key ?? string.Empty;
+            this.shopBuyGridHintRaw = raw ?? string.Empty;
+        }
+
+        private string ShopBuyGridHintText()
+        {
+            if (!string.IsNullOrEmpty(this.shopBuyGridHintRaw))
+            {
+                return this.shopBuyGridHintRaw;
+            }
+
+            if (!string.IsNullOrEmpty(this.shopBuyGridHintKey))
+            {
+                return this.L(this.shopBuyGridHintKey);
+            }
+
+            return string.Empty;
+        }
+
+        private static bool IsShopBuyFallbackName(string name, int staticId)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return true;
+            }
+
+            if (staticId > 0 && string.Equals(name, "Item " + staticId.ToString(), StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (name.StartsWith("item ", StringComparison.Ordinal) || string.Equals(name, "Unknown Item", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private string ResolveShopBuyItemName(in ShopBuyAllCandidate candidate)
+        {
+            return this.ShopBuyCellName(candidate.ItemStaticId, ShopBuyAllFormatName(in candidate));
+        }
+
+        private string ShopBuyCellName(int staticId, string fallback)
+        {
+            if (staticId > 0
+                && this.shopBuyNameCache.TryGetValue(staticId, out string cached)
+                && !IsShopBuyFallbackName(cached, staticId))
+            {
+                return cached;
+            }
+
+            if (staticId > 0
+                && this.shopBuyNameRetryAt.TryGetValue(staticId, out float retryAt)
+                && Time.unscaledTime < retryAt)
+            {
+                return string.IsNullOrWhiteSpace(fallback) ? ("Item " + staticId.ToString()) : fallback;
+            }
+
+            if (staticId > 0)
+            {
+                this.shopBuyNameRetryAt[staticId] = Time.unscaledTime + 1f;
+                string resolved = this.ResolveBagItemDisplayName(null, staticId);
+                if (!this.IsPoorBagItemDisplayName(resolved, staticId) && !IsShopBuyFallbackName(resolved, staticId))
+                {
+                    this.shopBuyNameCache[staticId] = resolved;
+                    this.shopBuyNameRetryAt.Remove(staticId);
+                    return resolved;
+                }
+            }
+
+            return string.IsNullOrWhiteSpace(fallback)
+                ? (staticId > 0 ? ("Item " + staticId.ToString()) : "Item")
+                : fallback;
+        }
+
+        private bool IsShopBuyGridCoinItem(in ShopBuyAllCandidate candidate)
+        {
+            return candidate.StoreMoneyType == ShopBuyAllStoreMoneyCurrency
+                && candidate.CurrencyType == ShopBuyAllCurrencyCoin
+                && candidate.IsUnlock
+                && candidate.Price > 0
+                && candidate.StoreId > 0
+                && candidate.SlotId > 0
+                && candidate.ItemId > 0;
+        }
+
+        private bool TryCollectShopBuyGridRows(int storeId, List<ShopBuyGridRow> rows, out string error)
+        {
+            error = null;
+            rows.Clear();
+            if (!this.TryInvokeAuraGetStoreGoodsData(storeId, out IntPtr listObj, out error))
+            {
+                return false;
+            }
+
+            List<IntPtr> elements = new List<IntPtr>();
+            List<uint> pins = new List<uint>();
+            try
+            {
+                if (!this.TryEnumerateAuraMonoCollectionItems(listObj, elements, pins) || elements.Count == 0)
+                {
+                    error = "Aura shop item list empty.";
+                    return false;
+                }
+
+                for (int i = 0; i < elements.Count; i++)
+                {
+                    if (!this.TryReadAuraShopItemData(elements[i], out ShopBuyAllCandidate candidate))
+                    {
+                        continue;
+                    }
+
+                    if (candidate.StoreId > 0 && candidate.StoreId != storeId)
+                    {
+                        continue;
+                    }
+
+                    if (!this.IsShopBuyGridCoinItem(in candidate))
+                    {
+                        continue;
+                    }
+
+                    rows.Add(new ShopBuyGridRow
+                    {
+                        Item = candidate,
+                        Name = this.ResolveShopBuyItemName(in candidate),
+                        AlreadyOwned = this.IsShopBuyAllAlreadyOwned(null, in candidate)
+                    });
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+
+            return true;
+        }
+
+        private void TickShopBuyGrid()
+        {
+            try
+            {
+                this.EnsureShopBuyGridHook();
+                int index = this.forceOpenShopSelectedIndex;
+                if (index == 6)
+                {
+                    this.shopBuyGridRows.Clear();
+                    this.shopBuyGridStoreId = -1;
+                    this.shopBuyGridShowList = false;
+                    this.SetShopBuyGridHint("Face Shop has no item grid.", null);
+                    return;
+                }
+
+                if (!this.IsForceShopBuyAllSupported(index, out _))
+                {
+                    this.shopBuyGridRows.Clear();
+                    this.shopBuyGridStoreId = -1;
+                    this.shopBuyGridShowList = false;
+                    this.SetShopBuyGridHint(null, null);
+                    return;
+                }
+
+                if (!this.IsGameDataQueryable)
+                {
+                    this.shopBuyGridRows.Clear();
+                    this.shopBuyGridStoreId = -1;
+                    this.shopBuyGridShowList = false;
+                    this.SetShopBuyGridHint("Enter the world to load this shop.", null);
+                    return;
+                }
+
+                if (!this.TryResolveForceOpenShopStoreId(index, out int storeId, out _, out string unsupported))
+                {
+                    this.shopBuyGridRows.Clear();
+                    this.shopBuyGridStoreId = -1;
+                    this.shopBuyGridShowList = false;
+                    this.SetShopBuyGridHint(null, unsupported);
+                    return;
+                }
+
+                if (storeId != this.shopBuyGridStoreId)
+                {
+                    this.shopBuyGridRows.Clear();
+                    this.shopBuyGridStoreId = storeId;
+                    this.shopBuyGridShowList = false;
+                    this.shopBuyGridDirty = true;
+                    this.shopBuyGridNextCollectAt = 0f;
+                    this.SetShopBuyGridHint("Shop catalog is not loaded yet.", null);
+                }
+
+                bool hookInstalled = this.IsGameEventHookInstalled(ShopItemUpdateEventName);
+                if (!this.shopBuyGridDirty && hookInstalled)
+                {
+                    return;
+                }
+
+                if (Time.unscaledTime < this.shopBuyGridNextCollectAt)
+                {
+                    return;
+                }
+
+                this.shopBuyGridNextCollectAt = Time.unscaledTime + ShopBuyGridCollectInterval;
+                this.shopBuyGridDirty = false;
+                if (!this.TryCollectShopBuyGridRows(storeId, this.shopBuyGridRows, out _))
+                {
+                    this.shopBuyGridShowList = false;
+                    this.SetShopBuyGridHint("Shop catalog is not loaded yet.", null);
+                    return;
+                }
+
+                if (this.shopBuyGridRows.Count == 0)
+                {
+                    this.shopBuyGridShowList = false;
+                    this.SetShopBuyGridHint("No coin items in this shop.", null);
+                    return;
+                }
+
+                this.shopBuyGridShowList = true;
+                this.SetShopBuyGridHint(null, null);
+            }
+            catch (Exception ex)
+            {
+                this.shopBuyGridRows.Clear();
+                this.shopBuyGridShowList = false;
+                this.SetShopBuyGridHint("Shop catalog is not loaded yet.", null);
+                this.ShopBuyAllLog("grid collect failed: " + ex.Message, always: true);
+            }
+        }
+
+        private IEnumerator ShopBuySelectedRoutine(int storeId, string label)
+        {
+            yield return null;
+            yield return null;
+
+            List<ShopBuyGridRow> rows = new List<ShopBuyGridRow>();
+            Dictionary<string, int> picks;
+            try
+            {
+                picks = this.SnapshotShopBuyPicks(storeId);
+                if (picks.Count == 0)
+                {
+                    this.shopBuyAllStatus = "No items selected.";
+                    this.AddMenuNotification(this.shopBuyAllStatus, new Color(1f, 0.55f, 0.45f));
+                    this.FinishShopBuyAllRun();
+                    yield break;
+                }
+
+                if (!this.TryCollectShopBuyGridRows(storeId, rows, out string prepError))
+                {
+                    this.shopBuyAllStatus = prepError ?? "Shop catalog is not loaded yet.";
+                    this.ShopBuyAllLog(this.shopBuyAllStatus, always: true);
+                    this.AddMenuNotification(this.shopBuyAllStatus, new Color(1f, 0.55f, 0.45f));
+                    this.FinishShopBuyAllRun();
+                    yield break;
+                }
+            }
+            catch (Exception ex)
+            {
+                this.shopBuyAllStatus = "Shop buy-all error: " + ex.Message;
+                FeatureLog.Fail("ShopBuyAll", this.shopBuyAllStatus);
+                this.ShopBuyAllLog(this.shopBuyAllStatus, always: true);
+                this.AddMenuNotification(this.shopBuyAllStatus, new Color(1f, 0.55f, 0.45f));
+                this.FinishShopBuyAllRun();
+                yield break;
+            }
+
+            long coinBalance = long.MaxValue;
+            try
+            {
+                if (!this.TryGetPlayerCoinBalance(out coinBalance, out _))
+                {
+                    coinBalance = long.MaxValue;
+                }
+            }
+            catch (Exception ex)
+            {
+                this.ShopBuyAllLog("balance read failed: " + ex.Message, always: true);
+                coinBalance = long.MaxValue;
+            }
+
+            bool clothingStore = storeId == ShopBuyAllClothingStoreId;
+            int bought = 0;
+            int stopped = 0;
+            int skipped = 0;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                ShopBuyGridRow row = rows[i];
+                ShopBuyAllCandidate item = row.Item;
+                string key = this.ShopBuyPickKey(item.SlotId, item.ItemId);
+                if (!picks.TryGetValue(key, out int wanted))
+                {
+                    continue;
+                }
+
+                picks.Remove(key);
+                wanted = Mathf.Clamp(wanted, 1, 999999);
+                if (row.AlreadyOwned)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                int stockCap = item.UnlimitedStock ? wanted : item.LeftCount;
+                int unitPrice = item.Price;
+                int affordable = 0;
+                if (unitPrice > 0 && stockCap > 0 && coinBalance >= unitPrice)
+                {
+                    long byCoins = coinBalance / unitPrice;
+                    affordable = (int)Math.Min(stockCap, byCoins);
+                }
+
+                int target = Math.Min(wanted, affordable);
+                if (target <= 0)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                int sent = 0;
+                while (sent < target)
+                {
+                    int chunk = clothingStore ? 1 : Math.Min(ShopBuyAllMaxPerCommand, target - sent);
+                    bool ok = false;
+                    string buyError = null;
+                    try
+                    {
+                        ok = this.TryInvokeShopBuyItem(item, chunk, out buyError);
+                    }
+                    catch (Exception ex)
+                    {
+                        buyError = ex.Message;
+                        ok = false;
+                    }
+
+                    if (!ok)
+                    {
+                        this.ShopBuyAllLog("buy failed " + row.Name + ": " + buyError, always: true);
+                        break;
+                    }
+
+                    sent += chunk;
+                    coinBalance -= (long)unitPrice * chunk;
+                    this.shopBuyAllStatus = "Buying " + row.Name + " x" + sent + "/" + wanted;
+                    if (sent < target)
+                    {
+                        yield return ModWait.Realtime(ShopBuyAllDelaySeconds);
+                    }
+                }
+
+                if (sent <= 0)
+                {
+                    skipped++;
+                }
+                else
+                {
+                    bought++;
+                    if (sent < wanted)
+                    {
+                        stopped++;
+                    }
+                }
+
+                yield return ModWait.Realtime(ShopBuyAllDelaySeconds);
+            }
+
+            skipped += picks.Count;
+
+            this.shopBuyAllStatus = "Done (" + label + "): bought " + bought + ", short " + stopped + ", skipped " + skipped + ".";
+            FeatureLog.Life("ShopBuyAll", this.shopBuyAllStatus);
+            this.AddMenuNotification(this.shopBuyAllStatus, new Color(0.55f, 1f, 0.65f));
+            this.FinishShopBuyAllRun();
         }
     }
 }

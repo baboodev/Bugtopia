@@ -1481,9 +1481,10 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 ### Buy All (Coin) — Selected Shop
 
 - **Menu:** **Features** tab → same dropdown as **Force Open Shop** → **BUY ALL (COIN)**.
-- **File:** `buddy/ShopBuyAllFeature.cs` (partial `HeartopiaComplete`).
+- **File:** `buddy/ShopBuyAllFeature.cs` (partial `HeartopiaComplete`), grid in `HeartopiaComplete.UguiFeaturesAutoBuyContent.cs`.
 - **Flow:** coroutine with 2-frame warmup → list goods → filter → buy loop (~100 ms between purchases). Status line under the button.
 - **No UI clicks** — protocol only.
+- **Grid:** coin items from `ShopSystem.GetStoreGoodsData` for the selected shop (not Face Shop, not Meteor). Click a cell to select it; the button label becomes **BUY SELECTED (COIN)** and only those rows are bought, each at the number typed on the cell. A shop stock below that number buys the remaining stock and stops that item; the rest of the selection continues. Unlimited rows (`TableStoreGroup.buyCount == 0`) ignore stock. Picks (`storeId + slotId + storeGroupId + count`) persist in `Config.xml`. An empty selection keeps **BUY ALL (COIN)** and the Max per item cap. Sold-out and already-owned rows stay visible. The list refreshes on `ShopItemUpdate`, and every 0.5 s while that hook is not installed.
 
 #### What gets bought
 
