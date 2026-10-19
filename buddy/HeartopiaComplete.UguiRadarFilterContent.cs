@@ -17,6 +17,16 @@ namespace HeartopiaMod
         private List<RadarSpeciesFilterEntry> radarInsectCatalog;
         private List<RadarSpeciesFilterEntry> radarBirdCatalog;
         private string radarSpeciesCatalogLanguage = string.Empty;
+        private readonly Dictionary<uint, InsectFilterItemIdCache> insectFilterItemIdCache = new Dictionary<uint, InsectFilterItemIdCache>();
+        private int insectFilterItemIdCacheEpoch = -1;
+        private const float InsectFilterItemIdCacheSeconds = 5f;
+        private const float InsectFilterItemIdMissSeconds = 0.5f;
+
+        private struct InsectFilterItemIdCache
+        {
+            public int ItemId;
+            public float ExpiresAt;
+        }
         private bool radarSpeciesNamesPending;
         private bool radarSpeciesCatalogRebuilt;
         private int radarSpeciesNameMisses;
@@ -129,7 +139,95 @@ namespace HeartopiaMod
                 return false;
             }
 
-            return this.IsInsectSpeciesAllowed(this.TryGetEntityStaticId(netId));
+            int itemId;
+            this.TryResolveInsectFilterItemId(netId, out itemId);
+            return this.IsInsectSpeciesAllowed(itemId);
+        }
+
+        // The filter stores bag item ids (InsectSuffixToItemId). EntityUtil.GetEntityResId(uint)
+        // is the overload that reads garbage and returns 0, so a non-empty filter rejected every
+        // insect. The entity-object overload is the one MapSpots already uses.
+        private bool TryResolveInsectFilterItemId(uint netId, out int itemId)
+        {
+            itemId = 0;
+            float now = Time.unscaledTime;
+            int epoch = AuraMonoWorldEpoch;
+            if (epoch != this.insectFilterItemIdCacheEpoch)
+            {
+                this.insectFilterItemIdCache.Clear();
+                this.insectFilterItemIdCacheEpoch = epoch;
+            }
+
+            InsectFilterItemIdCache cached;
+            if (this.insectFilterItemIdCache.TryGetValue(netId, out cached) && now < cached.ExpiresAt)
+            {
+                itemId = cached.ItemId;
+                return itemId > 0;
+            }
+
+            this.EnsureEntityResIdMethods();
+            IntPtr entityObj;
+            if (!this.TryGetAuraMonoEntityObjectByNetId(netId, out entityObj) || entityObj == IntPtr.Zero)
+            {
+                this.RememberInsectFilterItemId(netId, 0, now + InsectFilterItemIdMissSeconds);
+                return false;
+            }
+
+            uint pin = AuraMonoPinNew(entityObj);
+            if (pin == 0U)
+            {
+                this.RememberInsectFilterItemId(netId, 0, now + InsectFilterItemIdMissSeconds);
+                return false;
+            }
+
+            try
+            {
+                this.TryGetCollectableStaticIdViaAura(entityObj, out itemId);
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
+            }
+
+            float ttl = itemId > 0 ? InsectFilterItemIdCacheSeconds : InsectFilterItemIdMissSeconds;
+            this.RememberInsectFilterItemId(netId, itemId, now + ttl);
+            return itemId > 0;
+        }
+
+        private void RememberInsectFilterItemId(uint netId, int itemId, float expiresAt)
+        {
+            if (this.insectFilterItemIdCache.Count > 96)
+            {
+                List<uint> expired = null;
+                float now = Time.unscaledTime;
+                foreach (KeyValuePair<uint, InsectFilterItemIdCache> pair in this.insectFilterItemIdCache)
+                {
+                    if (now < pair.Value.ExpiresAt)
+                    {
+                        continue;
+                    }
+
+                    if (expired == null)
+                    {
+                        expired = new List<uint>();
+                    }
+
+                    expired.Add(pair.Key);
+                }
+
+                if (expired != null)
+                {
+                    for (int i = 0; i < expired.Count; i++)
+                    {
+                        this.insectFilterItemIdCache.Remove(expired[i]);
+                    }
+                }
+            }
+
+            InsectFilterItemIdCache entry = new InsectFilterItemIdCache();
+            entry.ItemId = itemId;
+            entry.ExpiresAt = expiresAt;
+            this.insectFilterItemIdCache[netId] = entry;
         }
 
         private void FilterLoadedInsectTargets(List<uint> ids, List<Vector3> positions)
