@@ -76,7 +76,7 @@ namespace HeartopiaMod
                 return Path.Combine(destRoot, CachedLutFileName);
             }
 
-            return Path.Combine(Application.persistentDataPath, "ScreenCaptureDecrypted", CachedLutFileName);
+            return Path.Combine(HelperPaths.Root, "ScreenCaptureDecrypted", CachedLutFileName);
         }
 
         public static byte[] IndexPngToColoredPng(byte[] indexPngBytes, Color32[] lut)

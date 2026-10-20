@@ -1884,7 +1884,7 @@ Details and troubleshooting: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#dai
 
 ## New Features — Pictures (ScreenCapture)
 
-Decrypts `persistentDataPath/ScreenCapture` to `ScreenCaptureDecrypted` (AES, same as game `EncryptUtil`). **Encrypt changed** re-imports only files whose plain SHA256 differs from `.bugtopia-manifest.json`.
+Decrypts `persistentDataPath/ScreenCapture` to `%LocalLow%/Bugtopia/ScreenCaptureDecrypted` (AES, same as game `EncryptUtil`). A folder left at `persistentDataPath/ScreenCaptureDecrypted` is moved there on the first open. **Encrypt changed** re-imports only files whose plain SHA256 differs from `.bugtopia-manifest.json`.
 
 **Draw** files are palette index maps (`TextureFormat.R8`), not normal photos. On decrypt:
 
@@ -1893,7 +1893,9 @@ Decrypts `persistentDataPath/ScreenCapture` to `ScreenCaptureDecrypted` (AES, sa
 
 Palette comes from the in-game `drawing_lut` texture (128 colors; cached as `ScreenCaptureDecrypted/.drawing_color_lut.png`). Edited colors outside the palette are quantized to the nearest entry on re-encrypt.
 
-**Upload edited drawing to the server** (open the drawing at your easel first): **Extract open drawing** dumps the live canvas to `ScreenCaptureDecrypted/drawing.png`; edit it; **Upload drawing.png** pushes the pixels to the server (DrawBoard protocol) and refreshes the in-game preview/thumbnail. This is server-authoritative — editing the local cache alone does **not** change the drawing in-game. A drawing with more than 256 colour runs goes out in chunks of 256 runs, one command per second (fixed values — the budget and delay sliders were removed 2026-09-29).
+**Upload edited drawing to the server** (open the drawing at your easel first): **Extract open drawing** dumps the live canvas to `ScreenCaptureDecrypted/drawing.png`; **Show drawing.png** selects that file in Explorer; edit it; **Upload drawing.png** pushes the pixels to the server (DrawBoard protocol) and refreshes the in-game preview/thumbnail. This is server-authoritative — editing the local cache alone does **not** change the drawing in-game. A drawing with more than 256 colour runs goes out in chunks of 256 runs, one command per second (fixed values — the budget and delay sliders were removed 2026-09-29).
+
+**Album photo** (open the photo in the album detail view first): **Extract open photo** writes `ScreenCaptureDecrypted/photo.png` from the largest encrypted cache file for that id (`1920×1080` when the local capture saved it, otherwise `1564×880`) and records the id and size in `photo.id`. **Show photo.png** selects that file in Explorer. **Upload photo.png** rebuilds the encrypted album jpgs from that PNG — `1920×1080` only when the edit is already that size, plus `1564×880`, `512×288` (the album grid) and `256×144` — then calls `PhotoSystem.SetFavourite`. The server image is still the one 1564×880 PNG. Upload refuses an already-liked photo, because that call deletes it. A 1564 source is never upscaled to 1920. `photo.png` is not part of the Pictures decrypt manifest. The open album grid keeps its decoded texture until the album is opened again.
 
 CLI parity: `tools/screen_capture_crypto.py` (`decrypt` / `encrypt-changed` / `decode-draw` / `encode-draw`; `pip install pycryptodome pillow`). Palette files: `tools/gen_drawing_palette.py`.
 

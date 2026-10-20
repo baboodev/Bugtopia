@@ -88,7 +88,7 @@ Python codec would need a flip for upload parity.)
 ## 4. Decrypt / encrypt of the `ScreenCapture` cache
 
 `PicturesDecryptFeature` (AES-256-CBC, key/iv = game `EncryptUtil`):
-- Decrypt all → `ScreenCaptureDecrypted/`. Draw files become `Draw/<id>.png` (colored, editable)
+- Decrypt all → `%LocalLow%/Bugtopia/ScreenCaptureDecrypted/`. Draw files become `Draw/<id>.png` (colored, editable)
   plus `Draw/.index/<id>.png` (original index map, for lossless roundtrip).
 - Encrypt changed → re-quantizes edited colored files to the palette, rebuilds the index map, AES,
   writes back to `ScreenCapture/Draw/<id>.png`.

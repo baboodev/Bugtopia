@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -110,10 +111,10 @@ namespace HeartopiaMod
     // span pad..right-edge in the source (16+504 = 520) — a full-width role, so
     // btnW = (panelW-24)/2 keeps that span at any shell width):
     //   card y=8, card-local: title (16,10,innerW,22); paths (16,32,innerW,pathsH);
-    //   hint +rowGap below; then rows of 32-high buttons at +42 steps (decrypt|encrypt pair,
-    //   scan full rowPairW, extract|upload pair); two slider rows (label 220x20 at innerX,
-    //   slider at innerX+228, innerW-228 wide, kit-placed 18 high at +1 for the 18px handle;
-    //   +30 steps); changed header (innerW x20); [list (12,·,panelW-24,scrollH); +8] when
+    //   photo hint, Extract open photo | Upload photo.png, Show photo.png (full rowPairW);
+    //   draw hint, Extract open drawing | Upload drawing.png, Show drawing.png;
+    //   extra gap, then decrypt|encrypt, scan;
+    //   changed header (innerW x20); [list (12,·,panelW-24,scrollH); +8] when
     //   count>0; status (innerW x56). cardH = the source's :123-127 formula VERBATIM —
     //   including its quirk of charging scrollH+8 unconditionally (8px of extra card padding
     //   when the list is empty, status drawn at the un-padded cursor: :230 only advances inside
@@ -143,12 +144,21 @@ namespace HeartopiaMod
             public GameObject HintLabel;
             public float HintH;
             public bool HintMeasureOk;
+            public GameObject PhotoHintLabel;
+            public float PhotoHintH;
+            public bool PhotoHintMeasureOk;
 
-            // Buttons — 2 primary + 3 secondary, busy-gated per the file header's exact scoping
+            // Buttons — photo block, then drawing, then cache. Photo show follows the file on disk.
+            public GameObject PhotoExtractButton; // !busy
+            public GameObject PhotoUploadButton;  // !busy
+            public GameObject PhotoShowButton;    // File.Exists(photo.png), independent of busy
+            public string PhotoWorkPath;
+            public GameObject DrawShowButton;     // File.Exists(drawing.png), independent of busy
+            public string DrawWorkPath;
             public GameObject DecryptButton;      // !busy
             public GameObject EncryptButton;      // !busy
-            public GameObject ScanButton;         // !busy (inside the :147 scope!)
-            public GameObject ExtractButton;      // !busy (drawn BEFORE :181 re-scopes)
+            public GameObject ScanButton;         // !busy
+            public GameObject ExtractButton;      // !busy
             public GameObject UploadButton;       // !busy && !chunkSendBusy
 
             // Changed-files header + nested list + status
@@ -172,6 +182,7 @@ namespace HeartopiaMod
             // Layout signature — the exact values the last relayout used (text-driven heights +
             // list count; a mismatch re-runs the relayout)
             public float LayoutPathsH = -1f;
+            public float LayoutPhotoHintH = -1f;
             public float LayoutHintH = -1f;
             public int LayoutCount = -1;
 
@@ -325,7 +336,7 @@ namespace HeartopiaMod
             // Frame-start resolves the drawer performs at :102-104 — done ONCE here (one manifest
             // JSON load for the initial hasManifest snapshot; NO changed-list hashing, see above).
             string sourcePath = this.TryGetScreenCaptureRootPath();
-            string destPath = this.GetScreenCaptureDecryptedRootPath(sourcePath);
+            string destPath = this.GetScreenCaptureDecryptedRootPath();
             PicturesManifest manifest = this.TryLoadPicturesManifest(destPath);
             handle.HasManifest = manifest != null && manifest.Files != null && manifest.Files.Count > 0;
 
@@ -352,37 +363,57 @@ namespace HeartopiaMod
             this.TrySetUguiLabelWrapped(handle.PathsLabel);
             PlaceUguiTopLeft(handle.PathsLabel, 16f, 32f, handle.InnerW, 36f);
 
-            // -------- Measured hint label (:122/:142) --------
+            // -------- Photo hint, then drawing hint. Both measured; relayout places them. --------
+            string photoHintText = this.L("pictures.photo_hint");
+            handle.PhotoHintLabel = this.CreateUguiLabel(card.transform, "PhotoHintLabel",
+                photoHintText, 11f, textColor, false);
+            this.TrySetUguiLabelWrapped(handle.PhotoHintLabel);
+            PlaceUguiTopLeft(handle.PhotoHintLabel, 16f, 72f, handle.InnerW, 36f);
+
             string hintText = this.L("pictures.draw_hint");
             handle.HintLabel = this.CreateUguiLabel(card.transform, "HintLabel",
                 hintText, 11f, textColor, false);
             this.TrySetUguiLabelWrapped(handle.HintLabel);
-            PlaceUguiTopLeft(handle.HintLabel, 16f, 72f, handle.InnerW, 36f);
+            PlaceUguiTopLeft(handle.HintLabel, 16f, 112f, handle.InnerW, 36f);
 
-            // -------- Button row 1: decrypt | encrypt (:148-156 — PRIMARY tier, !busy) --------
+            handle.PhotoExtractButton = this.CreateUguiSecondaryButton(card.transform, "PhotoExtractButton",
+                this.L("Extract open photo"), new System.Action(this.OnUguiPicturesPhotoExtractClicked));
+            handle.PhotoUploadButton = this.CreateUguiSecondaryButton(card.transform, "PhotoUploadButton",
+                this.L("Upload photo.png"), new System.Action(this.OnUguiPicturesPhotoUploadClicked));
+            handle.PhotoShowButton = this.CreateUguiSecondaryButton(card.transform, "PhotoShowButton",
+                this.L("Show photo.png"), new System.Action(this.OnUguiPicturesPhotoShowClicked));
+            handle.PhotoWorkPath = Path.Combine(destPath, PhotoWorkFileName);
+
+            // -------- Cache row: decrypt | encrypt (PRIMARY tier, !busy) --------
             handle.DecryptButton = this.CreateUguiPrimaryButton(card.transform, "DecryptAllButton",
                 this.L("pictures.decrypt_all"), new System.Action(this.OnUguiPicturesDecryptAllClicked));
             handle.EncryptButton = this.CreateUguiPrimaryButton(card.transform, "EncryptChangedButton",
                 this.L("pictures.encrypt_changed"), new System.Action(this.OnUguiPicturesEncryptChangedClicked));
 
-            // -------- Button row 2: scan, full pair width (:160-170 — Secondary, !busy) --------
+            // -------- Scan, full pair width (Secondary, !busy) --------
             handle.ScanButton = this.CreateUguiSecondaryButton(card.transform, "ScanChangedButton",
                 this.L("pictures.scan_changed"), new System.Action(this.OnUguiPicturesScanChangedClicked));
 
-            // -------- Button row 3: extract | upload (:175-185 — Secondary;
-            // extract gated !busy, upload !busy && !chunkSendBusy — file header) --------
+            // -------- Drawing extract | upload (Secondary; upload also waits out a chunk send) --------
             handle.ExtractButton = this.CreateUguiSecondaryButton(card.transform, "ExtractButton",
                 this.L("Extract open drawing"), new System.Action(this.OnUguiPicturesExtractClicked));
             handle.UploadButton = this.CreateUguiSecondaryButton(card.transform, "UploadButton",
                 this.L("Upload drawing.png"), new System.Action(this.OnUguiPicturesUploadClicked));
+            handle.DrawShowButton = this.CreateUguiSecondaryButton(card.transform, "DrawShowButton",
+                this.L("Show drawing.png"), new System.Action(this.OnUguiPicturesDrawShowClicked));
+            handle.DrawWorkPath = Path.Combine(destPath, DrawingWorkFileName);
 
             bool busy = this.IsUguiPicturesTaskBusy();
             bool chunkSendBusy = this.IsUguiPicturesChunkSendBusy();
+            this.SetUguiButtonInteractable(handle.PhotoExtractButton, !busy);
+            this.SetUguiButtonInteractable(handle.PhotoUploadButton, !busy);
+            this.SetUguiButtonInteractable(handle.PhotoShowButton, File.Exists(handle.PhotoWorkPath));
             this.SetUguiButtonInteractable(handle.DecryptButton, !busy);
             this.SetUguiButtonInteractable(handle.EncryptButton, !busy);
             this.SetUguiButtonInteractable(handle.ScanButton, !busy);
             this.SetUguiButtonInteractable(handle.ExtractButton, !busy);
             this.SetUguiButtonInteractable(handle.UploadButton, !busy && !chunkSendBusy);
+            this.SetUguiButtonInteractable(handle.DrawShowButton, File.Exists(handle.DrawWorkPath));
 
             // -------- Changed-count header (:213-216) --------
             handle.HeaderShown = this.BuildUguiPicturesHeaderText(handle.HasManifest);
@@ -424,6 +455,9 @@ namespace HeartopiaMod
             handle.PathsH = this.MeasureUguiPicturesWrappedHeight(handle.PathsLabel,
                 handle.PathsShown, handle.InnerW, 36f, out ok);
             handle.PathsMeasureOk = ok;
+            handle.PhotoHintH = this.MeasureUguiPicturesWrappedHeight(handle.PhotoHintLabel,
+                photoHintText, handle.InnerW, 36f, out ok);
+            handle.PhotoHintMeasureOk = ok;
             handle.HintH = this.MeasureUguiPicturesWrappedHeight(handle.HintLabel,
                 hintText, handle.InnerW, 36f, out ok);
             handle.HintMeasureOk = ok;
@@ -447,6 +481,7 @@ namespace HeartopiaMod
             const float statusH = 56f;  // :113
             const float btnH = 32f;     // :81
             const float btnGap = 8f;    // :81
+            const float cacheSectionGap = 16f;
 
             float innerW = handle.InnerW;
             float btnW = handle.BtnW;
@@ -454,11 +489,15 @@ namespace HeartopiaMod
             int count = this.picturesChangedRelativePaths.Count;
             float scrollH = count > 0 ? Mathf.Min(count, 6) * 18f + 4f : 0f; // :119-121
 
-            // The :123-127 card-height formula VERBATIM (scrollH+8 charged unconditionally —
-            // the source's own empty-list padding quirk, see file header).
+            // Photo hint + photo pair + show, then the drawing hint + drawing pair, then the
+            // original three cache rows. scrollH+8 stays charged when the list is empty.
             float cardH = 10f + 22f + handle.PathsH + rowGap
+                + handle.PhotoHintH + rowGap
+                + btnH + rowGap + btnH + rowGap
                 + handle.HintH + rowGap
-                + btnH + rowGap + btnH + rowGap + btnH + rowGap
+                + btnH + rowGap + btnH + rowGap
+                + cacheSectionGap
+                + btnH + rowGap + btnH + rowGap
                 + 20f + scrollH + 8f + statusH + 16f;
 
             PlaceUguiTopLeft(handle.Card, 8f, 8f, handle.PanelW, cardH);
@@ -468,18 +507,31 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.PathsLabel, 16f, cy, innerW, handle.PathsH);
             cy += handle.PathsH + rowGap;
 
+            PlaceUguiTopLeft(handle.PhotoHintLabel, 16f, cy, innerW, handle.PhotoHintH);
+            cy += handle.PhotoHintH + rowGap;
+
+            PlaceUguiTopLeft(handle.PhotoExtractButton, 16f, cy, btnW, btnH);
+            PlaceUguiTopLeft(handle.PhotoUploadButton, 16f + btnW + btnGap, cy, btnW, btnH);
+            cy += btnH + rowGap;
+
+            PlaceUguiTopLeft(handle.PhotoShowButton, 16f, cy, rowPairW, btnH);
+            cy += btnH + rowGap;
+
             PlaceUguiTopLeft(handle.HintLabel, 16f, cy, innerW, handle.HintH);
             cy += handle.HintH + rowGap;
+
+            PlaceUguiTopLeft(handle.ExtractButton, 16f, cy, btnW, btnH);
+            PlaceUguiTopLeft(handle.UploadButton, 16f + btnW + btnGap, cy, btnW, btnH);
+            cy += btnH + rowGap;
+
+            PlaceUguiTopLeft(handle.DrawShowButton, 16f, cy, rowPairW, btnH);
+            cy += btnH + rowGap + cacheSectionGap;
 
             PlaceUguiTopLeft(handle.DecryptButton, 16f, cy, btnW, btnH);
             PlaceUguiTopLeft(handle.EncryptButton, 16f + btnW + btnGap, cy, btnW, btnH);
             cy += btnH + rowGap;
 
             PlaceUguiTopLeft(handle.ScanButton, 16f, cy, rowPairW, btnH);
-            cy += btnH + rowGap;
-
-            PlaceUguiTopLeft(handle.ExtractButton, 16f, cy, btnW, btnH);
-            PlaceUguiTopLeft(handle.UploadButton, 16f + btnW + btnGap, cy, btnW, btnH);
             cy += btnH + rowGap;
 
             PlaceUguiTopLeft(handle.HeaderLabel, 16f, cy, innerW, 20f);
@@ -504,6 +556,7 @@ namespace HeartopiaMod
             this.SetUguiScrollContentHeight(handle.OuterContent, 8f + cardH + 24f);
 
             handle.LayoutPathsH = handle.PathsH;
+            handle.LayoutPhotoHintH = handle.PhotoHintH;
             handle.LayoutHintH = handle.HintH;
             handle.LayoutCount = count;
         }
@@ -578,11 +631,17 @@ namespace HeartopiaMod
                 // rides both flags). SetUguiButtonInteractable self-diffs the actual write.
                 bool busy = this.IsUguiPicturesTaskBusy();
                 bool chunkSendBusy = this.IsUguiPicturesChunkSendBusy();
+                this.SetUguiButtonInteractable(handle.PhotoExtractButton, !busy);
+                this.SetUguiButtonInteractable(handle.PhotoUploadButton, !busy);
+                this.SetUguiButtonInteractable(handle.PhotoShowButton,
+                    !string.IsNullOrEmpty(handle.PhotoWorkPath) && File.Exists(handle.PhotoWorkPath));
                 this.SetUguiButtonInteractable(handle.DecryptButton, !busy);
                 this.SetUguiButtonInteractable(handle.EncryptButton, !busy);
                 this.SetUguiButtonInteractable(handle.ScanButton, !busy);
                 this.SetUguiButtonInteractable(handle.ExtractButton, !busy);
                 this.SetUguiButtonInteractable(handle.UploadButton, !busy && !chunkSendBusy);
+                this.SetUguiButtonInteractable(handle.DrawShowButton,
+                    !string.IsNullOrEmpty(handle.DrawWorkPath) && File.Exists(handle.DrawWorkPath));
 
                 // Status — background coroutines rewrite picturesLastStatus; cached-string diff.
                 this.SyncUguiSelfLabelText(handle.StatusLabel, ref handle.StatusShown,
@@ -597,7 +656,7 @@ namespace HeartopiaMod
                     // Frame-start path resolve (:102-103) at 2Hz; a changed paths text (e.g.
                     // CACHE_PATH becoming available) re-measures and re-flows the card.
                     string sourcePath = this.TryGetScreenCaptureRootPath();
-                    string destPath = this.GetScreenCaptureDecryptedRootPath(sourcePath);
+                    string destPath = this.GetScreenCaptureDecryptedRootPath();
                     string pathsText = this.LF("pictures.paths", sourcePath, destPath);
                     bool pathsChanged = !string.Equals(pathsText, handle.PathsShown, StringComparison.Ordinal);
                     if (pathsChanged)
@@ -611,6 +670,15 @@ namespace HeartopiaMod
                         handle.PathsH = this.MeasureUguiPicturesWrappedHeight(handle.PathsLabel,
                             handle.PathsShown, handle.InnerW, handle.PathsH, out ok);
                         handle.PathsMeasureOk = ok;
+                    }
+                    handle.PhotoWorkPath = Path.Combine(destPath, PhotoWorkFileName);
+                    handle.DrawWorkPath = Path.Combine(destPath, DrawingWorkFileName);
+                    if (!handle.PhotoHintMeasureOk)
+                    {
+                        bool ok;
+                        handle.PhotoHintH = this.MeasureUguiPicturesWrappedHeight(handle.PhotoHintLabel,
+                            this.L("pictures.photo_hint"), handle.InnerW, handle.PhotoHintH, out ok);
+                        handle.PhotoHintMeasureOk = ok;
                     }
                     if (!handle.HintMeasureOk)
                     {
@@ -640,6 +708,7 @@ namespace HeartopiaMod
 
                     // Signature check — text-driven heights + list count (file header).
                     if (handle.LayoutPathsH != handle.PathsH
+                        || handle.LayoutPhotoHintH != handle.PhotoHintH
                         || handle.LayoutHintH != handle.HintH
                         || handle.LayoutCount != this.picturesChangedRelativePaths.Count)
                     {
@@ -679,7 +748,7 @@ namespace HeartopiaMod
         private void OnUguiPicturesScanChangedClicked()
         {
             string sourcePath = this.TryGetScreenCaptureRootPath();
-            string destPath = this.GetScreenCaptureDecryptedRootPath(sourcePath);
+            string destPath = this.GetScreenCaptureDecryptedRootPath();
 
             this.picturesChangedListDirty = true;
             PicturesManifest manifest = this.TryLoadPicturesManifest(destPath);
@@ -715,6 +784,26 @@ namespace HeartopiaMod
         private void OnUguiPicturesUploadClicked()
         {
             this.DrawUploadSendForOpenDrawing();
+        }
+
+        private void OnUguiPicturesDrawShowClicked()
+        {
+            this.DrawRevealWorkFile();
+        }
+
+        private void OnUguiPicturesPhotoExtractClicked()
+        {
+            this.PhotoExtractOpenPhoto();
+        }
+
+        private void OnUguiPicturesPhotoUploadClicked()
+        {
+            this.PhotoUploadWorkFile();
+        }
+
+        private void OnUguiPicturesPhotoShowClicked()
+        {
+            this.PhotoRevealWorkFile();
         }
     }
 }

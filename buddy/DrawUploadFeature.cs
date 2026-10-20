@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 
 namespace HeartopiaMod
@@ -25,6 +26,37 @@ namespace HeartopiaMod
 
         // Single, easy-to-find work file for the currently-open drawing (extract -> edit -> upload).
         private const string DrawingWorkFileName = "drawing.png";
+
+        internal void DrawRevealWorkFile()
+        {
+            string path = Path.Combine(
+                this.GetScreenCaptureDecryptedRootPath(),
+                DrawingWorkFileName);
+            if (!File.Exists(path))
+            {
+                this.picturesLastStatus = "Draw: Extract first";
+                return;
+            }
+
+            // explorer.exe returns immediately and often exits 1 even when the window opened.
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = "/select,\"" + path + "\"",
+                    UseShellExecute = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                this.picturesLastStatus = "Draw: Extract first";
+                ModLogger.Msg("[DrawUpload] reveal failed: " + ex.Message);
+                return;
+            }
+
+            this.picturesLastStatus = "Draw: opened " + path;
+        }
 
         // ---- Chunked upload (split the canvas across several DrawingOperation commands) ----
         // A single whole-canvas op is protocol-valid (verified in-game); chunking exists for
@@ -518,7 +550,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            string destRoot = this.GetScreenCaptureDecryptedRootPath(this.TryGetScreenCaptureRootPath());
+            string destRoot = this.GetScreenCaptureDecryptedRootPath();
             if (!DrawColorCodec.TryResolveLut(destRoot, out UnityEngine.Color32[] lut, out _) || lut == null || lut.Length == 0)
             {
                 this.picturesLastStatus = "Draw extract: LUT unavailable";
@@ -701,7 +733,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            string destRoot = this.GetScreenCaptureDecryptedRootPath(this.TryGetScreenCaptureRootPath());
+            string destRoot = this.GetScreenCaptureDecryptedRootPath();
             string workFile = Path.Combine(destRoot, DrawingWorkFileName);
             if (!File.Exists(workFile))
             {

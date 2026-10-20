@@ -114,7 +114,7 @@ namespace HeartopiaMod
                 yield break;
             }
 
-            string destRoot = this.GetScreenCaptureDecryptedRootPath(sourceRoot);
+            string destRoot = this.GetScreenCaptureDecryptedRootPath();
             string[] files;
             PicturesManifest manifest = this.TryLoadPicturesManifest(destRoot) ?? new PicturesManifest();
             if (manifest.Files == null)
@@ -287,7 +287,7 @@ namespace HeartopiaMod
         private IEnumerator PicturesEncryptChangedRoutine(bool silent)
         {
             string sourceRoot = this.TryGetScreenCaptureRootPath();
-            string destRoot = this.GetScreenCaptureDecryptedRootPath(sourceRoot);
+            string destRoot = this.GetScreenCaptureDecryptedRootPath();
             PicturesManifest manifest = this.TryLoadPicturesManifest(destRoot);
             if (manifest == null || manifest.Files == null || manifest.Files.Count == 0)
             {
@@ -1114,18 +1114,42 @@ namespace HeartopiaMod
             return Path.Combine(Application.persistentDataPath, "ScreenCapture");
         }
 
-        private string GetScreenCaptureDecryptedRootPath(string screenCaptureRoot)
+        private static string screenCaptureDecryptedRoot;
+
+        // Unpacked files live under %LocalLow%/Bugtopia, not next to the game cache.
+        // The first call moves a legacy Heartopia/ScreenCaptureDecrypted tree when the new folder is absent.
+        private string GetScreenCaptureDecryptedRootPath()
         {
-            if (!string.IsNullOrWhiteSpace(screenCaptureRoot))
+            if (!string.IsNullOrEmpty(screenCaptureDecryptedRoot))
             {
-                string parent = Directory.GetParent(screenCaptureRoot)?.FullName;
-                if (!string.IsNullOrWhiteSpace(parent))
-                {
-                    return Path.Combine(parent, "ScreenCaptureDecrypted");
-                }
+                return screenCaptureDecryptedRoot;
             }
 
-            return Path.Combine(Application.persistentDataPath, "ScreenCaptureDecrypted");
+            string destination = Path.Combine(HelperPaths.Root, "ScreenCaptureDecrypted");
+            string legacy = Path.Combine(Application.persistentDataPath, "ScreenCaptureDecrypted");
+            try
+            {
+                bool samePlace = string.Equals(
+                    Path.GetFullPath(legacy),
+                    Path.GetFullPath(destination),
+                    StringComparison.OrdinalIgnoreCase);
+                if (!samePlace && Directory.Exists(legacy) && !Directory.Exists(destination))
+                {
+                    Directory.Move(legacy, destination);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[Pictures] could not move ScreenCaptureDecrypted: " + ex.Message);
+            }
+
+            if (!Directory.Exists(destination))
+            {
+                Directory.CreateDirectory(destination);
+            }
+
+            screenCaptureDecryptedRoot = destination;
+            return destination;
         }
 
         private bool TryResolveDrawColorLut(string destRoot, out Color32[] lut, out string lutSha256)

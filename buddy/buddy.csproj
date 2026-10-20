@@ -533,6 +533,7 @@
     <Compile Include="PetPlayFeature.cs" />
     <Compile Include="DrawColorCodec.cs" />
     <Compile Include="DrawUploadFeature.cs" />
+    <Compile Include="PhotoExtractFeature.cs" />
     <Compile Include="PicturesDecryptFeature.cs" />
     <Compile Include="WildAnimalFeedFeature.cs" />
     <Compile Include="WildAnimalGiftFeature.cs" />
