@@ -72,6 +72,11 @@ namespace HeartopiaMod
         private readonly Dictionary<string, int> petFeedFoodStaticIdByPet = new Dictionary<string, int>(StringComparer.Ordinal);
         private string petFeedFoodPickerKey = string.Empty;
         private string petFeedFoodPickerPetName = string.Empty;
+        private bool petFeedFoodPickerIsDog;
+        private uint petFeedFoodPickerNetId;
+        private readonly Dictionary<uint, HashSet<int>> petFeedEatenFavoriteIdsByNetId = new Dictionary<uint, HashSet<int>>();
+        private readonly Dictionary<uint, float> petFeedEatenFavoriteReadAt = new Dictionary<uint, float>();
+        private const float PetFeedEatenFavoriteCacheSeconds = 8f;
         private bool petFeedSkipFiveStarFood = true;
         private bool petFeedSkipRareFood = true;
         private readonly List<PetFeedFavoriteUiRow> petFeedFavoriteUiRows = new List<PetFeedFavoriteUiRow>();
@@ -90,6 +95,8 @@ namespace HeartopiaMod
             public string Name;
             public int Count;
             public int Fullness;
+            public bool ForDog;
+            public bool ForCat;
         }
 
         private sealed class PetFeedFoodSupply
@@ -101,6 +108,8 @@ namespace HeartopiaMod
             public int StarRate;
             public string Name;
             public bool IsLock;
+            public bool ForDog;
+            public bool ForCat;
         }
 
         private sealed class PetFeedUsedFood
@@ -1703,7 +1712,9 @@ namespace HeartopiaMod
                         StaticId = existing.StaticId,
                         Name = existing.Name,
                         Count = existing.Count,
-                        Fullness = existing.Fullness
+                        Fullness = existing.Fullness,
+                        ForDog = existing.ForDog,
+                        ForCat = existing.ForCat
                     };
                 }
             }
@@ -1737,6 +1748,8 @@ namespace HeartopiaMod
                 {
                     option.Fullness = food.Fullness;
                 }
+                option.ForDog |= food.ForDog;
+                option.ForCat |= food.ForCat;
             }
 
             this.petFeedFoodOptions.Clear();
@@ -2369,6 +2382,11 @@ namespace HeartopiaMod
             {
                 this.petFeedFoodStaticIdByPet.Remove(this.petFeedFoodPickerKey);
             }
+            else if (!this.PetFeedFoodStaticIdFitsPicker(chosen))
+            {
+                this.AddMenuNotification("Pet food: that food is not for this pet", new Color(1f, 0.72f, 0.42f));
+                return;
+            }
             else
             {
                 this.petFeedFoodStaticIdByPet[this.petFeedFoodPickerKey] = chosen;
@@ -2483,10 +2501,55 @@ namespace HeartopiaMod
             }
 
             this.petFeedFoodPickerKey = key;
+            this.petFeedFoodPickerIsDog = entry != null && entry.IsDog;
+            this.petFeedFoodPickerNetId = entry == null ? 0U : entry.NetId;
+            if (this.petFeedFoodPickerNetId != 0U)
+            {
+                this.petFeedEatenFavoriteReadAt.Remove(this.petFeedFoodPickerNetId);
+            }
             this.petFeedFoodPickerPetName = entry == null || string.IsNullOrWhiteSpace(entry.Name)
                 ? ("#" + (entry == null ? 0 : entry.NetId))
                 : entry.Name;
             this.petFeedFoodDropdownOpen = true;
+            this.RefreshPetFeedFoodOptionsForPicker();
+        }
+
+        private bool PetFeedFoodOptionFitsPicker(PetFeedFoodOption option)
+        {
+            if (option == null)
+            {
+                return false;
+            }
+
+            if (!option.ForDog && !option.ForCat)
+            {
+                return true;
+            }
+
+            if (string.IsNullOrEmpty(this.petFeedFoodPickerKey))
+            {
+                return true;
+            }
+
+            return this.petFeedFoodPickerIsDog ? option.ForDog : option.ForCat;
+        }
+
+        private bool PetFeedFoodStaticIdFitsPicker(int staticId)
+        {
+            if (staticId <= 0 || this.petFeedFoodOptions == null)
+            {
+                return staticId <= 0;
+            }
+
+            foreach (PetFeedFoodOption option in this.petFeedFoodOptions)
+            {
+                if (option != null && option.StaticId == staticId)
+                {
+                    return this.PetFeedFoodOptionFitsPicker(option);
+                }
+            }
+
+            return false;
         }
 
         private int GetPetFeedFoodDropdownOptionCount()
@@ -2496,16 +2559,11 @@ namespace HeartopiaMod
                 return 0;
             }
 
-            if (string.IsNullOrWhiteSpace(this.petFeedFoodSearchText))
-            {
-                return this.petFeedFoodOptions.Count;
-            }
-
-            string search = this.petFeedFoodSearchText.Trim();
+            string search = string.IsNullOrWhiteSpace(this.petFeedFoodSearchText) ? string.Empty : this.petFeedFoodSearchText.Trim();
             int count = 0;
             foreach (PetFeedFoodOption option in this.petFeedFoodOptions)
             {
-                if (this.PetFeedFoodOptionMatchesSearch(option, search))
+                if (this.PetFeedFoodOptionFitsPicker(option) && this.PetFeedFoodOptionMatchesSearch(option, search))
                 {
                     count++;
                 }
@@ -2525,13 +2583,85 @@ namespace HeartopiaMod
             string search = string.IsNullOrWhiteSpace(this.petFeedFoodSearchText) ? string.Empty : this.petFeedFoodSearchText.Trim();
             foreach (PetFeedFoodOption option in this.petFeedFoodOptions)
             {
+                if (!this.PetFeedFoodOptionFitsPicker(option))
+                {
+                    continue;
+                }
+
                 if (string.IsNullOrEmpty(search) || this.PetFeedFoodOptionMatchesSearch(option, search))
                 {
                     result.Add(option);
                 }
             }
 
+            uint pickerNetId = this.petFeedFoodPickerNetId;
+            result.Sort((a, b) =>
+            {
+                int cmp = (this.IsPetEatenFavoriteFood(pickerNetId, a.StaticId) ? 0 : 1)
+                    .CompareTo(this.IsPetEatenFavoriteFood(pickerNetId, b.StaticId) ? 0 : 1);
+                if (cmp != 0)
+                {
+                    return cmp;
+                }
+
+                cmp = string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                return cmp != 0 ? cmp : a.StaticId.CompareTo(b.StaticId);
+            });
+
             return result;
+        }
+
+        private bool IsPetEatenFavoriteFood(uint netId, int staticId)
+        {
+            if (netId == 0U || staticId <= 0)
+            {
+                return false;
+            }
+
+            float now = Time.realtimeSinceStartup;
+            if (!this.petFeedEatenFavoriteReadAt.TryGetValue(netId, out float readAt)
+                || now - readAt >= PetFeedEatenFavoriteCacheSeconds)
+            {
+                HashSet<int> ids = new HashSet<int>();
+                this.TryReadPetEatenFavoriteFoodIds(netId, ids);
+                this.petFeedEatenFavoriteIdsByNetId[netId] = ids;
+                this.petFeedEatenFavoriteReadAt[netId] = now;
+            }
+
+            return this.petFeedEatenFavoriteIdsByNetId.TryGetValue(netId, out HashSet<int> cached)
+                && cached != null
+                && cached.Contains(staticId);
+        }
+
+        private void TryReadPetEatenFavoriteFoodIds(uint netId, HashSet<int> into)
+        {
+            if (into == null || netId == 0U || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                return;
+            }
+
+            if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.Pet.PetSystem", out IntPtr petSystemObj) || petSystemObj == IntPtr.Zero)
+            {
+                return;
+            }
+
+            IntPtr method = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(petSystemObj), "GetEatenFavoriteFoods", 1);
+            if (method == IntPtr.Zero)
+            {
+                return;
+            }
+
+            PetFeedTarget scratch = new PetFeedTarget { NetId = netId };
+            this.TryPopulatePetFeedKnownFavoriteFoodsAuraMono(petSystemObj, method, scratch);
+            if (scratch.FavoriteFoods == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < scratch.FavoriteFoods.Count; i++)
+            {
+                into.Add(scratch.FavoriteFoods[i]);
+            }
         }
 
         private bool PetFeedFoodOptionMatchesSearch(PetFeedFoodOption option, string search)
@@ -2592,7 +2722,9 @@ namespace HeartopiaMod
                         StaticId = option.StaticId,
                         Name = option.Name,
                         Count = option.Count,
-                        Fullness = option.Fullness
+                        Fullness = option.Fullness,
+                        ForDog = option.ForDog,
+                        ForCat = option.ForCat
                     })
                     .ToList();
                 this.petFeedFoodDropdownOpen = false;
@@ -2686,7 +2818,9 @@ namespace HeartopiaMod
                     StaticId = previous.StaticId,
                     Name = previous.Name,
                     Count = 0,
-                    Fullness = previous.Fullness
+                    Fullness = previous.Fullness,
+                    ForDog = previous.ForDog,
+                    ForCat = previous.ForCat
                 });
                 existingIds.Add(previous.StaticId);
             }
@@ -2759,16 +2893,55 @@ namespace HeartopiaMod
             }
         }
 
+        private void RefreshPetFeedFoodOptionsForPicker()
+        {
+            if (this.petFeedFoodScanInProgress)
+            {
+                return;
+            }
+
+            if (this.petFeedFoodOptions == null)
+            {
+                this.petFeedFoodOptions = new List<PetFeedFoodOption>();
+            }
+
+            this.petFeedFoodScanInProgress = true;
+            try
+            {
+                this.TryRefreshPetFeedFoodOptionsFromPetSystem(out int petFoodCount, out string petFoodStatus);
+                this.PetFeedLog("Picker food refresh: foods=" + petFoodCount
+                    + " dog=" + this.petFeedFoodPickerIsDog
+                    + (string.IsNullOrWhiteSpace(petFoodStatus) ? string.Empty : " status=" + petFoodStatus));
+            }
+            finally
+            {
+                this.petFeedFoodScanInProgress = false;
+            }
+        }
+
         private bool TryRefreshPetFeedFoodOptionsFromPetSystem(out int foodCount, out string status)
         {
             foodCount = 0;
             status = string.Empty;
 
             Dictionary<int, PetFeedFoodSupply> byStaticId = new Dictionary<int, PetFeedFoodSupply>();
-            bool catOk = this.TryCollectPetFeedFoods(false, byStaticId, out string catStatus);
+            Dictionary<int, PetFeedFoodSupply> catFoods = new Dictionary<int, PetFeedFoodSupply>();
             bool dogOk = this.TryCollectPetFeedFoods(true, byStaticId, out string dogStatus);
-            foodCount = byStaticId.Count;
+            bool catOk = this.TryCollectPetFeedFoods(false, catFoods, out string catStatus);
+            foreach (KeyValuePair<int, PetFeedFoodSupply> pair in catFoods)
+            {
+                if (byStaticId.TryGetValue(pair.Key, out PetFeedFoodSupply supply))
+                {
+                    supply.ForCat = true;
+                }
+                else
+                {
+                    byStaticId[pair.Key] = pair.Value;
+                }
+            }
+
             status = "cat=" + catStatus + "; dog=" + dogStatus;
+            foodCount = byStaticId.Count;
 
             if (foodCount <= 0)
             {
@@ -2875,6 +3048,14 @@ namespace HeartopiaMod
                             if (supply.NetId == 0U)
                             {
                                 supply.NetId = netId;
+                            }
+                            if (dog)
+                            {
+                                supply.ForDog = true;
+                            }
+                            else
+                            {
+                                supply.ForCat = true;
                             }
                             if (!string.IsNullOrWhiteSpace(name))
                             {

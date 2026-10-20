@@ -184,6 +184,8 @@ namespace HeartopiaMod
             public GameObject SelectFoodButton;
             public GameObject FoodLabel;
             public string FoodShown;
+            public GameObject FoodHeart;
+            public int FoodFavoriteShown = -1;
             public int FeedEnabledShown = -1;
             public PetCareEntry BoundEntry;   // rebound every frame — clicks act on the live entry
             public int ActiveSessionShown = -1;   // -1 forces the first apply
@@ -200,6 +202,9 @@ namespace HeartopiaMod
             public GameObject NameLabel;
             public GameObject CountLabel;     // "x{Count}" — hidden on the Any Food row
             public string CountShown;
+            public GameObject HeartGo;
+            public RawImage Heart;
+            public int HeartStateShown = -1;
             public int BoundStaticId = int.MinValue;
             public string BoundName;          // RAW option name — SelectPetFeedFood gets this (:525)
             public string BoundDisplay;       // shown label (GetPetFeedFoodDisplayName)
@@ -277,6 +282,7 @@ namespace HeartopiaMod
         }
 
         private UguiShellFeaturesPetCareHandle uguiShellFeaturesPetCare;
+        private Texture2D uguiPetCareHeartTexture;
 
         // Content-local fixed geometry — the source's num cursor (left 40, width 520) re-based to
         // 8: header 8 (+42) → TRAINING card 50 (160 tall, +174) → MY PETS card 224. Everything
@@ -789,6 +795,8 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(row.SelectFoodButton, 86f, 68f, 108f, 26f);
             row.FoodLabel = this.CreateUguiLabel(root.transform, "FoodLabel", row.FoodShown, 11f, this.UguiKitTextColor(), false);
             PlaceUguiTopLeft(row.FoodLabel, 202f, 68f, Mathf.Max(40f, rowW - 218f), 26f);
+            row.FoodHeart = this.CreateUguiPetCareHeart(root.transform, "FoodHeart", 202f, 73f, 16f);
+            row.FoodHeart.SetActive(false);
 
             row.Root = root;
             return row;
@@ -806,7 +814,6 @@ namespace HeartopiaMod
                 string petCareBusyLabel;
                 petCareBusy = this.TryGetPetCareBusyLabel(out petCareBusyLabel);
             }
-
             for (int i = 0; i < count; i++)
             {
                 if (i >= handle.PetRows.Count)
@@ -837,8 +844,19 @@ namespace HeartopiaMod
                     BuildUguiFeaturesPetCarePetStatsLine(entry));
                 this.SyncUguiSelfLabelText(row.MessageLabel, ref row.MessageShown,
                     entry.Message ?? string.Empty); // :353
-                string foodLabel = this.GetPetFeedFoodLabelForStaticId(this.GetPetFeedSavedFoodStaticId(this.GetPetFeedFoodPrefKey(entry)));
+                int savedFoodId = this.GetPetFeedSavedFoodStaticId(this.GetPetFeedFoodPrefKey(entry));
+                string foodLabel = this.GetPetFeedFoodLabelForStaticId(savedFoodId);
                 this.SyncUguiSelfLabelText(row.FoodLabel, ref row.FoodShown, foodLabel);
+                bool foodFavorite = this.IsPetEatenFavoriteFood(entry.NetId, savedFoodId);
+                int foodFavoriteState = foodFavorite ? 1 : 0;
+                if (foodFavoriteState != row.FoodFavoriteShown)
+                {
+                    row.FoodFavoriteShown = foodFavoriteState;
+                    SetUguiGoActive(row.FoodHeart, foodFavorite);
+                    float labelX = foodFavorite ? 222f : 202f;
+                    float rowW = handle.ContentWidth - 16f;
+                    PlaceUguiTopLeft(row.FoodLabel, labelX, 68f, Mathf.Max(40f, rowW - labelX - 16f), 26f);
+                }
                 bool feedBusy = petCareBusy || this.petFeedAllCoroutine != null || Time.realtimeSinceStartup < this.petFeedAllBusyUntil;
                 int feedState = feedBusy ? 0 : 1;
                 if (feedState != row.FeedEnabledShown)
@@ -923,7 +941,11 @@ namespace HeartopiaMod
             row.IconGo = iconGo;
 
             row.NameLabel = this.CreateUguiLabel(root.transform, "Name", "", 12f, this.UguiKitTextColor(), false);
-            PlaceUguiTopLeft(row.NameLabel, 42f, 2f, innerW - 88f, 32f); // :529-530, :536
+            PlaceUguiTopLeft(row.NameLabel, 42f, 2f, Mathf.Max(40f, innerW - 112f), 32f);
+
+            row.HeartGo = this.CreateUguiPetCareHeart(root.transform, "Heart", innerW - 62f, 10f, 16f);
+            row.Heart = row.HeartGo.GetComponent<RawImage>();
+            row.HeartGo.SetActive(false);
 
             row.CountLabel = this.CreateUguiLabel(root.transform, "Count", "", 12f, this.UguiKitAccent(), true);
             this.TrySetUguiLabelBold(row.CountLabel);
@@ -982,21 +1004,89 @@ namespace HeartopiaMod
             bool selected = staticId <= 0
                 ? armedStaticId <= 0
                 : staticId == armedStaticId;
-            if (selected != row.SelectedShown)
+            bool favorite = staticId > 0 && this.IsPetEatenFavoriteFood(this.petFeedFoodPickerNetId, staticId);
+            int heartState = !favorite ? 0 : (selected ? 2 : 1);
+            if (selected != row.SelectedShown || heartState != row.HeartStateShown)
             {
                 row.SelectedShown = selected;
+                row.HeartStateShown = heartState;
+                Color accent = this.UguiKitAccent();
                 try
                 {
                     if (row.Fill != null)
                     {
-                        row.Fill.color = selected ? this.UguiKitAccent() : Color.clear;
+                        row.Fill.color = selected ? accent : Color.clear;
                     }
                 }
                 catch { }
                 this.SetUguiLabelColor(row.NameLabel, selected
-                    ? this.GetUiTextOnAccent(this.UguiKitAccent())
+                    ? this.GetUiTextOnAccent(accent)
                     : this.UguiKitTextColor());
+                SetUguiGoActive(row.HeartGo, favorite);
+                if (favorite && row.Heart != null)
+                {
+                    row.Heart.color = selected ? this.GetUiTextOnAccent(accent) : accent;
+                }
             }
+        }
+
+        private GameObject CreateUguiPetCareHeart(Transform parent, string name, float x, float y, float size)
+        {
+            GameObject heart = this.CreateUguiGo(name, parent);
+            PlaceUguiTopLeft(heart, x, y, size, size);
+            RawImage image = heart.AddComponent<RawImage>();
+            image.texture = this.EnsureUguiPetCareHeartTexture();
+            image.color = this.UguiKitAccent();
+            image.raycastTarget = false;
+            return heart;
+        }
+
+        private Texture2D EnsureUguiPetCareHeartTexture()
+        {
+            if (this.uguiPetCareHeartTexture != null)
+            {
+                return this.uguiPetCareHeartTexture;
+            }
+
+            // Unity y=0 is the bottom. Each row is a 16-wide palindrome so the cleft stays on center.
+            string[] rows =
+            {
+                "....##....##....",
+                "...####..####...",
+                "..#####..#####..",
+                "..############..",
+                "..############..",
+                "...##########...",
+                "....########....",
+                ".....######.....",
+                "......####......",
+                ".......##.......",
+            };
+            const int size = 16;
+            int pad = (size - rows.Length) / 2;
+            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Point;
+            tex.hideFlags = HideFlags.HideAndDontSave;
+            Color32[] pixels = new Color32[size * size];
+            Color32 solid = new Color32(255, 255, 255, 255);
+            for (int y = 0; y < size; y++)
+            {
+                int rowIndex = (size - 1 - y) - pad;
+                string row = rowIndex >= 0 && rowIndex < rows.Length ? rows[rowIndex] : null;
+                for (int x = 0; x < size; x++)
+                {
+                    if (row != null && x < row.Length && row[x] == '#')
+                    {
+                        pixels[(y * size) + x] = solid;
+                    }
+                }
+            }
+
+            tex.SetPixels32(pixels);
+            tex.Apply(false, true);
+            this.uguiPetCareHeartTexture = tex;
+            return tex;
         }
 
         private void SyncUguiFeaturesPetCareFoodRows(UguiShellFeaturesPetCareHandle handle)
