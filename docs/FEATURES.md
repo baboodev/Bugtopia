@@ -1393,7 +1393,8 @@ is not available at all (a boss run) or every spot refused in a row.
 
 **Auto Eat**
 
-- Default food key: `food_bluejam` (configurable type / custom name).
+- Default food option: Bad Food (`food_badfood`; configurable type / custom name).
+- Among stacks that match the selected food, eats the lowest `TableEntity.rarity` first (`RewardUtility.GetQuality`). Ties go to the stack whose `Eatable.restore` value is lower at that stack's star (`restore[starRate == 0 ? 0 : starRate - 1]`), then to the earlier backpack slot. The star is the backpack item's `_starRate` field (`get_starRate` returns 0 while the pictorial hides food stars). A rarity that cannot be read is used only after every known rarity; a restore value that cannot be read is used only after known restores of the same rarity. The shared backpack list is not reordered.
 - Eats until energy full or max attempts reached.
 - Trigger: hotkey, toast, or energy % threshold (default 20%).
 

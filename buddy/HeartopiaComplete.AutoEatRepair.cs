@@ -2536,6 +2536,15 @@ namespace HeartopiaMod
         // rejecting only the netId would just pick the next copy of the same thing.
         private readonly HashSet<uint> autoEatRejectedFoodNetIds = new HashSet<uint>();
         private readonly HashSet<int> autoEatRejectedFoodStaticIds = new HashSet<int>();
+        private readonly List<AutoEatFoodRow> autoEatFoodRows = new List<AutoEatFoodRow>(32);
+        private readonly Dictionary<int, int> autoEatRarityByStaticId = new Dictionary<int, int>();
+        private readonly HashSet<int> autoEatRarityMissStaticIds = new HashSet<int>();
+        private readonly Dictionary<long, int> autoEatEnergyByKey = new Dictionary<long, int>();
+        private readonly HashSet<long> autoEatEnergyMissKeys = new HashSet<long>();
+        private readonly Dictionary<uint, int> autoEatStarByNetId = new Dictionary<uint, int>();
+        private IntPtr autoEatGetEatableMethod = IntPtr.Zero;
+        private float nextAutoEatGetEatableResolveAt = -999f;
+        private uint autoEatRankLoggedNetId;
 
         private static bool IsEatableEntityType(int entityType)
         {
@@ -2631,6 +2640,308 @@ namespace HeartopiaMod
             this.ClearCachedFood();
         }
 
+        private struct AutoEatFoodRow
+        {
+            public uint NetId;
+            public int StaticId;
+            public int EntityType;
+            public int Count;
+            public int BagIndex;
+            public int StarRate;
+        }
+
+        private struct AutoEatFoodPick
+        {
+            public uint NetId;
+            public int StaticId;
+            public int EntityType;
+            public int Count;
+            public int BagIndex;
+            public int Rarity;
+            public bool RarityKnown;
+            public int Energy;
+            public bool EnergyKnown;
+            public int StarRate;
+        }
+
+        // Cached only when a real tier is found. BackpackItem.get_starRate returns 0 while
+        // PictorialSystem.CanShowStarRate is false; the tier itself is the _starRate field.
+        // A cached 0 would make every star of one dish share restore[0].
+        private int ReadAutoEatStarRate(uint netId, IntPtr itemObj)
+        {
+            if (netId != 0U && this.autoEatStarByNetId.TryGetValue(netId, out int cached))
+            {
+                return cached;
+            }
+
+            int star = 0;
+            if (itemObj == IntPtr.Zero || !this.TryGetMonoInt32Member(itemObj, "_starRate", out star) || star <= 0)
+            {
+                if (netId == 0U || !this.TryGetAutoSellBackpackItemDataStar(netId, out star) || star <= 0)
+                {
+                    return 0;
+                }
+            }
+
+            star = this.NormalizeAutoSellStarRate(star);
+            if (netId != 0U)
+            {
+                this.autoEatStarByNetId[netId] = star;
+            }
+
+            return star;
+        }
+
+        private static long AutoEatEnergyCacheKey(int staticId, int starIndex)
+        {
+            return ((long)staticId << 4) | (uint)starIndex;
+        }
+
+        // GetQuality returns 0 when the entity row is missing; that is unknown, not a real tier.
+        private bool TryGetAutoEatItemRarity(int staticId, out int rarity)
+        {
+            rarity = 0;
+            if (staticId <= 0)
+            {
+                return false;
+            }
+
+            if (this.autoEatRarityByStaticId.TryGetValue(staticId, out rarity))
+            {
+                return true;
+            }
+
+            if (this.autoEatRarityMissStaticIds.Contains(staticId))
+            {
+                return false;
+            }
+
+            if (!this.EnsureItemQualityMethod())
+            {
+                return false;
+            }
+
+            if (!this.TryGetItemQuality(staticId, out rarity))
+            {
+                return false;
+            }
+
+            if (rarity <= 0)
+            {
+                this.autoEatRarityMissStaticIds.Add(staticId);
+                return false;
+            }
+
+            this.autoEatRarityByStaticId[staticId] = rarity;
+            return true;
+        }
+
+        private bool EnsureAutoEatGetEatableMethod()
+        {
+            if (this.autoEatGetEatableMethod != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            if (Time.unscaledTime < this.nextAutoEatGetEatableResolveAt)
+            {
+                return false;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            IntPtr cls = this.FindAuraMonoClassByFullName("TableData");
+            if (cls == IntPtr.Zero)
+            {
+                cls = this.FindAuraMonoClassInImages(string.Empty, "TableData", new[] { "EcsClient", "EcsClient.dll" });
+            }
+
+            if (cls == IntPtr.Zero)
+            {
+                this.nextAutoEatGetEatableResolveAt = Time.unscaledTime + 3f;
+                return false;
+            }
+
+            IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "GetEatable", 2);
+            if (method == IntPtr.Zero)
+            {
+                method = this.FindAuraMonoMethodOnHierarchy(cls, "GetEatable", 1);
+            }
+
+            if (method == IntPtr.Zero)
+            {
+                this.nextAutoEatGetEatableResolveAt = Time.unscaledTime + 3f;
+                return false;
+            }
+
+            this.autoEatGetEatableMethod = method;
+            this.nextAutoEatGetEatableResolveAt = -999f;
+            return true;
+        }
+
+        // BackPackSystem.TryGetFoodDetailData is an out-struct wider than a pointer. mono_runtime_invoke
+        // would write the whole struct into the slot and corrupt the stack, so the restore int is read
+        // off TableEatable.restore instead. Index matches the game: starRate == 0 uses element 0.
+        private unsafe bool TryGetAutoEatFoodEnergy(int staticId, int starIndex, out int energy)
+        {
+            energy = 0;
+            if (staticId <= 0 || starIndex < 0)
+            {
+                return false;
+            }
+
+            long key = AutoEatEnergyCacheKey(staticId, starIndex);
+            if (this.autoEatEnergyByKey.TryGetValue(key, out energy))
+            {
+                return true;
+            }
+
+            if (this.autoEatEnergyMissKeys.Contains(key))
+            {
+                return false;
+            }
+
+            if (!this.EnsureAutoEatGetEatableMethod())
+            {
+                return false;
+            }
+
+            int id = staticId;
+            int needException = 0;
+            IntPtr* args = stackalloc IntPtr[2];
+            args[0] = (IntPtr)(&id);
+            args[1] = (IntPtr)(&needException);
+            IntPtr exc = IntPtr.Zero;
+            IntPtr eatable = auraMonoRuntimeInvoke(
+                this.autoEatGetEatableMethod,
+                IntPtr.Zero,
+                (IntPtr)args,
+                ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (eatable == IntPtr.Zero)
+            {
+                this.autoEatEnergyMissKeys.Add(key);
+                return false;
+            }
+
+            uint pin = AuraMonoPinNew(eatable);
+            try
+            {
+                IntPtr pinned = pin != 0U ? AuraMonoPinTarget(pin) : eatable;
+                if (pinned == IntPtr.Zero || !this.TryGetMonoObjectMember(pinned, "restore", out IntPtr restoreArr) || restoreArr == IntPtr.Zero)
+                {
+                    this.autoEatEnergyMissKeys.Add(key);
+                    return false;
+                }
+
+                if (auraMonoArrayLength == null || auraMonoArrayAddrWithSize == null)
+                {
+                    return false;
+                }
+
+                int length = (int)Math.Min(auraMonoArrayLength(restoreArr).ToUInt64(), 8UL);
+                if (starIndex >= length)
+                {
+                    this.autoEatEnergyMissKeys.Add(key);
+                    return false;
+                }
+
+                IntPtr addr = auraMonoArrayAddrWithSize(restoreArr, sizeof(int), (UIntPtr)starIndex);
+                if (addr == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                energy = *(int*)addr;
+                this.autoEatEnergyByKey[key] = energy;
+                return true;
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
+            }
+        }
+
+        // Known rarity, then lower rarity, then known restore, then lower restore, then earlier bag slot.
+        private static bool IsPreferredAutoEatFood(ref AutoEatFoodPick candidate, ref AutoEatFoodPick current)
+        {
+            if (candidate.RarityKnown != current.RarityKnown)
+            {
+                return candidate.RarityKnown;
+            }
+
+            if (candidate.RarityKnown && candidate.Rarity != current.Rarity)
+            {
+                return candidate.Rarity < current.Rarity;
+            }
+
+            if (candidate.EnergyKnown != current.EnergyKnown)
+            {
+                return candidate.EnergyKnown;
+            }
+
+            if (candidate.EnergyKnown && candidate.Energy != current.Energy)
+            {
+                return candidate.Energy < current.Energy;
+            }
+
+            return candidate.BagIndex < current.BagIndex;
+        }
+
+        private bool TryPickBestAutoEatFood(List<AutoEatFoodRow> rows, out AutoEatFoodPick best)
+        {
+            best = default;
+            bool any = false;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                AutoEatFoodRow row = rows[i];
+                int starIndex = row.StarRate > 0 ? row.StarRate - 1 : 0;
+                AutoEatFoodPick candidate = new AutoEatFoodPick
+                {
+                    NetId = row.NetId,
+                    StaticId = row.StaticId,
+                    EntityType = row.EntityType,
+                    Count = row.Count,
+                    BagIndex = row.BagIndex,
+                    RarityKnown = this.TryGetAutoEatItemRarity(row.StaticId, out int rarity),
+                    Rarity = rarity,
+                    EnergyKnown = this.TryGetAutoEatFoodEnergy(row.StaticId, starIndex, out int energy),
+                    Energy = energy,
+                    StarRate = row.StarRate
+                };
+                if (!any || IsPreferredAutoEatFood(ref candidate, ref best))
+                {
+                    best = candidate;
+                    any = true;
+                }
+            }
+
+            return any;
+        }
+
+        private void LogAutoEatFoodRank(ref AutoEatFoodPick best)
+        {
+            if (best.NetId == this.autoEatRankLoggedNetId)
+            {
+                return;
+            }
+
+            this.autoEatRankLoggedNetId = best.NetId;
+            this.AutoEatRepairLog("[Auto Eat] Selected staticId=" + best.StaticId
+                + " star=" + best.StarRate
+                + " rarity=" + (best.RarityKnown ? best.Rarity.ToString() : "?")
+                + " energy=" + (best.EnergyKnown ? best.Energy.ToString() : "?")
+                + " bagIndex=" + best.BagIndex
+                + " netId=" + best.NetId);
+        }
+
         private bool TryDirectUseFood()
         {
             try
@@ -2638,12 +2949,14 @@ namespace HeartopiaMod
                 string foodKey = this.GetAutoEatFoodKey();
                 bool anyFood = this.autoEatFoodType == this.autoEatFoodOptions.Length - 2;
                 this.AutoEatRepairLog("[Auto Eat] Direct food requested. key=" + foodKey + " anyFood=" + anyFood + " option=" + this.GetAutoEatFoodOptionLabel(this.autoEatFoodType) + " energy=" + this.GetCurrentEnergyDisplay());
-                if (this.TryUseCachedFood(foodKey, anyFood))
+                bool bagRead = this.TryFillAutoEatFoodRows(foodKey, anyFood, this.autoEatFoodRows);
+                if (!bagRead && this.TryUseCachedFood(foodKey, anyFood))
                 {
                     return true;
                 }
 
-                if (!this.TryFindDirectBackpackItem(foodKey, anyFood, out uint netId, true) || netId == 0U)
+                AutoEatFoodPick best = default;
+                if (!bagRead || !this.TryPickBestAutoEatFood(this.autoEatFoodRows, out best) || best.NetId == 0U)
                 {
                     FeatureLog.Fail("AutoEat", "No usable food found in the backpack for " + this.GetAutoEatFoodOptionLabel(this.autoEatFoodType) + ".");
                     this.ClearCachedFood();
@@ -2651,9 +2964,14 @@ namespace HeartopiaMod
                     return false;
                 }
 
+                this.lastDirectBackpackMatchedNetId = best.NetId;
+                this.lastDirectBackpackMatchedStaticId = best.StaticId;
+                this.lastDirectBackpackMatchedEntityType = best.EntityType;
+                this.lastDirectBackpackMatchedCount = best.Count;
                 this.CacheFoodMatch(foodKey, anyFood);
-                this.AutoEatRepairLog("[Auto Eat] Direct food matched netId=" + netId + " staticId=" + this.lastDirectBackpackMatchedStaticId + " entityType=" + this.lastDirectBackpackMatchedEntityType + "; sending eat.");
-                return this.SendEatForAutoEat(netId);
+                this.LogAutoEatFoodRank(ref best);
+                this.AutoEatRepairLog("[Auto Eat] Direct food matched netId=" + best.NetId + " staticId=" + best.StaticId + " entityType=" + best.EntityType + "; sending eat.");
+                return this.SendEatForAutoEat(best.NetId);
             }
             catch (Exception ex)
             {

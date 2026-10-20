@@ -2569,6 +2569,24 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Same predicate the food and repair lookups already used. Descriptor is lowercase.
+        private static bool DirectBackpackFoodDescriptorMatches(string descriptor, string normalizedKey, bool anyFood)
+        {
+            if (string.IsNullOrEmpty(descriptor))
+            {
+                return false;
+            }
+
+            if (anyFood)
+            {
+                return descriptor.Contains("food_")
+                    || descriptor.Contains("p_food")
+                    || descriptor.Contains("ui_item_normal_p_food");
+            }
+
+            return !string.IsNullOrEmpty(normalizedKey) && descriptor.Contains(normalizedKey);
+        }
+
         private bool TryFindDirectBackpackItem(string itemKey, bool anyFood, out uint netId, bool requireEdible = false)
         {
             netId = 0U;
@@ -2679,9 +2697,7 @@ namespace HeartopiaMod
                             this.AutoEatRepairLog("[DirectBackpackMono] Item sample " + sampleCount + ": netId=" + candidateNetId + " descriptor=" + descriptor);
                         }
 
-                        bool matches = anyFood
-                            ? (descriptor.Contains("food_") || descriptor.Contains("p_food") || descriptor.Contains("ui_item_normal_p_food"))
-                            : (!string.IsNullOrEmpty(normalizedKey) && descriptor.Contains(normalizedKey));
+                        bool matches = DirectBackpackFoodDescriptorMatches(descriptor, normalizedKey, anyFood);
 
                         if (!matches)
                         {
@@ -2748,9 +2764,7 @@ namespace HeartopiaMod
                 }
 
                 string descriptor = item.Descriptor ?? string.Empty;
-                bool matches = anyFood
-                    ? (descriptor.Contains("food_") || descriptor.Contains("p_food") || descriptor.Contains("ui_item_normal_p_food"))
-                    : (!string.IsNullOrEmpty(normalizedKey) && descriptor.Contains(normalizedKey));
+                bool matches = DirectBackpackFoodDescriptorMatches(descriptor, normalizedKey, anyFood);
 
                 if (!matches)
                 {
@@ -2773,6 +2787,50 @@ namespace HeartopiaMod
             }
 
             return false;
+        }
+
+        // Every edible match, in backpack order. Does not reorder directBackpackRuntimeItems.
+        // False means the bag could not be read. An empty list means it was read and nothing matched.
+        private bool TryFillAutoEatFoodRows(string itemKey, bool anyFood, List<AutoEatFoodRow> rows)
+        {
+            if (rows == null || !this.TryRefreshDirectBackpackRuntimeSnapshot(true))
+            {
+                return false;
+            }
+
+            rows.Clear();
+            string normalizedKey = (itemKey ?? string.Empty).ToLowerInvariant();
+            for (int i = 0; i < this.directBackpackRuntimeItems.Count; i++)
+            {
+                DirectBackpackRuntimeItem item = this.directBackpackRuntimeItems[i];
+                if (item == null || item.NetId == 0U)
+                {
+                    continue;
+                }
+
+                string descriptor = item.Descriptor ?? string.Empty;
+                if (!DirectBackpackFoodDescriptorMatches(descriptor, normalizedKey, anyFood))
+                {
+                    continue;
+                }
+
+                if (!this.IsAutoEatFoodCandidate(item.NetId, item.StaticId, item.EntityType, out _))
+                {
+                    continue;
+                }
+
+                rows.Add(new AutoEatFoodRow
+                {
+                    NetId = item.NetId,
+                    StaticId = item.StaticId,
+                    EntityType = item.EntityType,
+                    Count = item.Count,
+                    BagIndex = i,
+                    StarRate = this.ReadAutoEatStarRate(item.NetId, item.MonoItem)
+                });
+            }
+
+            return true;
         }
 
         private bool TryRefreshDirectBackpackRuntimeSnapshot(bool forceRefresh)

@@ -474,6 +474,7 @@ namespace HeartopiaMod
         private IntPtr mapResDropDictGetter = IntPtr.Zero;   // static get_TableRandomDropsAndLowerUpperLimitsByDropGroup
         private IntPtr mapResDropDictGetItem = IntPtr.Zero;  // Dictionary.get_Item(string)
         private IntPtr mapResGetQualityMethod = IntPtr.Zero; // RewardUtility.GetQuality(RewardType,int,int)
+        private float nextItemQualityResolveAt = -999f;
         private IntPtr mapResGetEntityMethod = IntPtr.Zero;  // TableData.GetEntity(int,bool) -> TableEntity (.name)
         private int mapResGroupVerboseCount;
         private int mapTrackMatchDiagCount;
@@ -2457,7 +2458,51 @@ namespace HeartopiaMod
             return false;
         }
 
+        // RewardUtility.GetQuality is normally resolved by the map scan. Auto Eat needs it before that scan runs.
+        private bool EnsureItemQualityMethod()
+        {
+            if (this.mapResGetQualityMethod != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            if (Time.unscaledTime < this.nextItemQualityResolveAt)
+            {
+                return false;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            IntPtr rewardCls = this.FindAuraMonoClassByFullName("XDTGameSystem.Utilities.RewardUtility");
+            if (rewardCls == IntPtr.Zero)
+            {
+                rewardCls = this.FindAuraMonoClassInImages("XDTGameSystem.Utilities", "RewardUtility",
+                    new[] { "XDTDataAndProtocol", "XDTDataAndProtocol.dll" });
+            }
+
+            if (rewardCls == IntPtr.Zero)
+            {
+                this.nextItemQualityResolveAt = Time.unscaledTime + 3f;
+                return false;
+            }
+
+            IntPtr method = this.FindAuraMonoMethodOnHierarchy(rewardCls, "GetQuality", 3);
+            if (method == IntPtr.Zero)
+            {
+                this.nextItemQualityResolveAt = Time.unscaledTime + 3f;
+                return false;
+            }
+
+            this.mapResGetQualityMethod = method;
+            this.nextItemQualityResolveAt = -999f;
+            return true;
+        }
+
         // RewardUtility.GetQuality(RewardType.Item, itemId, 0) -> item rarity (safe; reads TableEntity.rarity).
+        // A missing entity returns 0. Callers that rank food treat 0 as unknown.
         private unsafe bool TryGetItemQuality(int itemId, out int quality)
         {
             quality = 0;
