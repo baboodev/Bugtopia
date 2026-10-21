@@ -79,7 +79,8 @@ namespace HeartopiaMod
             WriteResidentRaw("{\"quitSignal\":true,\"plugins\":[]}");
         }
 
-        // Once per process, on the first world-ready. Later worlds do not reload; Reload does.
+        // Once per process, on the first world-ready. Loads only dlls the user has turned on.
+        // A new dll stays unloaded until Enabled is checked. Later worlds do not reload; Reload does.
         internal static bool OnWorldReady()
         {
             if (diskLoaded)
@@ -127,17 +128,20 @@ namespace HeartopiaMod
                 return;
             }
 
-            string marker = Path.Combine(Folder(), id + ".disabled");
+            string dir = Folder();
+            string enabledMarker = Path.Combine(dir, id + ".enabled");
+            string disabledMarker = Path.Combine(dir, id + ".disabled");
             try
             {
                 if (enabled)
                 {
-                    if (File.Exists(marker))
+                    if (File.Exists(disabledMarker))
                     {
-                        File.Delete(marker);
+                        File.Delete(disabledMarker);
                     }
 
-                    string dll = Path.Combine(Folder(), id + ".dll");
+                    File.WriteAllBytes(enabledMarker, Array.Empty<byte>());
+                    string dll = Path.Combine(dir, id + ".dll");
                     if (File.Exists(dll))
                     {
                         TryLoadFile(dll, false, out _);
@@ -145,7 +149,11 @@ namespace HeartopiaMod
                 }
                 else
                 {
-                    File.WriteAllBytes(marker, Array.Empty<byte>());
+                    if (File.Exists(enabledMarker))
+                    {
+                        File.Delete(enabledMarker);
+                    }
+
                     if (Loaded.TryGetValue(id, out LoadedPlugin entry) && entry.Source == PluginSource.Disk)
                     {
                         TryUnload(id, out _);
@@ -228,10 +236,10 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                bool enabled = !File.Exists(Path.Combine(dir, id + ".disabled"));
+                bool enabled = IsDiskOptedIn(dir, id);
                 DiskErrors.TryGetValue(id, out string error);
                 bool quarantined = string.Equals(error, "quarantined", StringComparison.Ordinal);
-                string detail = !enabled ? "disabled" : (error ?? "not loaded");
+                string detail = enabled ? (error ?? "not loaded") : "not enabled";
                 into.Add(new PluginRow
                 {
                     Id = id,
@@ -301,7 +309,7 @@ namespace HeartopiaMod
         {
             string dir = Folder();
             bool hasDll = File.Exists(Path.Combine(dir, entry.Id + ".dll"));
-            bool enabled = !File.Exists(Path.Combine(dir, entry.Id + ".disabled"));
+            bool enabled = entry.Source != PluginSource.Disk || IsDiskOptedIn(dir, entry.Id);
             string detail = entry.Source == PluginSource.Disk ? "disk" : "mcp";
 
             return new PluginRow
@@ -348,7 +356,7 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                if (File.Exists(Path.Combine(dir, id + ".disabled")))
+                if (!IsDiskOptedIn(dir, id))
                 {
                     continue;
                 }
@@ -398,6 +406,18 @@ namespace HeartopiaMod
             }
 
             return false;
+        }
+
+        // Opt-in is a sibling <id>.enabled written by the Plugins tab. <id>.disabled still wins,
+        // so an older skip marker keeps the dll off even if both files are present.
+        private static bool IsDiskOptedIn(string dir, string id)
+        {
+            if (File.Exists(Path.Combine(dir, id + ".disabled")))
+            {
+                return false;
+            }
+
+            return File.Exists(Path.Combine(dir, id + ".enabled"));
         }
 
         private static bool ConsiderDiskName(string fileName, string id)
@@ -642,8 +662,9 @@ namespace HeartopiaMod
                 File.WriteAllText(readme,
                     "Bugtopia plugins\r\n"
                     + "\r\n"
-                    + "Drop a net6.0 dll here (and its pdb, same name) and enter a world.\r\n"
+                    + "Drop a net6.0 dll here (and its pdb, same name).\r\n"
                     + "The file name without .dll is the plugin id.\r\n"
+                    + "Nothing loads until you turn it on in the Plugins tab, which writes <id>.enabled.\r\n"
                     + "A sibling file <id>.disabled skips that dll.\r\n"
                     + "State is stored in state/<id>.json.\r\n"
                     + "quarantine.json lists hashes that crashed a previous session; clear a line\r\n"

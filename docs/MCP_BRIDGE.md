@@ -296,9 +296,10 @@ rather than passing the bare code through.
 be swapped without restarting the game. Contract: `HeartopiaMod.Plugins.IBugtopiaPlugin`
 (`buddy/PluginContract.cs`); reference implementation: `tools/SamplePlugin`.
 
-The same host autoloads user dlls from `%LocalLow%/Bugtopia/Plugins` in every build, including ones
-compiled without the bridge. That path, the stable surface, and the template project are
-[PLUGINS.md](./PLUGINS.md). `plugin.load` stays the agent path and shares ids with those files.
+The same host lists user dlls from `%LocalLow%/Bugtopia/Plugins` in every build, including ones
+compiled without the bridge. A dll loads only after it is turned on in the Plugins tab. That path,
+the stable surface, and the template project are [PLUGINS.md](./PLUGINS.md). `plugin.load` stays
+the agent path and shares ids with those files.
 
 Bytes, not paths — `LoadFromStream` takes no file lock, so the plugin project can be rebuilt while
 the previous version is still live, which is the entire point. Ship the pdb too and exceptions carry

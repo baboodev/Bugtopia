@@ -18,7 +18,8 @@ member on it can disappear in any build. Code that should keep working across mo
 %LocalLow%/Bugtopia/Plugins/
   HelloBugtopia.dll
   HelloBugtopia.pdb          optional, same stem, gives line numbers in stack traces
-  HelloBugtopia.disabled     empty sibling: skip this dll
+  HelloBugtopia.enabled      written by the Enabled toggle; without it the dll is not loaded
+  HelloBugtopia.disabled     optional hard skip; wins over .enabled
   state/<id>.json            IHostApi.State
   resident.json              who is loaded; the host rewrites it on load and unload
   quarantine.json            sha256 values refused after a killed session
@@ -39,17 +40,20 @@ Rules:
 - Ids are shared with `plugin.load`. A disk file named `sample.dll` and an MCP load of id `sample`
   are the same slot.
 
-The scan runs once, on the first world-ready of the process. Later world entries do not reload.
+A dll in the folder is not loaded on its own. The first load is the **Enabled** toggle on the
+Plugins tab: that writes `<id>.enabled` and loads immediately. The next launch loads that dll
+once, on the first world-ready. Later world entries do not reload. Unchecking deletes
+`<id>.enabled` and unloads. A `<id>.disabled` sibling skips the dll even when `.enabled` is present.
 **Plugins** is its own sidebar tab, shown only while that folder contains at least one plugin dll (a
-`.disabled` sibling still counts). With an empty folder the tab is not in the menu. Opening
+`.disabled` or `.enabled` sibling still counts). With an empty folder the tab is not in the menu. Opening
 the menu rebuilds the sidebar if a dll has appeared or the last one has been removed.
-**Plugins → Reload** unloads disk-loaded plugins and scans again. Plugins loaded only
-through `plugin.load` stay.
+**Plugins → Reload** unloads disk-loaded plugins and scans again, loading only the ones that are
+turned on. Plugins loaded only through `plugin.load` stay.
 
 ## Enable, quarantine
 
-A `<id>.disabled` file next to the dll skips it. The Enabled toggle on Plugins writes or
-deletes that file and loads or unloads immediately.
+The Enabled toggle on Plugins is the opt-in. It writes or deletes `<id>.enabled` and loads or
+unloads immediately.
 
 `resident.json` records the loaded set and whether that session installed a quit signal
 (`Application.quitting`). If the process is killed, the file is still there and `quitSignal` is
@@ -139,10 +143,11 @@ Template: `plugins/HelloBugtopia`.
 dotnet build plugins/HelloBugtopia/HelloBugtopia.csproj -c Release
 ```
 
-Copy `bin/Release/net6.0/HelloBugtopia.dll` and the pdb into the plugins folder. Enter a world.
-The log line is `[Plugin] loaded 'HelloBugtopia'`. The Plugins tab shows the page. Restarting
-the game increments `runs` in `state/HelloBugtopia.json`. A sibling `HelloBugtopia.disabled` skips
-it on the next start.
+Copy `bin/Release/net6.0/HelloBugtopia.dll` and the pdb into the plugins folder. Enter a world
+and turn **Enabled** on under Plugins. The log line is `[Plugin] loaded 'HelloBugtopia'`. The
+Plugins tab shows the page. Restarting the game loads it again and increments `runs` in
+`state/HelloBugtopia.json`. Without `HelloBugtopia.enabled` it stays unloaded. A sibling
+`HelloBugtopia.disabled` skips it on the next start.
 
 `BugtopiaDll` and `InteropDir` on the csproj override the reference paths. `InteropDir` must be the
 loader interop folder that contains `UnityEngine.CoreModule.dll`.
@@ -151,4 +156,4 @@ loader interop folder that contains `UnityEngine.CoreModule.dll`.
 
 `plugin.load` / `plugin.unload` / `plugin.call` load the same host from bytes. That protocol, the
 hot-reload loop, and `tools/SamplePlugin` are in [MCP_BRIDGE.md](./MCP_BRIDGE.md) §4b. The bridge
-is a BepInEx development build (`-p:Mcp=true`). Disk autoload does not need it.
+is a BepInEx development build (`-p:Mcp=true`). The disk folder does not need it.
