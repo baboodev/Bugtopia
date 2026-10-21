@@ -37,6 +37,7 @@ Guide for AI agents and developers working on this mod. Read this file first, th
 | Instrument WAV export (noteId ↔ Wwise subsong) | [docs/INSTRUMENT_SAMPLE_EXPORT.md](docs/INSTRUMENT_SAMPLE_EXPORT.md) |
 | **Game actions / animations** (what makes one play, combo gates, which are safe to cast) | [docs/GAME_ACTIONS.md](docs/GAME_ACTIONS.md) |
 | **Asking the RUNNING game instead of the dumps** (type search, live field/method tables, entity enumeration, `eval`, screenshots) — and reaching a game on a **second machine** over SSH | [docs/MCP_BRIDGE.md](docs/MCP_BRIDGE.md) |
+| **User plugins** — contract, folder, build | [docs/PLUGINS.md](docs/PLUGINS.md) |
 
 **Rule:** Do not guess type names from memory. Copy **full namespaces** from decompilations or interop DLLs for the target game build.
 

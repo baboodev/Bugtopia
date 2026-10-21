@@ -13,6 +13,8 @@ tools/BugtopiaMcp/bin
 tools/BugtopiaMcp/obj
 tools/SamplePlugin/bin
 tools/SamplePlugin/obj
+plugins/HelloBugtopia/bin
+plugins/HelloBugtopia/obj
 tools/cpp2il_out
 tools/reports
 tools/ilspy-verify

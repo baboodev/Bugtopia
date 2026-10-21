@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Collections.Generic;
 
@@ -146,6 +145,7 @@ namespace HeartopiaMod
             return removed;
         }
 
+#if FEATURE_MCP
         internal static void WriteStatusJson(McpJsonWriter w)
         {
             w.Num("subscribedTypes", Subscribers.Count);
@@ -162,6 +162,6 @@ namespace HeartopiaMod
 
             w.EndArray();
         }
+#endif
     }
 }
-#endif

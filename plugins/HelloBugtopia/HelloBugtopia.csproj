@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Template user plugin. Copy this folder, rename the assembly, and drop the dll into
+       %LocalLow%/Bugtopia/Plugins. See docs/PLUGINS.md.
+
+         dotnet build plugins/HelloBugtopia/HelloBugtopia.csproj -c Release
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>HelloBugtopia</AssemblyName>
+    <RootNamespace>HelloBugtopia</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>10.0</LangVersion>
+    <DebugType>portable</DebugType>
+    <BugtopiaDll Condition="'$(BugtopiaDll)' == ''">$(MSBuildThisFileDirectory)..\..\buddy\bin\BepInEx\Release\bugtopia.dll</BugtopiaDll>
+    <InteropDir Condition="'$(InteropDir)' == ''">C:\Users\coder\workplace\Heartopia-Mods\BepInEx\interop</InteropDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="bugtopia">
+      <HintPath>$(BugtopiaDll)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(InteropDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

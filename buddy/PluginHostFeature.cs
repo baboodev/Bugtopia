@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -22,7 +21,7 @@ namespace HeartopiaMod
     // The contract and the reasoning behind its prohibitions live in PluginContract.cs. This file is
     // the machinery: validate → load → tick → revoke → unload → prove it collected.
     // ============================================================================================
-    internal static class PluginHost
+    internal static partial class PluginHost
     {
         // Assemblies arrive as BYTES, never as a path. LoadFromStream takes no file lock, so the
         // plugin's source project can be rebuilt while the previous version is still live — which is
@@ -46,6 +45,12 @@ namespace HeartopiaMod
             protected override IntPtr LoadUnmanagedDll(string unmanagedDllName) => IntPtr.Zero;
         }
 
+        internal enum PluginSource
+        {
+            Mcp = 0,
+            Disk = 1,
+        }
+
         private sealed class LoadedPlugin
         {
             internal string Id;
@@ -57,6 +62,7 @@ namespace HeartopiaMod
             internal long Ticks;
             internal FeatureBreakerState Breaker;
             internal string LastError;
+            internal PluginSource Source;
         }
 
         // A plugin whose ALC has been asked to unload, still being watched to see whether it actually
@@ -78,16 +84,24 @@ namespace HeartopiaMod
 
         internal static int LoadedCount => Loaded.Count;
 
+        // Bumped on every load and unload so the Plugins tab can rebuild its rows.
+        internal static int Generation { get; private set; }
+
         // ── Load ─────────────────────────────────────────────────────────────────────────────────
 
         internal static bool TryLoad(string id, byte[] dll, byte[] pdb, out string error, out List<string> violations)
         {
+            return TryLoad(id, dll, pdb, PluginSource.Mcp, out error, out violations);
+        }
+
+        internal static bool TryLoad(string id, byte[] dll, byte[] pdb, PluginSource source, out string error, out List<string> violations)
+        {
             error = null;
             violations = null;
 
-            if (string.IsNullOrEmpty(id))
+            if (!IsPluginId(id))
             {
-                error = "a plugin id is required";
+                error = "a plugin id is 1-64 characters: letters, digits, '.', '_' or '-'";
                 return false;
             }
 
@@ -154,10 +168,12 @@ namespace HeartopiaMod
                     Alc = alc,
                     Api = api,
                     LoadedUtc = DateTime.UtcNow,
+                    Source = source,
                 };
 
                 instance.Load(api);
                 Loaded[id] = entry;
+                Generation++;
                 WriteResidentRecord();
                 ModLogger.Msg("[Plugin] loaded '" + id + "' (" + entryTypeName + ", " + dll.Length
                               + " bytes, sha " + sha.Substring(0, 12) + ")");
@@ -194,6 +210,7 @@ namespace HeartopiaMod
             // every host-held reference INTO it, and only then unload — a single surviving reference
             // (a coroutine iterator, the instance itself) keeps the ALC alive forever.
             Loaded.Remove(id);
+            Generation++;
             WriteResidentRecord();
 
             try
@@ -276,6 +293,7 @@ namespace HeartopiaMod
                         entry.Instance.Tick();
                         entry.Ticks++;
                         entry.Breaker.Success();
+                        entry.Api?.FlushState(false);
                     }
                     catch (Exception ex)
                     {
@@ -362,6 +380,7 @@ namespace HeartopiaMod
             }
         }
 
+#if FEATURE_MCP
         internal static void WriteListJson(McpJsonWriter w)
         {
             w.Num("loaded", Loaded.Count);
@@ -375,6 +394,7 @@ namespace HeartopiaMod
                 w.Str("sha256", entry.Sha256);
                 w.Num("ticks", entry.Ticks);
                 w.Str("loadedUtc", entry.LoadedUtc.ToString("O"));
+                w.Str("source", entry.Source == PluginSource.Disk ? "disk" : "mcp");
                 w.Num("coroutines", entry.Api == null ? 0 : entry.Api.CoroutineCount);
                 if (!string.IsNullOrEmpty(entry.LastError))
                 {
@@ -394,6 +414,7 @@ namespace HeartopiaMod
 
             w.EndArray();
         }
+#endif
 
         internal static bool TryGetSha(string id, out string sha)
         {
@@ -408,29 +429,33 @@ namespace HeartopiaMod
         }
 
         // Rewritten on every load and unload — twice per plugin lifetime, not per frame. A crash
-        // while this file is non-empty means the process died with those plugins ticking
-        // (McpForensics.ReadPreviousResident).
+        // while this file is non-empty means the process died with those plugins ticking.
+        // quitSignal is stamped in so the next startup can tell a kill from an ordinary exit
+        // (see McpQuitSignal). The file lives in the plugins folder, shared with disk autoload.
         private static void WriteResidentRecord()
         {
-            McpJsonWriter w = new McpJsonWriter();
-            w.BeginObject();
-            // Stamped INTO the record: whether this session can clear it on a clean exit. Next
-            // startup needs that to know whether the file surviving means anything at all.
-            w.Bool("quitSignal", McpQuitSignal.Armed);
-            w.BeginArray("plugins");
+            StringBuilder sb = new StringBuilder(256);
+            sb.Append("{\"quitSignal\":").Append(McpQuitSignal.Armed ? "true" : "false");
+            sb.Append(",\"plugins\":[");
+            bool first = true;
             foreach (KeyValuePair<string, LoadedPlugin> pair in Loaded)
             {
-                w.BeginArrayObject();
-                w.Str("id", pair.Value.Id);
-                w.Str("sha", pair.Value.Sha256);
-                w.Str("loadedUtc", pair.Value.LoadedUtc.ToString("O"));
-                w.EndObject();
+                if (!first)
+                {
+                    sb.Append(',');
+                }
+
+                first = false;
+                LoadedPlugin entry = pair.Value;
+                sb.Append("{\"id\":\"").Append(JsonEscape(entry.Id));
+                sb.Append("\",\"sha\":\"").Append(entry.Sha256 ?? string.Empty);
+                sb.Append("\",\"loadedUtc\":\"").Append(entry.LoadedUtc.ToString("O"));
+                sb.Append("\",\"source\":\"").Append(entry.Source == PluginSource.Disk ? "disk" : "mcp");
+                sb.Append("\"}");
             }
 
-            w.EndArray();
-            w.EndObject();
-
-            McpForensics.WriteResident(Loaded.Count == 0 ? "[]" : w.ToString());
+            sb.Append("]}");
+            WriteResidentRaw(sb.ToString());
         }
 
         internal static string Sha256Hex(byte[] data)
@@ -452,16 +477,41 @@ namespace HeartopiaMod
         {
             private readonly string id;
             private readonly List<object> coroutines = new List<object>();
-            private readonly Dictionary<string, string> state = new Dictionary<string, string>(StringComparer.Ordinal);
+            private readonly StateMap state;
+            private float nextStateWrite;
 
             internal HostApi(string id)
             {
                 this.id = id;
+                this.state = StateMap.Load(id);
             }
 
             internal int CoroutineCount => this.coroutines.Count;
 
+            // State writes are coalesced to one a second while ticking. Unload forces a write so a
+            // value set in Unload() reaches the file before the dictionary is dropped.
+            internal void FlushState(bool force)
+            {
+                if (this.state == null || !this.state.Dirty)
+                {
+                    return;
+                }
+
+                if (!force && Time.unscaledTime < this.nextStateWrite)
+                {
+                    return;
+                }
+
+                this.nextStateWrite = Time.unscaledTime + 1f;
+                if (WriteStateFile(this.id, this.state))
+                {
+                    this.state.Dirty = false;
+                }
+            }
+
             public string Id => this.id;
+
+            public string PluginDirectory => Folder();
 
             public HeartopiaComplete Mod => HeartopiaComplete.Instance;
 
@@ -474,7 +524,7 @@ namespace HeartopiaMod
             {
                 try
                 {
-                    HeartopiaComplete.Instance?.McpPluginToast(message);
+                    HeartopiaComplete.Instance?.PluginToast(message);
                 }
                 catch
                 {
@@ -543,7 +593,7 @@ namespace HeartopiaMod
                 public IPluginPage AddPage(string title)
                 {
                     HeartopiaComplete mod = HeartopiaComplete.Instance;
-                    return mod == null ? null : mod.AddMcpPluginPage(this.pluginId, title);
+                    return mod == null ? null : mod.AddPluginPage(this.pluginId, title);
                 }
             }
 
@@ -783,7 +833,8 @@ namespace HeartopiaMod
                 }
 
                 this.coroutines.Clear();
-                this.state.Clear();
+                this.FlushState(true);
+                this.state.Forget();
 
                 // Menu pages, and with them every click/toggle/slider callback the plugin handed
                 // over. A live Button holding a plugin delegate pins the load context just as surely
@@ -791,7 +842,7 @@ namespace HeartopiaMod
                 // functional, so this must run whether or not the plugin cleaned up after itself.
                 try
                 {
-                    int pages = HeartopiaComplete.Instance?.RemoveMcpPluginPages(this.id) ?? 0;
+                    int pages = HeartopiaComplete.Instance?.RemovePluginPages(this.id) ?? 0;
                     if (pages > 0)
                     {
                         ModLogger.Msg("[Plugin:" + this.id + "] removed " + pages + " menu page(s).");
@@ -1023,4 +1074,3 @@ namespace HeartopiaMod
         }
     }
 }
-#endif

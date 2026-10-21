@@ -112,7 +112,7 @@ namespace HeartopiaMod
         // Music (display position 9) has NO IMGUI ancestor — it arrived after the menu was
         // retired — so it takes the next free internal id, 10. Its m2-era draft used 9, which is
         // Research's here; that collision is why it is renumbered rather than carried over.
-        private static readonly int[] UguiShellInternalTabIds = new int[] { 0, 2, 3, 8, 12, 4, 5, 6, 9, 10, 7, 11 };
+        private static readonly int[] UguiShellInternalTabIds = new int[] { 0, 2, 3, 8, 12, 4, 5, 6, 9, 10, 7, 11, 13 };
 
         private const float UguiShellWindowW = 960f;
         private const float UguiShellWindowH = 640f;
@@ -126,6 +126,15 @@ namespace HeartopiaMod
         {
             try
             {
+                if (this.uguiShell != null
+                    && this.uguiShellPluginsTabIncluded != PluginHost.HasDiskPlugins())
+                {
+                    // The Plugins sidebar row exists only while the folder has a dll. Opening the
+                    // menu is when that has to catch up — a dll dropped after the shell was built,
+                    // or the last one removed.
+                    this.RebuildUguiShellForTheme();
+                }
+
                 if (this.uguiShell == null)
                 {
                     if (this.uguiShellBuildFailed)
@@ -234,6 +243,7 @@ namespace HeartopiaMod
             this.ProcessUguiShellRadarFilterOnUpdate();
             this.ProcessUguiShellMusicOnUpdate();
             this.ProcessUguiShellMcpOnUpdate();
+            this.ProcessUguiShellPluginsOnUpdate();
             this.ProcessUguiShellHobbyPumpkinOnUpdate();
         }
 
@@ -427,6 +437,11 @@ namespace HeartopiaMod
             UguiShellHandle shell = null;
             try
             {
+                // A rebuild that hides this tab must not keep a handle whose GameObjects the
+                // previous window already destroyed. The builder assigns a new one when the row
+                // is shown.
+                this.uguiShellPlugins = null;
+
                 // Display-order data tables — mirrors navLabels / GetActiveTopSubTabs /
                 // GetSelectedTabHeader / GetSelectedTabSubtitle. Nothing below hardcodes a count;
                 // every loop runs off these arrays.
@@ -435,7 +450,7 @@ namespace HeartopiaMod
                     this.L("Self"), this.L("Resource Gathering"), this.L("Features"),
                     this.L("New Features"), this.L("Hobby"), this.L("Radar"), this.L("Teleport"),
                     this.L("Bag / Warehouse"), this.L("Research / Order"), this.L("Music"),
-                    this.L("Settings"), this.L("Agent")
+                    this.L("Settings"), this.L("Agent"), this.L("Plugins")
                 };
                 string[] tabSubtitles = new string[]
                 {
@@ -446,8 +461,16 @@ namespace HeartopiaMod
                     this.L("Bulk item tools"), this.L("Institute and order machine"),
                     this.L("Play .bin note tracks"),
                     this.L("Menu, theme and hotkeys"),
-                    this.L("MCP bridge and sandbox plugins")
+                    this.L("MCP bridge and sandbox plugins"),
+                    this.L("Installed plugins")
                 };
+                this.uguiShellPluginsTabIncluded = PluginHost.HasDiskPlugins();
+                string[] settingsSubs = new string[]
+                {
+                    this.L("Main"), this.L("Keybinds"), this.L("UI Theme"), this.L("About"),
+                    this.L("Logging"), this.L("Game Keys"), this.L("Status Overlay"),
+                };
+
                 string[][] subTabLabels = new string[][]
                 {
                     new string[] { this.L("Main"), this.L("Building"), this.L("Fun"), this.L("Privacy"), this.L("Game UI"), this.L("Game LOD"), this.L("Minimap") },
@@ -460,9 +483,9 @@ namespace HeartopiaMod
                     new string[0], // Bag / Warehouse — no sub-tabs
                     new string[0], // Research / Order — no sub-tabs
                     new string[0], // Music — no sub-tabs
-                    new string[] { this.L("Main"), this.L("Keybinds"), this.L("UI Theme"), this.L("About"), this.L("Logging"), this.L("Game Keys"), this.L("Status Overlay") },
-                    new string[0], // Agent — sub-tabs are built at RUNTIME (plugins come and go), so
-                                   // it takes the no-subs branch and owns its own rebuildable bar.
+                    settingsSubs,
+                    new string[0], // Agent — Bridge only; the bar is rebuilt in UguiAgentContent.
+                    new string[0], // Plugins — Installed plus one tab per plugin page, rebuilt at runtime.
                 };
 
                 shell = new UguiShellHandle();
@@ -966,14 +989,17 @@ namespace HeartopiaMod
                             }
 #if FEATURE_MCP
                             // Agent (HeartopiaComplete.UguiAgentContent.cs). Gated on tabUnlocked for
-                            // the same reason Music is: the builder is not free (it renders every
-                            // plugin page that already exists), and a tab the sidebar cannot reach
-                            // has nothing to render into.
+                            // the same reason Music is: the builder is not free, and a tab the
+                            // sidebar cannot reach has nothing to render into.
                             else if (i == UguiShellMcpTabIndex && tabUnlocked)
                             {
                                 this.BuildUguiShellMcpContent(container.transform, 0f, 0f, contentColW, contentH, mainW);
                             }
 #endif
+                            else if (i == UguiShellPluginsTabIndex && tabUnlocked)
+                            {
+                                this.BuildUguiShellPluginsContent(container.transform, 0f, 0f, contentColW, contentH, mainW);
+                            }
                             // Every sub-less tab has a real builder above (the migration is
                             // complete); an unmatched tab would simply show an empty container.
                             shell.SubTabBars.Add(null);
@@ -1290,6 +1316,13 @@ namespace HeartopiaMod
 #else
                 return false;
 #endif
+            }
+            if (displayIndex == UguiShellPluginsTabIndex)
+            {
+                // Not fixed for the session: a dll can appear or be the last one removed. The
+                // shell records uguiShellPluginsTabIncluded at build and rebuilds when the menu
+                // opens onto a different answer.
+                return PluginHost.HasDiskPlugins();
             }
             return true;
         }

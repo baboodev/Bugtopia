@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Reflection;
 
@@ -94,8 +93,11 @@ namespace HeartopiaMod
             try
             {
                 Quitting = true;
+                PluginHost.OnCleanQuit();
+#if FEATURE_MCP
                 McpForensics.ClearResident();
-                ModLogger.Msg("[Mcp] clean shutdown — resident-plugin record cleared.");
+#endif
+                ModLogger.Msg("[Plugin] clean shutdown — resident-plugin record cleared.");
             }
             catch
             {
@@ -103,4 +105,3 @@ namespace HeartopiaMod
         }
     }
 }
-#endif

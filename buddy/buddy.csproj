@@ -569,6 +569,9 @@
     <Compile Include="McpScreenshot.cs" />
     <Compile Include="PluginContract.cs" />
     <Compile Include="PluginHostFeature.cs" />
+    <Compile Include="PluginHost.Disk.cs" />
+    <Compile Include="HeartopiaComplete.PluginMono.cs" />
+    <Compile Include="HeartopiaComplete.PluginMenu.cs" />
     <Compile Include="McpOps.Plugins.cs" />
     <Compile Include="McpForensics.cs" />
     <Compile Include="McpQuitSignal.cs" />

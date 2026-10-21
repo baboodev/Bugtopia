@@ -45,6 +45,12 @@ namespace HeartopiaMod
         // It also belongs at the bottom on merit — it is a developer surface, not a feature.
         private const int UguiShellMcpTabIndex = 11;            // Agent (internal id 11)
 
+        // Plugins (HeartopiaComplete.PluginMenu.cs). Appended after Agent so no earlier display
+        // position moves. The sidebar row is hidden while the plugins folder has no dll; opening
+        // the menu rebuilds the shell when that changes. No shell sub-tabs: the page owns a bar
+        // it rebuilds (Installed, plus one tab per plugin page).
+        private const int UguiShellPluginsTabIndex = 12;        // Plugins (internal id 13)
+
         // Hobby is display position 4, immediately after New Features. Radar and everything
         // below it shifted +1. Ice Skating stays on New Features.
         private const int UguiShellHobbyTabIndex = 4;           // Hobby (internal id 12)

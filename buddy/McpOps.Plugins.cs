@@ -83,21 +83,6 @@ namespace HeartopiaMod
                 this.HandleMcpPluginCall);
         }
 
-        private void ProcessMcpPluginsOnUpdate()
-        {
-            PluginHost.Tick();
-        }
-
-        // The toast surface is private to HeartopiaComplete, and PluginHost's HostApi is a nested
-        // type of a different class — so the bridge goes through this partial, which does have
-        // access. Cheaper than widening AddMenuNotification for one caller.
-        internal void McpPluginToast(string message)
-        {
-            this.AddMenuNotification(message, Color.white);
-        }
-
-        // ────────────────────────────────────────────────────────────────────────────────────────
-
         private string HandleMcpSessionReport(Dictionary<string, object> args)
         {
             string release = McpArgs.GetString(args, "unquarantine");
@@ -166,7 +151,11 @@ namespace HeartopiaMod
             // Refuse what was running when the last session died, unless told otherwise. Without
             // this, an agent that auto-reloads its work walks straight back into the same crash on
             // every launch.
-            if (!force && McpForensics.IsQuarantined(sha))
+            if (force)
+            {
+                McpForensics.RemoveQuarantine(sha);
+            }
+            else if (McpForensics.IsQuarantined(sha))
             {
                 throw new McpOpException("plugin_error",
                     "sha " + sha.Substring(0, 12) + " is quarantined — it was running when a previous "

@@ -516,6 +516,7 @@ namespace HeartopiaMod
             Breadcrumbs.Init();
             this.ApplyMasterConsoleVisibility();
             HeartopiaComplete.Instance = this;
+            PluginHost.Install();
             ModLogger.Msg("Bugtopia initialized!");
             // Input-ownership registry (HeartopiaComplete.CameraInput.cs): every surviving mod
             // surface is UGUI and registers itself on first build (shell = modal;
@@ -634,6 +635,9 @@ namespace HeartopiaMod
             // invariant. Placed after the world-ready tick so an op reading IsWorldReady sees this
             // frame's state, exactly like the feature ticks below.
             this.ProcessMcpOnUpdate();
+            // Sandbox plugins (PluginHostFeature.cs). One empty-collection walk when nothing is
+            // loaded. Independent of the MCP pump: disk plugins tick in a build without the bridge.
+            PluginHost.Tick();
             // Direct game-icon loads (docs/ITEM_ICON_PIPELINE.md): drain completed sprite loads,
             // time out stuck ones. No-op (two dictionary count checks) while idle.
             this.ProcessGameIconLoads();

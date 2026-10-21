@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -62,8 +61,12 @@ namespace HeartopiaMod.Plugins
     /// What the host lends a plugin. Everything here is safe to call from Load/Tick/Unload.
     public interface IHostApi
     {
-        /// The plugin's id, as passed to plugin.load.
+        /// The plugin's id: the file name without extension for a dll in the plugins folder,
+        /// or the id passed to plugin.load.
         string Id { get; }
+
+        /// Absolute path of the user plugin folder (%LocalLow%/Bugtopia/Plugins).
+        string PluginDirectory { get; }
 
         /// The live mod instance — the whole public surface of the mod, deliberately.
         HeartopiaComplete Mod { get; }
@@ -87,7 +90,9 @@ namespace HeartopiaMod.Plugins
         /// is why plugins must not start their own threads or timers.
         void StartCoroutine(IEnumerator routine);
 
-        /// Scratch key/value store, persisted per plugin id under %LocalLow%/Bugtopia/Plugins/.
+        /// Scratch key/value store, persisted per plugin id at
+        /// %LocalLow%/Bugtopia/Plugins/state/&lt;id&gt;.json. A key or value that contains a
+        /// newline is refused and logged; the previous value stays.
         IDictionary<string, string> State { get; }
 
         /// Live reflection over the game's embedded Mono runtime. Without this a snippet can only
@@ -294,10 +299,9 @@ namespace HeartopiaMod.Plugins
     /// binary-compatible for them and a stale plugin keeps working — it just cannot see the new
     /// surface until it is rebuilt.
     ///
-    /// v2 added IHostApi.Ui (plugin pages in the Agent tab).
+    /// v2 added IHostApi.Ui. v3 adds IHostApi.PluginDirectory and persists State.
     public static class PluginSdk
     {
-        public const int Version = 2;
+        public const int Version = 3;
     }
 }
-#endif

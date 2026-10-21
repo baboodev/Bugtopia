@@ -96,10 +96,6 @@ namespace HeartopiaMod
             try
             {
                 McpBridge.Drain(Time.frameCount);
-                // Sandbox plugin ticks + the unload-collection watchdog. Inside the same breaker as
-                // the pump: a plugin host that starts throwing every frame must cool down like any
-                // other feature rather than flooding the log.
-                this.ProcessMcpPluginsOnUpdate();
                 this.mcpBreaker.Success();
             }
             catch (Exception ex)

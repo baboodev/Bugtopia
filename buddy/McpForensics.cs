@@ -47,9 +47,6 @@ namespace HeartopiaMod
         internal static bool PreviousSessionKilled;
 
 
-        private static readonly HashSet<string> Quarantined = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private static readonly List<string> QuarantineReasons = new List<string>();
-
         private static string armedSha;
         private static bool armed;
 
@@ -252,39 +249,22 @@ namespace HeartopiaMod
 
         // ── Quarantine ───────────────────────────────────────────────────────────────────────────
 
+        // The list itself lives in Plugins/quarantine.json. This used to keep a second copy under
+        // McpBridge/, which disk autoload never read, so a hash blocked for plugin.load could still
+        // load from the folder. LoadQuarantine folds a leftover McpBridge file in once and deletes it.
         internal static bool IsQuarantined(string sha)
         {
-            return !string.IsNullOrEmpty(sha) && Quarantined.Contains(sha);
+            return PluginHost.IsQuarantined(sha);
         }
 
         internal static void AddQuarantine(string sha, string reason)
         {
-            if (string.IsNullOrEmpty(sha) || !Quarantined.Add(sha))
-            {
-                return;
-            }
-
-            QuarantineReasons.Add(sha + "\t" + (reason ?? string.Empty));
-            SaveQuarantine();
+            PluginHost.Quarantine(sha, reason);
         }
 
         internal static bool RemoveQuarantine(string sha)
         {
-            if (string.IsNullOrEmpty(sha) || !Quarantined.Remove(sha))
-            {
-                return false;
-            }
-
-            for (int i = QuarantineReasons.Count - 1; i >= 0; i--)
-            {
-                if (QuarantineReasons[i].StartsWith(sha, StringComparison.OrdinalIgnoreCase))
-                {
-                    QuarantineReasons.RemoveAt(i);
-                }
-            }
-
-            SaveQuarantine();
-            return true;
+            return PluginHost.Unquarantine(sha);
         }
 
         private static void LoadQuarantine()
@@ -304,25 +284,18 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    QuarantineReasons.Add(line);
                     int tab = line.IndexOf('\t');
-                    Quarantined.Add(tab > 0 ? line.Substring(0, tab) : line.Trim());
+                    string sha = tab > 0 ? line.Substring(0, tab).Trim() : line.Trim();
+                    string reason = tab > 0 ? line.Substring(tab + 1) : string.Empty;
+                    PluginHost.Quarantine(sha, reason);
                 }
+
+                File.Delete(path);
+                ModLogger.Msg("[Mcp] imported quarantine.json into the plugins folder and removed the bridge copy.");
             }
             catch (Exception ex)
             {
                 ModLogger.Warning("[Mcp] quarantine list unreadable: " + ex.Message);
-            }
-        }
-
-        private static void SaveQuarantine()
-        {
-            try
-            {
-                File.WriteAllLines(PathOf(QuarantineFile), QuarantineReasons, new UTF8Encoding(false));
-            }
-            catch
-            {
             }
         }
 
@@ -339,14 +312,19 @@ namespace HeartopiaMod
             // Context, NOT evidence — and the difference is spelled out because the two fields look
             // alike: `previousOp` means "died inside this call"; this only means "was loaded when the
             // session ended", which on this build is equally true after an ordinary quit.
-            w.Bool("previousSessionHadResidentPlugins", PreviousSessionHadResident);
-            w.Bool("previousSessionKilled", PreviousSessionKilled);
+            bool hadResident = PreviousSessionHadResident || PluginHost.PreviousSessionHadResident;
+            bool killed = PreviousSessionKilled || PluginHost.PreviousSessionKilled;
+            string residentJson = !string.IsNullOrEmpty(PreviousResidentJson)
+                ? PreviousResidentJson
+                : PluginHost.PreviousResidentJson;
+            w.Bool("previousSessionHadResidentPlugins", hadResident);
+            w.Bool("previousSessionKilled", killed);
             w.Bool("quitSignalArmed", McpQuitSignal.Armed);
             w.Str("quitSignal", McpQuitSignal.Status);
-            if (PreviousSessionHadResident && !string.IsNullOrEmpty(PreviousResidentJson))
+            if (hadResident && !string.IsNullOrEmpty(residentJson))
             {
-                w.Raw("previousResident", PreviousResidentJson);
-                w.Str("previousResidentNote", PreviousSessionKilled
+                w.Raw("previousResident", residentJson);
+                w.Str("previousResidentNote", killed
                     ? "that session had a working quit signal and never used it, so it was KILLED "
                       + "rather than closed; the plugins above were resident at the time and are "
                       + "quarantined on suspicion, not proof."
@@ -354,10 +332,12 @@ namespace HeartopiaMod
                       + "quit leaves exactly this record and nothing was quarantined from it.");
             }
 
+            List<string> quarantineLines = new List<string>();
+            PluginHost.CopyQuarantineLines(quarantineLines);
             w.BeginArray("quarantined");
-            for (int i = 0; i < QuarantineReasons.Count; i++)
+            for (int i = 0; i < quarantineLines.Count; i++)
             {
-                string line = QuarantineReasons[i];
+                string line = quarantineLines[i];
                 int tab = line.IndexOf('\t');
                 w.BeginArrayObject();
                 w.Str("sha", tab > 0 ? line.Substring(0, tab) : line);

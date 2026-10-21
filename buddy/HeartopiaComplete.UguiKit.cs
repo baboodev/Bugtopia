@@ -3111,6 +3111,17 @@ namespace HeartopiaMod
 
             try
             {
+                if (bar.Contents == null || bar.Contents.Count == 0)
+                {
+                    return;
+                }
+
+                // A rebuild can restore a sub-tab index that no longer exists.
+                if (index < 0 || index >= bar.Contents.Count)
+                {
+                    index = 0;
+                }
+
                 if (index == bar.ActiveIndex)
                 {
                     return; // re-clicking the active tab is a no-op

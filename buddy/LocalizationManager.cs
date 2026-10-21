@@ -1214,6 +1214,8 @@ namespace HeartopiaMod
             // Agent tab — MCP bridge and sandbox plugins (HeartopiaComplete.UguiAgentContent.cs)
             { "Agent", "Agent" },
             { "MCP bridge and sandbox plugins", "MCP bridge and sandbox plugins" },
+            { "Plugins", "Plugins" },
+            { "Installed plugins", "Installed plugins" },
             { "Agent Bridge", "Agent Bridge" },
             { "Bridge", "Bridge" },
             { "Allow write ops", "Allow write ops" },
@@ -2491,6 +2493,8 @@ namespace HeartopiaMod
             // Agent tab — MCP bridge and sandbox plugins (HeartopiaComplete.UguiAgentContent.cs)
             { "Agent", "Agente" },
             { "MCP bridge and sandbox plugins", "Puente MCP y plugins de espacio aislado" },
+            { "Plugins", "Plugins" },
+            { "Installed plugins", "Plugins instalados" },
             { "Agent Bridge", "Puente del agente" },
             { "Bridge", "Puente" },
             { "Allow write ops", "Permitir operaciones de escritura" },
@@ -3768,6 +3772,8 @@ namespace HeartopiaMod
             // Agent tab — MCP bridge and sandbox plugins (HeartopiaComplete.UguiAgentContent.cs)
             { "Agent", "代理" },
             { "MCP bridge and sandbox plugins", "MCP 桥接与沙盒插件" },
+            { "Plugins", "插件" },
+            { "Installed plugins", "已安装的插件" },
             { "Agent Bridge", "代理桥接" },
             { "Bridge", "桥接" },
             { "Allow write ops", "允许写入操作" },
@@ -5036,6 +5042,8 @@ namespace HeartopiaMod
             // Agent tab — MCP bridge and sandbox plugins (HeartopiaComplete.UguiAgentContent.cs)
             { "Agent", "Agente" },
             { "MCP bridge and sandbox plugins", "Ponte MCP e plugins de sandbox" },
+            { "Plugins", "Plugins" },
+            { "Installed plugins", "Plugins instalados" },
             { "Agent Bridge", "Ponte do agente" },
             { "Bridge", "Ponte" },
             { "Allow write ops", "Permitir operações de escrita" },
@@ -6304,6 +6312,8 @@ namespace HeartopiaMod
             // Agent tab — MCP bridge and sandbox plugins (HeartopiaComplete.UguiAgentContent.cs)
             { "Agent", "เอเจนต์" },
             { "MCP bridge and sandbox plugins", "สะพาน MCP และปลั๊กอินแซนด์บ็อกซ์" },
+            { "Plugins", "ปลั๊กอิน" },
+            { "Installed plugins", "ปลั๊กอินที่ติดตั้งแล้ว" },
             { "Agent Bridge", "สะพานเอเจนต์" },
             { "Bridge", "สะพาน" },
             { "Allow write ops", "อนุญาตการเขียนข้อมูล" },
@@ -7585,6 +7595,8 @@ namespace HeartopiaMod
             // Agent tab — MCP bridge and sandbox plugins (HeartopiaComplete.UguiAgentContent.cs)
             { "Agent", "에이전트" },
             { "MCP bridge and sandbox plugins", "MCP 브리지와 샌드박스 플러그인" },
+            { "Plugins", "플러그인" },
+            { "Installed plugins", "설치된 플러그인" },
             { "Agent Bridge", "에이전트 브리지" },
             { "Bridge", "브리지" },
             { "Allow write ops", "쓰기 작업 허용" },
