@@ -199,9 +199,10 @@ namespace HeartopiaMod
 
         // ── Repair cycle (phase 2) ───────────────────────────────────────────────────────────────
         // The restore aura only ever repairs the tool IN HAND, so repairing N tools costs N ×
-        // (equip → repair). That makes it a serial sub-FSM that owns the whole coordinator while it
-        // runs: every farm suspended, nobody moving (the aura is a circle on the ground — walking out
-        // of it cancels the repair), one tool at a time.
+        // (equip → repair). That makes it a serial sub-FSM that owns the coordinator while it runs.
+        // Farms stay suspended through the equip and the kit use. Once the aura is up on the ACTIVE
+        // slice's own tool, that farm catches again; movement stays blocked, because walking out of
+        // the aura circle cancels the repair.
         private const float RepairEquipTimeoutSeconds = 10f;
         private const float RepairStartTimeoutSeconds = 6f;   // request → machine actually busy
         private const float RepairFinishTimeoutSeconds = 45f; // busy → idle (kit throw + aura)
@@ -220,6 +221,7 @@ namespace HeartopiaMod
         }
 
         private static bool repairCycleActive;
+        private static bool repairActiveFarmCatching;
         private static RepairStep repairStep;
         private static readonly List<int> repairQueue = new List<int>(3);
         private static int repairQueueIndex;
@@ -777,6 +779,7 @@ namespace HeartopiaMod
             }
 
             repairCycleActive = true;
+            repairActiveFarmCatching = false;
             repairQueueIndex = 0;
             repairPassesForTool = 0;
             repairCycleToolsFixed = 0;
@@ -821,14 +824,14 @@ namespace HeartopiaMod
                         repairStep = RepairStep.Assess;
                         repairSettleUntil = now + RepairSettleSeconds;
                         repairStepDeadline = now + RepairFinishTimeoutSeconds;
-                        return;
+                        break;
                     }
 
                     if (now >= repairStepDeadline)
                     {
                         Log("Repair cycle: " + GetToolName(toolId) + " would not equip in time — skipped.");
                         AdvanceRepairTool(now, fixedIt: false);
-                        return;
+                        break;
                     }
 
                     if (now >= repairNextEquipAttemptAt)
@@ -836,7 +839,7 @@ namespace HeartopiaMod
                         repairNextEquipAttemptAt = now + RepairEquipRetrySeconds;
                         host.EquipHandTool(toolId);
                     }
-                    return;
+                    break;
                 }
 
                 case RepairStep.Assess:
@@ -845,7 +848,7 @@ namespace HeartopiaMod
                     // same ToolSystem the equip just updated.
                     if (now < repairSettleUntil)
                     {
-                        return;
+                        break;
                     }
 
                     int threshold = host.GetAutoRepairTriggerPercent();
@@ -858,7 +861,7 @@ namespace HeartopiaMod
                         Log("Repair cycle: " + GetToolName(toolId) + " now " + Mathf.RoundToInt(ratio * 100f)
                             + "% — no pass needed.");
                         AdvanceRepairTool(now, fixedIt: repairPassesForTool > 0);
-                        return;
+                        break;
                     }
 
                     if (repairPassesForTool >= RepairMaxPassesPerTool)
@@ -866,7 +869,7 @@ namespace HeartopiaMod
                         Log("Repair cycle: " + GetToolName(toolId) + " still low after "
                             + repairPassesForTool + " pass(es) — moving on (out of kits?).");
                         AdvanceRepairTool(now, fixedIt: false);
-                        return;
+                        break;
                     }
 
                     // A live aura from the previous tool repairs whatever is in hand — wait it out
@@ -875,7 +878,7 @@ namespace HeartopiaMod
                     {
                         repairStep = RepairStep.AwaitFinish;
                         repairStepDeadline = now + RepairFinishTimeoutSeconds;
-                        return;
+                        break;
                     }
 
                     repairPassesForTool++;
@@ -883,7 +886,7 @@ namespace HeartopiaMod
                     repairStep = RepairStep.AwaitStart;
                     repairNextEquipAttemptAt = now + 1.5f; // reused as the re-request clock
                     repairStepDeadline = now + RepairStartTimeoutSeconds;
-                    return;
+                    break;
                 }
 
                 case RepairStep.AwaitStart:
@@ -892,7 +895,7 @@ namespace HeartopiaMod
                     {
                         repairStep = RepairStep.AwaitFinish;
                         repairStepDeadline = now + RepairFinishTimeoutSeconds;
-                        return;
+                        break;
                     }
 
                     // RequestDurabilityCheck is throttled to ≤1/s host-side, so a single request can
@@ -911,7 +914,7 @@ namespace HeartopiaMod
                         Log("Repair cycle: " + GetToolName(toolId) + " repair did not start (no kit / cooldown).");
                         AdvanceRepairTool(now, fixedIt: false);
                     }
-                    return;
+                    break;
                 }
 
                 case RepairStep.AwaitFinish:
@@ -922,7 +925,7 @@ namespace HeartopiaMod
                         // warranted or the tool is done.
                         repairStep = RepairStep.Assess;
                         repairSettleUntil = now + RepairSettleSeconds;
-                        return;
+                        break;
                     }
 
                     if (now >= repairStepDeadline)
@@ -931,13 +934,43 @@ namespace HeartopiaMod
                             + RepairFinishTimeoutSeconds.ToString("F0") + "s — moving on.");
                         AdvanceRepairTool(now, fixedIt: false);
                     }
-                    return;
+                    break;
                 }
 
                 default:
                     EndRepairCycle(host, now, "unknown step");
                     return;
             }
+
+            SyncRepairCatching(host);
+        }
+
+        // The kit use needs an idle player, and a different tool needs the handhold. The aura on
+        // the active slice's own tool does not: that farm catches in place. SetSuspended only on
+        // the edge — a resume clears the farm's equip state, so it must not run every frame.
+        private static void SyncRepairCatching(HeartopiaComplete host)
+        {
+            bool allow = repairCycleActive
+                && repairStep == RepairStep.AwaitFinish
+                && repairQueueIndex < repairQueue.Count
+                && repairQueue[repairQueueIndex] == GetSliceToolId(activeSlice)
+                && !host.IsAutoRepairUsePhase();
+            if (allow == repairActiveFarmCatching)
+            {
+                return;
+            }
+
+            repairActiveFarmCatching = allow;
+            if (allow)
+            {
+                EnforceSuspension(host);
+                Log("Repair cycle: aura on " + GetToolName(repairQueue[repairQueueIndex])
+                    + " — " + activeSlice + " catching again.");
+                return;
+            }
+
+            SuspendAll(host);
+            Log("Repair cycle: " + activeSlice + " paused.");
         }
 
         // Direct read + cache refresh, so the summary line reports what the cycle actually acted on.
@@ -985,6 +1018,7 @@ namespace HeartopiaMod
         private static void EndRepairCycle(HeartopiaComplete host, float now, string reason)
         {
             repairCycleActive = false;
+            repairActiveFarmCatching = false;
             repairStep = RepairStep.Idle;
             repairQueue.Clear();
             repairQueueIndex = 0;
@@ -1080,9 +1114,9 @@ namespace HeartopiaMod
             }
 
             LogSliceEnd(Time.unscaledTime, "stop: " + reason);
-            // A repair cycle in flight must not survive the stop: it holds every farm suspended and
-            // drives the handhold itself.
+            // A repair cycle in flight must not survive the stop: it holds the handhold itself.
             repairCycleActive = false;
+            repairActiveFarmCatching = false;
             repairStep = RepairStep.Idle;
             repairQueue.Clear();
             repairQueueIndex = 0;
