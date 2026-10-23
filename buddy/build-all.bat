@@ -10,3 +10,4 @@ if errorlevel 1 exit /b 1
 echo.
 echo Done.
 echo   bin\Universal\Release\bugtopia.dll  -^> auto-deployed to Mods\ and BepInEx\plugins\ (whichever exist)
+echo   plugins\ and internal-plugins\     -^> each plugin's bin\Release\ (internal-plugins is optional)

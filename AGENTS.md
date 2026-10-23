@@ -115,6 +115,8 @@ dotnet build buddy.csproj -c Release -p:Loader=MelonLoader    # MelonLoader only
 
 One-off path override: add `-p:HeartopiaDir="C:\Games\Heartopia"`. Shipping build (hides loader console): `-c ReleaseShip`.
 
+That build also compiles every `plugins\*\*.csproj`, and every `internal-plugins\*\*.csproj` when that folder exists, against the dll it just produced. A missing `internal-plugins` folder is skipped. `-p:BuildPlugins=false` skips both. The release workflow builds the tracked plugins once, against the published BepInEx dll, and attaches them to the release. `internal-plugins` is not in the repository, so that workflow does not build it.
+
 ### Build the launcher
 
 A separate product with its own projects and its own build. Full detail in

@@ -10,6 +10,11 @@
          flag: #if strips the code AND its string literals from the assembly, whereas a bool would
          leave "https://t.me/..." sitting in the DLL's string heap for anyone to grep. -->
     <Telegram Condition="'$(Telegram)' == ''">true</Telegram>
+    <!-- BuildPlugins: true (default) builds every plugins\*\*.csproj and, when the folder exists,
+         every internal-plugins\*\*.csproj, against the dll just produced. false skips that. A missing
+         internal-plugins folder is not an error. CI sets ContinuousIntegrationBuild and skips both,
+         because those projects need the local interop folder. -->
+    <BuildPlugins Condition="'$(BuildPlugins)' == ''">true</BuildPlugins>
     <HeartopiaDir Condition="'$(HeartopiaDir)' == ''">D:\SteamLibrary\steamapps\common\Heartopia</HeartopiaDir>
     <!-- BepInEx root. Defaults to the install-next-to-the-game layout (and CI, where the deps zip
          extracts to BepInEx\core + MelonLoader\net6 side by side under HeartopiaDir), but Doorstop's
@@ -589,5 +594,20 @@
              Condition="'@(UnifiedDeployDir)' != '' and '@(DeployedDll)' == ''" />
     <Warning Text="No loader folder found to deploy bugtopia.dll into (Loader=$(Loader)). Looked for $(HeartopiaDir)\Mods and $(BepInExDir)\plugins."
              Condition="'@(UnifiedDeployDir)' == ''" />
+  </Target>
+
+  <!-- Disk plugins reference bugtopia.dll as a file, so they build after this project and take its
+       output path. A plugin failure fails this build. -->
+  <Target Name="BuildDiskPlugins" AfterTargets="Build"
+          Condition="'$(ContinuousIntegrationBuild)' != 'true' and '$(BuildPlugins)' != 'false'">
+    <ItemGroup>
+      <DiskPluginProject Include="$(MSBuildThisFileDirectory)..\plugins\*\*.csproj" />
+      <DiskPluginProject Include="$(MSBuildThisFileDirectory)..\internal-plugins\*\*.csproj"
+                         Condition="Exists('$(MSBuildThisFileDirectory)..\internal-plugins')" />
+    </ItemGroup>
+    <Message Importance="high" Text="Building plugin %(DiskPluginProject.Filename)"
+             Condition="'@(DiskPluginProject)' != ''" />
+    <Exec Command="dotnet build &quot;%(DiskPluginProject.FullPath)&quot; -c Release -p:BugtopiaDll=&quot;$(TargetPath)&quot; -p:InteropDir=&quot;$(BepInExDir)\interop&quot; -p:BepInExCore=&quot;$(BepInExDir)\core&quot; --nologo"
+          Condition="'@(DiskPluginProject)' != ''" />
   </Target>
 </Project>
