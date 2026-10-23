@@ -43,6 +43,11 @@ namespace HeartopiaMod
         private int auraTotalBushPicks = 0;
         private float auraLastSuccessfulCommandAt = -999f;
         private float auraLastStallRecoveryAt = -999f;
+        // Last tree the aura actually chopped. The walk uses this to arrive when the pivot sits
+        // inside the trunk and the body cannot close the stand-off (WALK_TO_NODES_RULES 0.4d).
+        private float auraLastTreeHitAt = -999f;
+        private uint auraLastTreeHitOwnerNetId = 0U;
+        private Vector3 auraLastTreeHitPosition = Vector3.zero;
         private uint auraLastDetectedResourceNetId = 0U;
         private uint auraLastDetectedOwnerNetId = 0U;
         private ulong auraLastDetectedTargetNetId = 0UL;
@@ -460,6 +465,9 @@ namespace HeartopiaMod
             this.auraTotalBushPicks = 0;
             this.auraLastSuccessfulCommandAt = -999f;
             this.auraLastStallRecoveryAt = -999f;
+            this.auraLastTreeHitAt = -999f;
+            this.auraLastTreeHitOwnerNetId = 0U;
+            this.auraLastTreeHitPosition = Vector3.zero;
             this.auraLastDetectedResourceNetId = 0U;
             this.auraLastDetectedOwnerNetId = 0U;
             this.auraLastDetectedTargetNetId = 0UL;
@@ -669,6 +677,7 @@ namespace HeartopiaMod
                     else if (targetKind == AuraTargetKind.Tree)
                     {
                         treeHits++;
+                        this.NoteAuraTreeHit(ownerNetId, targetAnchor);
                     }
                     else
                     {
@@ -1923,6 +1932,25 @@ namespace HeartopiaMod
             }
 
             return best;
+        }
+
+        // Position is the anchor the axe already had. When discovery registered the owner without
+        // one, resolve the entity once. A zero position is not a hit the walker can match.
+        private void NoteAuraTreeHit(uint ownerNetId, Vector3 targetAnchor)
+        {
+            Vector3 position = targetAnchor;
+            if (position == Vector3.zero)
+            {
+                object entity = this.TryGetAuraOwnerEntity(ownerNetId);
+                if (entity == null || !this.TryGetAuraEntityPosition(entity, out position) || position == Vector3.zero)
+                {
+                    return;
+                }
+            }
+
+            this.auraLastTreeHitOwnerNetId = ownerNetId;
+            this.auraLastTreeHitAt = Time.unscaledTime;
+            this.auraLastTreeHitPosition = position;
         }
 
         private object TryGetAuraOwnerEntity(uint ownerNetId)

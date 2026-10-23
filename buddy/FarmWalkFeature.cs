@@ -646,6 +646,8 @@ namespace HeartopiaMod
         // plus the round trip that publishes the verdict; the measured cases all read "heard 0s
         // ago" with the aura reporting hits continuously.
         private const float FarmWalkOwnDrainWindow = 2.5f;
+        // Same 3 m the collect-wait capture uses ((anchor - lastNodePosition).sqrMagnitude > 9).
+        private const float FarmWalkTreeHitMatchDistance = 3f;
 
         private const float FarmWalkDrainedCloseDistance = 12f;
         // Crossing this forces one fresh scan, so the approach is judged on current world state well
@@ -2633,6 +2635,41 @@ namespace HeartopiaMod
             return Mathf.Lerp(slow, speed, t);
         }
 
+        // Body is outside the stand-off and not closing, and the aura has just chopped the tree
+        // this walk is aimed at. Finish on foot. A hit on some other tree, or a stale one, leaves
+        // the hop ladder alone. See WALK_TO_NODES_RULES 0.4d.
+        private bool TryFinishFarmWalkOnTreeHit(Vector3 selfPos)
+        {
+            if (this.farmWalkAimOffsetY != 0f
+                || this.FarmWalkTargetIsBubble
+                || !this.farmWalkLabel.StartsWith("node:", StringComparison.Ordinal)
+                || Distance3D(selfPos, this.farmWalkTarget) <= this.ResolveFarmWalkCollectStandoff())
+            {
+                return false;
+            }
+
+            if (this.auraLastTreeHitAt < 0f
+                || Time.unscaledTime - this.auraLastTreeHitAt > FarmWalkOwnDrainWindow
+                || this.auraLastTreeHitPosition == Vector3.zero)
+            {
+                return false;
+            }
+
+            Vector3 delta = this.auraLastTreeHitPosition - this.farmWalkTrueTarget;
+            if (delta.sqrMagnitude > FarmWalkTreeHitMatchDistance * FarmWalkTreeHitMatchDistance)
+            {
+                return false;
+            }
+
+            float remaining = HorizontalDistance(selfPos, this.farmWalkTarget);
+            float distance3D = Distance3D(selfPos, this.farmWalkTarget);
+            this.FinishFarmWalk("arrived " + remaining.ToString("F2") + "m horizontally ("
+                + distance3D.ToString("F2") + "m 3-D) — aura already hit this tree (owner "
+                + this.auraLastTreeHitOwnerNetId + "), not walking into the trunk",
+                teleport: false);
+            return true;
+        }
+
         // Stuck detection is only a safety net for what the graph cannot know about: another player
         // in the doorway, a mesh/collision mismatch, a prop spawned since the path was authored.
         // Returns true when it ENDED the walk (arrival taken here), so the tick stops touching a
@@ -2690,6 +2727,13 @@ namespace HeartopiaMod
             // lines, having given up 1 m short without attempting the one thing that might work.
             if (Distance3D(selfPos, this.farmWalkTarget) <= FarmWalkFinalApproachDistance)
             {
+                // The pivot is inside the trunk. One stuck sample while the aura is already
+                // chopping THIS tree is the arrival — a hop here only resets the tally.
+                if (this.TryFinishFarmWalkOnTreeHit(selfPos))
+                {
+                    return true;
+                }
+
                 // Already collectable, and the only thing left is height we do not need. Jumping at
                 // it cannot help: the node's Y is the resource ANCHOR, which for a rock is its base,
                 // so the aim point sits under the surface the player is standing on — the hop lands

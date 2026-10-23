@@ -84,6 +84,13 @@ is per stubborn node — a successful collect resets it — while the learned di
 reach" fallback. That fallback kept a global 1.4 m after the walk had already proved the kind does
 not collect from 1.1 m, and accepted an arrival at 1.37 m that collected nothing. **[M]**
 
+**0.4d** A tree pivot that sits inside the trunk is arrived when the body is stuck outside the
+stand-off and the aura has just chopped that same tree. The hit position has to lie within **3 m**
+of `farmWalkTrueTarget` (the collect-wait capture's own tolerance) and be fresher than the own-drain
+window (2.5 s). The walk finishes on foot: no hop into the trunk, no teleport onto the pivot. The
+inward stand-off learner (0.4b) does not run on this path. A wedge with no hit on this tree still
+takes the hop ladder and, past that, the final-approach teleport. **[M]**
+
 **0.5** A target is judged **only** by an authority that knows something about it. The collectable
 scan rules on `node:` walks alone; `quest:`, `cleanse:`, `area:` and bubbles are outside its
 jurisdiction. Stated as a positive rule rather than a list of exceptions — the list turned out
