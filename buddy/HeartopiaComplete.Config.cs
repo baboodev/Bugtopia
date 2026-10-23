@@ -112,6 +112,7 @@ namespace HeartopiaMod
             data.keyActionPanel = (int)this.keyActionPanel;
             data.keyAuraFarm = (int)this.keyAuraFarm;
             data.keyWaterWeedRadius = (int)this.keyWaterWeedRadius;
+            data.keyForceWaterFlowers = (int)this.keyForceWaterFlowers;
             data.keyAutoFish = (int)this.keyAutoFish;
             data.keyAutoFishingTeleport = (int)this.keyAutoFishingTeleport;
             data.keyAutoFishShadowNet = (int)this.keyAutoFishShadowNet;
@@ -492,6 +493,7 @@ namespace HeartopiaMod
             this.keyActionPanel = (KeyCode)data.keyActionPanel;
             this.keyAuraFarm = (KeyCode)data.keyAuraFarm;
             this.keyWaterWeedRadius = (KeyCode)data.keyWaterWeedRadius;
+            this.keyForceWaterFlowers = (KeyCode)data.keyForceWaterFlowers;
             this.keyAutoFish = (KeyCode)data.keyAutoFish;
             this.keyAutoFishingTeleport = (KeyCode)data.keyAutoFishingTeleport;
             this.keyAutoFishShadowNet = (KeyCode)data.keyAutoFishShadowNet;
@@ -1317,6 +1319,7 @@ namespace HeartopiaMod
             this.keyActionPanel = KeyCode.None;
             this.keyAuraFarm = KeyCode.None;
             this.keyWaterWeedRadius = KeyCode.None;
+            this.keyForceWaterFlowers = KeyCode.None;
             this.keyAutoFish = KeyCode.None;
             this.keyAutoFishingTeleport = KeyCode.None;
             this.keyAutoFishShadowNet = KeyCode.None;
@@ -1457,6 +1460,7 @@ namespace HeartopiaMod
                 case "Action Panel": this.keyActionPanel = newKey; break;
                 case "Aura Farm": this.keyAuraFarm = newKey; break;
                 case "Water + Weed Radius": this.keyWaterWeedRadius = newKey; break;
+                case "Force Water Flowers": this.keyForceWaterFlowers = newKey; break;
                 case "Auto Fish Farm (Auto Teleport)": this.keyAutoFishingTeleport = newKey; break;
                 case "Auto Fishing (Teleport)": this.keyAutoFishingTeleport = newKey; break;
                 case "Auto Fish (No Teleport)": this.keyAutoFish = newKey; break;

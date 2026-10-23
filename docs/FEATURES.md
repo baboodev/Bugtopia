@@ -1935,7 +1935,7 @@ Tab layout (top → bottom):
 3. **Privacy Pause** — single slider (0–100 m, **0 = off**, default off); **persisted to config**.
 4. **Crops** — seed source (Backpack / Warehouse / Both), Refresh seeds, seed selector.
 5. **Fertilizer** — fertilizer source, Refresh fertilizers, fertilizer selector.
-6. **Operations** — buttons: Water in radius · Harvest · Weed · Collect seeds · **Sow** · **Fertilize** · Log diagnostics.
+6. **Operations** — buttons: Water in radius · **Force water flowers** · Harvest · Weed · Collect seeds · **Sow** · **Fertilize** · Log diagnostics.
 7. Status panel + **Stop** (cancels the running operation).
 
 ### Manual operations (radius)
@@ -1943,6 +1943,7 @@ Tab layout (top → bottom):
 | Button | Action | Owner filter |
 |--------|--------|--------------|
 | Water in radius | Waters crop boxes + plants (batch = watering hobby-skill cell count) | any |
+| Force water flowers | Sends `WaterPlant` for every flower in radius, including ones the client already counts as fully watered. Crop boxes stay on Water in radius. Same sprinkler batch size | any |
 | Weed | Removes the `hasWeed` flag on crops | any |
 | Harvest | Collects ripe crops (`stage == 4`) | **own only** |
 | Collect seeds | Collects ready plant seeds | any |
@@ -1979,7 +1980,7 @@ frame, so a rotated plot measures correctly.
 - **Inert while you are away from the field** — ECS entities stream around the player, not around the
   plot, so at distance the scan cannot see who is at home. It says so once in the log; remote weeding
   and sowing keep running.
-- Manual tab buttons and the water+weed hotkey are **not** gated — they are an explicit user action.
+- Manual tab buttons and the water+weed / force-water-flowers hotkeys are **not** gated — they are an explicit user action.
 - Resolution failures fail **open** (farm keeps running) and are always logged under
   `[HomelandFarmPrivacy]`; pause/resume transitions log one line each.
 
@@ -2318,7 +2319,7 @@ All default to **KeyCode.None** except menu toggle. Grouped as in Settings → K
 | Section | Keybinds |
 |---------|----------|
 | CORE | Toggle Menu (**Insert**), Toggle Radar, Bypass UI, Disable All, Inspect Player, Inspect Move |
-| AUTOMATION | Auto Foraging, Aura Farm, Water + Weed Radius, Auto Insect Farm, Auto Bird Farm, Fish Shadow Net, Mass Cook, Auto Puzzle, Auto Cat Play, Auto Dog Train, Auto Pet Wash, Feed All Cats, Feed All Dogs, Auto Snow Sculpture, Auto Sand Sculpture, Auto Pumpkin Carving, Bird Vacuum, Spawn Bubble, Auto Repair, Auto Eat |
+| AUTOMATION | Auto Foraging, Aura Farm, Water + Weed Radius, Force Water Flowers, Auto Insect Farm, Auto Bird Farm, Fish Shadow Net, Mass Cook, Auto Puzzle, Auto Cat Play, Auto Dog Train, Auto Pet Wash, Feed All Cats, Feed All Dogs, Auto Snow Sculpture, Auto Sand Sculpture, Auto Pumpkin Carving, Bird Vacuum, Spawn Bubble, Auto Repair, Auto Eat |
 | PLAYER | Noclip, Camera Toggle, Auto Ice Skating, Join My Town, Anti AFK, Bypass Overlap |
 | SPEED & TOOLS | Game Speed 1×/2×/5×/10×, Equip Axe / Net / Rod / Sprinkler / Bird Scanner / Pad |
 

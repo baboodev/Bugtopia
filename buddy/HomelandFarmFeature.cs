@@ -132,7 +132,8 @@ namespace HeartopiaMod
             InRadius,
             Own,
             Friends,
-            Unwatered
+            Unwatered,
+            ForceFlowers
         }
 
         private enum HomelandFarmStorageSource
@@ -2368,6 +2369,26 @@ namespace HeartopiaMod
             {
                 HomelandFarmTarget target = targets[i];
                 if (target == null || !target.NeedsWater)
+                {
+                    targets.RemoveAt(i);
+                }
+            }
+        }
+
+        // Force-water keeps every flower (PlantItemData) in radius and drops crop boxes.
+        // NeedsWater stays unread: the point is to send WaterPlant when the client already
+        // counts the flower as fully watered (owner masterWater/weatherWater, or level 5).
+        private void FilterHomelandFarmFlowersOnly(List<HomelandFarmTarget> targets)
+        {
+            if (targets == null || targets.Count == 0)
+            {
+                return;
+            }
+
+            for (int i = targets.Count - 1; i >= 0; i--)
+            {
+                HomelandFarmTarget target = targets[i];
+                if (target == null || target.IsCropBox)
                 {
                     targets.RemoveAt(i);
                 }
@@ -13369,7 +13390,8 @@ namespace HeartopiaMod
         {
             bool allowVisitingFarmArea = mode == HomelandFarmWaterMode.Unwatered
                 || mode == HomelandFarmWaterMode.Friends
-                || mode == HomelandFarmWaterMode.InRadius;
+                || mode == HomelandFarmWaterMode.InRadius
+                || mode == HomelandFarmWaterMode.ForceFlowers;
             if (!this.TryBeginHomelandFarmAction(silent, out _, allowVisitingFarmArea))
             {
                 return;
@@ -13570,7 +13592,9 @@ namespace HeartopiaMod
 
             try
             {
-                if (mode == HomelandFarmWaterMode.InRadius && !this.TryHomelandFarmTryIsHandHoldSprinklerEquipped())
+                bool localRadius = mode == HomelandFarmWaterMode.InRadius
+                    || mode == HomelandFarmWaterMode.ForceFlowers;
+                if (localRadius && !this.TryHomelandFarmTryIsHandHoldSprinklerEquipped())
                 {
                     if (!this.TryEquipHandTool(HomelandFarmSprinklerToolTypeId, out string equipStatus))
                     {
@@ -13597,9 +13621,9 @@ namespace HeartopiaMod
 
                 bool allowVisitingFarmArea = mode == HomelandFarmWaterMode.Unwatered
                     || mode == HomelandFarmWaterMode.Friends
-                    || mode == HomelandFarmWaterMode.InRadius;
-                // InRadius only needs the local radius scanned — keeps the scan fast (no freeze).
-                float scanRadiusOverride = mode == HomelandFarmWaterMode.InRadius ? this.homelandFarmWaterRadius : 0f;
+                    || localRadius;
+                // InRadius and ForceFlowers only need the local radius scanned — keeps the scan fast (no freeze).
+                float scanRadiusOverride = localRadius ? this.homelandFarmWaterRadius : 0f;
                 // Frame-budgeted scan: drive the sliced routine so the target build never stalls a frame.
                 HomelandFarmWaterScanResult waterScan = new HomelandFarmWaterScanResult();
                 IEnumerator waterScanDrive = this.ScanHomelandFarmWaterTargetsRoutine(waterScan, allowVisitingFarmArea, scanRadiusOverride);
@@ -13627,6 +13651,7 @@ namespace HeartopiaMod
                 switch (mode)
                 {
                     case HomelandFarmWaterMode.InRadius:
+                    case HomelandFarmWaterMode.ForceFlowers:
                         if (this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos))
                         {
                             this.FilterHomelandFarmByRadius(targets, playerPos, this.homelandFarmWaterRadius);
@@ -13635,6 +13660,12 @@ namespace HeartopiaMod
                         else
                         {
                             this.HomelandFarmLog("Player position unavailable; skipping radius filter for " + targets.Count + " scanned target(s).");
+                        }
+
+                        if (mode == HomelandFarmWaterMode.ForceFlowers)
+                        {
+                            this.FilterHomelandFarmFlowersOnly(targets);
+                            this.HomelandFarmLog("Force flowers kept plants only: " + targets.Count + "/" + scannedCount);
                         }
 
                         break;
@@ -13682,9 +13713,16 @@ namespace HeartopiaMod
                         break;
                 }
 
-                this.FilterHomelandFarmUnwatered(targets);
-                int afterDryFilter = targets.Count;
-                this.HomelandFarmLog("Water after dry filter: " + afterDryFilter + "/" + scannedCount);
+                if (mode == HomelandFarmWaterMode.ForceFlowers)
+                {
+                    this.HomelandFarmLog("Force flowers skipped dry filter: " + targets.Count + "/" + scannedCount);
+                }
+                else
+                {
+                    this.FilterHomelandFarmUnwatered(targets);
+                    int afterDryFilter = targets.Count;
+                    this.HomelandFarmLog("Water after dry filter: " + afterDryFilter + "/" + scannedCount);
+                }
 
                 this.TryHomelandFarmResolveWaterTargetOwners(targets, mode, playerNetId);
 

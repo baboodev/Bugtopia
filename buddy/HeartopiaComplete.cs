@@ -40,6 +40,7 @@ namespace HeartopiaMod
         private KeyCode keyActionPanel = KeyCode.None;
         private KeyCode keyAuraFarm = KeyCode.None;
         private KeyCode keyWaterWeedRadius = KeyCode.None;
+        private KeyCode keyForceWaterFlowers = KeyCode.None;
         private KeyCode keyAutoFish = KeyCode.None;
         private KeyCode keyAutoFishingTeleport = KeyCode.None;
         private KeyCode keyAutoFishShadowNet = KeyCode.None;
@@ -927,6 +928,10 @@ namespace HeartopiaMod
                 if (this.TryGetModHotkeyDown(this.keyWaterWeedRadius))
                 {
                     this.StartHomelandFarmWaterAndWeed(silent: false);
+                }
+                if (this.TryGetModHotkeyDown(this.keyForceWaterFlowers))
+                {
+                    this.StartHomelandFarmWater(HomelandFarmWaterMode.ForceFlowers, silent: false);
                 }
                 if (this.TryGetModHotkeyDown(this.keyAutoInsectFarm))
                 {

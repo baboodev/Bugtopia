@@ -50,6 +50,7 @@ namespace HeartopiaMod
             public int keyActionPanel;
             public int keyAuraFarm;
             public int keyWaterWeedRadius;
+            public int keyForceWaterFlowers;
             public int keyAutoFish;
             public int keyAutoFishingTeleport;
             public int keyAutoFishShadowNet;

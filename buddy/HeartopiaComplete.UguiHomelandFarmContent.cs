@@ -93,18 +93,20 @@ namespace HeartopiaMod
     //   y += 100   →   privacy card y=296 h=88  (labels 34, slider 54)
     //   y += 100   →   crops card   y=396 h=160 (storage lbl 36, picker 58, refresh 90, sel 122)
     //   y += 172   →   fert card    y=568 h=160 (same rows; refresh 140w, count lbl at 166)
-    //   y += 172   →   ops card     y=740 h=236 (rows 40/78/116/154 two-col + 192 full-width)
-    //   y += 248   →   event diag   y=988 (h28); y += 34 → event-driven y=1022 (h28)
-    //   y += 38    →   status card  y=1060 h=52 (label 16,10, wrapped 11pt @ .82)
-    //   y += 62    →   stop button  y=1122 (160x30); + 40 → content height 1162.
+    //   y += 172   →   ops card     y=740 h=274 (rows 40/78/116/154 two-col + 192/230 full-width)
+    //   y += 286   →   event diag   y=1026 (h28); y += 34 → event-driven y=1060 (h28)
+    //   y += 38    →   status card  y=1098 h=52 (label 16,10, wrapped 11pt @ .82)
+    //   y += 62    →   stop button  y=1160 (160x30); + 40 → content height 1200.
     // NOTE (2026-07-22): the radius card is 88, not the source's 70 — its slider runs y=54..74 and
     // was overflowing the card. Everything from the crops card down is therefore +18 off the IMGUI
     // y-cursor; the 12px inter-card gap is unchanged. Don't "restore" these to source parity.
-    // NOTE (2026-07-29): the ops card is 236, not the source's 272 — the source height carried
+    // NOTE (2026-07-29): the ops card was 236, not the source's 272 — the source height carried
     // ~50px of empty card under the diagnostics row (which ends at 222; +14 pad = 236, the same
     // breathing room the radius/crops/fert cards carry). Everything from the event-diag toggle
-    // down is therefore -36 vs the 07-22 chain (net -18 vs the raw IMGUI cursor); the 12px gap
+    // down was therefore -36 vs the 07-22 chain (net -18 vs the raw IMGUI cursor); the 12px gap
     // after the ops card and every later step are unchanged. Don't "restore" this either.
+    // NOTE (2026-10-23): Force water flowers inserted a full-width row above diagnostics, so the
+    // ops card is 274 (diagnostics ends at 260; +14 pad) and everything below it is +38.
     // NOTE (2026-09-04): the PRIVACY PAUSE card was inserted after the radius card, so everything
     // from the crops card down is a further +100 (its 88 height + the uniform 12px gap). It has no
     // IMGUI twin — the feature is UGUI-only.
@@ -664,14 +666,14 @@ namespace HeartopiaMod
             // -------- 5. OPERATIONS card (source y=622 h=272 — :22414-22478) --------
             // Column/order mapping verified against source: rows alternate col1/col2 —
             // (Water In Radius | Harvest All), (Weed All | Collect Plant Seeds),
-            // (Collect Dormant | Sow), (Collect Flowers | Fertilize), then the full-width
-            // diagnostics row. Two equal columns split the inner width (file header deviation).
-            // 2026-07-29: h was the source's 272 — ~50px of empty card under the diagnostics
-            // row. Now the real extent: last row ends 192+30 = 222, +14 bottom pad (the same
-            // breathing room the radius/crops/fert cards carry) = 236. Everything below is -36.
+            // (Collect Dormant | Sow), (Collect Flowers | Fertilize), then two full-width
+            // rows: Force water flowers, then diagnostics. Two equal columns split the inner
+            // width (file header deviation).
+            // 2026-10-23: force-water row at y=192, diagnostics at y=230. Last row ends
+            // 230+30 = 260, +14 bottom pad = 274. Everything below the card is +38 vs 07-29.
             GameObject opsCard = this.CreateUguiSettingsMainPanel(scrollContent, "OpsPanel",
                 this.L("homeland_farm.operations_section"));
-            PlaceUguiTopLeft(opsCard, 8f, 740f, panelW, 236f);
+            PlaceUguiTopLeft(opsCard, 8f, 740f, panelW, 274f);
 
             float colW = (rowW - 12f) / 2f;
             float col1 = 16f;
@@ -694,7 +696,7 @@ namespace HeartopiaMod
                 new System.Action(this.OnUguiHomelandFarmCollectFlowersClicked),
                 new System.Action(this.OnUguiHomelandFarmFertilizeClicked)
             };
-            handle.OpsButtons = new GameObject[9];
+            handle.OpsButtons = new GameObject[10];
             for (int i = 0; i < 8; i++)
             {
                 float bx = (i % 2 == 0) ? col1 : col2;
@@ -705,10 +707,15 @@ namespace HeartopiaMod
                 this.TrySetUguiButtonLabelSize(handle.OpsButtons[i], 12f);
             }
             handle.OpsButtons[8] = this.CreateUguiPrimaryButton(opsCard.transform, "Ops8",
-                this.L("homeland_farm.log_water_radius"),
-                new System.Action(this.OnUguiHomelandFarmLogWaterRadiusClicked));
+                this.L("homeland_farm.force_water_flowers"),
+                new System.Action(this.OnUguiHomelandFarmForceWaterFlowersClicked));
             PlaceUguiTopLeft(handle.OpsButtons[8], 16f, 192f, rowW, 30f);
             this.TrySetUguiButtonLabelSize(handle.OpsButtons[8], 12f);
+            handle.OpsButtons[9] = this.CreateUguiPrimaryButton(opsCard.transform, "Ops9",
+                this.L("homeland_farm.log_water_radius"),
+                new System.Action(this.OnUguiHomelandFarmLogWaterRadiusClicked));
+            PlaceUguiTopLeft(handle.OpsButtons[9], 16f, 230f, rowW, 30f);
+            this.TrySetUguiButtonLabelSize(handle.OpsButtons[9], 12f);
 
             // -------- 6+7. The two trailing toggles (source y=906 / y=940 — :22480-22499) ------
             // Event Diagnostics' handler keeps the source change guard; Event-driven is a bare
@@ -716,18 +723,18 @@ namespace HeartopiaMod
             handle.EventDiagToggle = this.CreateUguiCheckbox(scrollContent, "EventDiagToggle",
                 this.L("Event Diagnostics (log)"), this.homelandFarmEventDiagEnabled,
                 new System.Action<bool>(this.OnUguiHomelandFarmEventDiagToggled));
-            PlaceUguiTopLeft(handle.EventDiagToggle.gameObject, 8f, 988f, panelW, 28f);
+            PlaceUguiTopLeft(handle.EventDiagToggle.gameObject, 8f, 1026f, panelW, 28f);
 
             handle.EventDrivenToggle = this.CreateUguiCheckbox(scrollContent, "EventDrivenToggle",
                 this.L("Event-driven auto-farm (no rescan)"), this.homelandFarmAutoEventDriven,
                 new System.Action<bool>(this.OnUguiHomelandFarmEventDrivenToggled));
-            PlaceUguiTopLeft(handle.EventDrivenToggle.gameObject, 8f, 1022f, panelW, 28f);
+            PlaceUguiTopLeft(handle.EventDrivenToggle.gameObject, 8f, 1060f, panelW, 28f);
 
             // -------- 8. Status card (source y=978, h=52 — :22501-22508) --------
             // Headerless panel (the source box carries no label — Animal Care's "" precedent).
             GameObject statusCard = this.CreateUguiSettingsMainPanel(scrollContent, "StatusPanel",
                 string.Empty);
-            PlaceUguiTopLeft(statusCard, 8f, 1060f, panelW, 52f);
+            PlaceUguiTopLeft(statusCard, 8f, 1098f, panelW, 52f);
 
             // statusStyle: 11pt, wordWrap, uiText @ 0.82 (:22227-22228). Text painted by the
             // sync pass (key-then-localize — file header).
@@ -742,10 +749,10 @@ namespace HeartopiaMod
             handle.StopButton = this.CreateUguiPrimaryButton(scrollContent, "StopButton",
                 this.L("homeland_farm.stop"),
                 new System.Action(this.OnUguiHomelandFarmStopClicked));
-            PlaceUguiTopLeft(handle.StopButton, 8f, 1122f, 160f, 30f);
+            PlaceUguiTopLeft(handle.StopButton, 8f, 1160f, 160f, 30f);
 
-            // Cursor chain end (file header): stop button 1122 + the source's trailing 40 = 1162.
-            this.SetUguiScrollContentHeight(scrollContent, 1162f);
+            // Cursor chain end (file header): stop button 1160 + the source's trailing 40 = 1200.
+            this.SetUguiScrollContentHeight(scrollContent, 1200f);
 
             // Seed every dynamic state once (texts, interactables, segment styles, selector
             // rows, Start/Stop swap) via the same pass the processor runs. The warmup kick,
@@ -1056,6 +1063,11 @@ namespace HeartopiaMod
         private void OnUguiHomelandFarmWaterInRadiusClicked()
         {
             this.StartHomelandFarmWater(HomelandFarmWaterMode.InRadius, silent: false);
+        }
+
+        private void OnUguiHomelandFarmForceWaterFlowersClicked()
+        {
+            this.StartHomelandFarmWater(HomelandFarmWaterMode.ForceFlowers, silent: false);
         }
 
         private void OnUguiHomelandFarmHarvestCropsClicked()

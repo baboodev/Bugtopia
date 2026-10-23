@@ -44,7 +44,7 @@ namespace HeartopiaMod
     // therefore inert while the loop reports we are away, and says so once in the log. Auto-farm
     // keeps running there on purpose: remote weeding and sowing are the point of being away.
     //
-    // Manual tab buttons and the water+weed hotkey are NOT gated — they are an explicit user act.
+    // Manual tab buttons and the water+weed / force-water-flowers hotkeys are NOT gated — they are an explicit user act.
     //
     // Failure is fail-OPEN (farm keeps running) and always logged: fail-closed would brick auto
     // farming on any resolution miss, which is far worse than one unpaused tick.

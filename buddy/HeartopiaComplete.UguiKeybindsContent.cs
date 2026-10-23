@@ -9,7 +9,7 @@ namespace HeartopiaMod
     // UGUI SHELL — Phase 3 tab CONTENT, item 9 (migration plan: cosmic-waddling-rainbow.md):
     // Settings→Keybinds. UGUI mirror of the DrawSettingsTab fallthrough branch
     // (HeartopiaComplete.Config.cs:930, settingsSubTab == 1): "KEYBIND SETTINGS" header, four
-    // section panels (CORE 7 / AUTOMATION 23 / PLAYER 6 / SPEED & TOOLS 11 = 47 click-to-rebind
+    // section panels (CORE 7 / AUTOMATION 24 / PLAYER 6 / SPEED & TOOLS 11 = 48 click-to-rebind
     // rows), a DANGER reset button, and the capture-mode view that REPLACES the section list
     // while this.keyBindingActive is non-empty.
     //
@@ -26,7 +26,7 @@ namespace HeartopiaMod
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs this builder).
     //
-    // The 46 rows are ONE data-driven array grouped by section (the Logging-round 39-binding
+    // The 48 rows are ONE data-driven array grouped by section (the Logging-round 39-binding
     // precedent, KeyCode getters instead of bools). Each binding carries the EXACT label string
     // its IMGUI row passes to DrawKeybindRowInPanel — that string is ALSO the ApplyActiveKeybind
     // switch key, so arming capture with it routes the eventual write through the same backend
@@ -56,7 +56,7 @@ namespace HeartopiaMod
     {
         // ----------------------------------------------------------------------------------------
         // Data-driven bindings — labels/pairs/ORDER copied exactly from the IMGUI drawer
-        // (HeartopiaComplete.Config.cs:964-1022). 7 + 22 + 6 + 11 = 46 rows (the five Pad build
+        // (HeartopiaComplete.Config.cs:964-1022). 7 + 24 + 6 + 11 = 48 rows (the five Pad build
         // hotkeys were removed 2026-09-24 — the game's own build shortcuts replace them).
         // ----------------------------------------------------------------------------------------
 
@@ -104,6 +104,7 @@ namespace HeartopiaMod
                 {
                     new UguiKeybindRowBinding("Aura Farm", () => this.keyAuraFarm),
                     new UguiKeybindRowBinding("Water + Weed Radius", () => this.keyWaterWeedRadius),
+                    new UguiKeybindRowBinding("Force Water Flowers", () => this.keyForceWaterFlowers),
                     new UguiKeybindRowBinding("Auto Insect Farm", () => this.keyAutoInsectFarm),
                     new UguiKeybindRowBinding("Auto Bird Farm", () => this.keyAutoBirdFarm),
                     new UguiKeybindRowBinding("Fish Shadow Net", () => this.keyAutoFishShadowNet),
@@ -171,7 +172,7 @@ namespace HeartopiaMod
         private UguiShellKeybindsHandle uguiShellKeybinds;
 
         // ----------------------------------------------------------------------------------------
-        // Construction — everything is static layout (all 46 rows always exist; the only dynamic
+        // Construction — everything is static layout (all 48 rows always exist; the only dynamic
         // pieces are label texts and the normal/capture view swap), so unlike Settings→Main there
         // is no relayout pass. Handle assigned LAST (Research idiom).
         // ----------------------------------------------------------------------------------------
