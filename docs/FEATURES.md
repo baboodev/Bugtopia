@@ -2231,8 +2231,16 @@ The tab is its own top-level sidebar entry (display position 8, ahead of Setting
 
 Own sidebar entry, shown only while `%LocalLow%/Bugtopia/Plugins` contains at least one plugin dll.
 A dll stays unloaded until Enabled is turned on; that choice is remembered. Inner tabs are
-Installed (enable, reload, quarantine) plus one tab per page a plugin adds. The MCP bridge, when
-`BugtopiaMcp.dll` is enabled, adds an MCP Bridge page here. Contract: [PLUGINS.md](./PLUGINS.md).
+Installed (enable, reload, quarantine) plus one tab per page a plugin adds.
+
+Shipped with the release, and also compiled by `buddy/build-all.bat`:
+
+| Dll | Page |
+|-----|------|
+| `BugtopiaMcp.dll` | **MCP Bridge** — agent bridge. Off until Enabled. Writes and unsafe stay off for the session. [MCP_BRIDGE.md](./MCP_BRIDGE.md) |
+| `HelloBugtopia.dll` | Sample page |
+
+Contract, folder layout, and `internal-plugins/`: [PLUGINS.md](./PLUGINS.md).
 
 ---
 
@@ -2390,5 +2398,7 @@ See root [README.md](../README.md) disclaimer.
 
 - [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md) — inventory access, filters, sorting per feature
 - [BUILD_AND_RUN.md](./BUILD_AND_RUN.md)
+- [PLUGINS.md](./PLUGINS.md) — disk plugins, enable, build
+- [MCP_BRIDGE.md](./MCP_BRIDGE.md) — agent bridge
 - [TECHNICAL.md](./TECHNICAL.md)
 - [TYPE_RESOLUTION.md](./TYPE_RESOLUTION.md)

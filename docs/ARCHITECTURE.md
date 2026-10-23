@@ -707,6 +707,8 @@ buddy/
 
 **Not compiled** (exist on disk but excluded from csproj): experimental dump tooling only. The legacy fishing input-simulation files (`AutoFishLogic.cs`, `AutoFishFarm.cs`, `AutoFishGet*.cs`) and `InsectFarm.cs` were deleted — fishing/insect ship as the net-based `AutoFishingFarm.cs` / `InsectNetFarm.cs`.
 
+Disk plugins are separate projects, not files in this tree. `plugins/` holds the ones a release publishes (`BugtopiaMcp`, `HelloBugtopia`). `internal-plugins/` is gitignored and compiled by the same mod build only when the folder is present. The host that loads them is `PluginHost*.cs` and `HeartopiaComplete.PluginMenu.cs`. Contract: [PLUGINS.md](PLUGINS.md).
+
 ---
 
 ## 7. Mod ↔ game interaction flows

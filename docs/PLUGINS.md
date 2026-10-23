@@ -135,9 +135,20 @@ host drops its references, then unloads, then checks collection over a few frame
 survives is `leaked` in `plugin.list`: nothing ticks it, the memory returns on restart, and a new
 load of the same id still works.
 
+## Shipped plugins
+
+| Project | Release file | Role |
+|---------|--------------|------|
+| `plugins/BugtopiaMcp` | `BugtopiaMcp.dll` | Agent bridge. Page title **MCP Bridge**. [MCP_BRIDGE.md](./MCP_BRIDGE.md) |
+| `plugins/HelloBugtopia` | `HelloBugtopia.dll` | Template |
+
+The release workflow builds these once against `bugtopia-bepinex.dll` and attaches the dll and the pdb. `internal-plugins/` is not in the repository, so it is not built or published.
+
 ## Build
 
-Template: `plugins/HelloBugtopia`. One plugin is one csproj. Rebuild that project, not the mod:
+`buddy/build-all.bat` and `dotnet build buddy/buddy.csproj` compile every `plugins/*/*.csproj`, and every `internal-plugins/*/*.csproj` when that folder exists, against the `bugtopia.dll` just produced. `-p:BuildPlugins=false` skips them. A missing `internal-plugins` folder is not an error. Output is `bin/Release/net6.0/<AssemblyName>.dll` inside the project directory. The build does not copy that dll into the Plugins folder and does not write `.enabled`.
+
+One project on its own, using the template:
 
 ```powershell
 dotnet build plugins/HelloBugtopia/HelloBugtopia.csproj -c Release
@@ -162,8 +173,8 @@ loader interop folder that contains `UnityEngine.CoreModule.dll`.
 ### Internal plugins
 
 `internal-plugins/` is gitignored. Projects there are not listed in `buddy.csproj` and are never
-compiled into `bugtopia.dll`. Each subdirectory is one local plugin. The same build and copy
-commands apply, with that plugin's csproj and assembly name:
+compiled into `bugtopia.dll`. Each subdirectory is one local plugin. The mod build compiles them
+when the folder exists. Building one by hand is the same command, with that project's name:
 
 ```powershell
 dotnet build internal-plugins/Disconnect/Disconnect.csproj -c Release
@@ -178,4 +189,5 @@ transition as the in-game settings exit. The button is on its Plugins page.
 `plugin.load` / `plugin.loadFile` / `plugin.unload` / `plugin.call` load the same host. `plugin.load`
 sends the assembly as base64. `plugin.loadFile` reads `%LocalLow%/Bugtopia/Plugins/<id>.dll` and a
 sibling pdb. That protocol is [MCP_BRIDGE.md](./MCP_BRIDGE.md) §4b. The bridge itself is the
-`BugtopiaMcp` plugin in that same folder (`buddy/build-mcp.bat`); a mod build does not contain it.
+`BugtopiaMcp` plugin. `bugtopia.dll` has no socket. `buddy/build-all.bat` compiles the plugin;
+`buddy/build-mcp.bat` also copies it into the Plugins folder. Neither writes `.enabled`.

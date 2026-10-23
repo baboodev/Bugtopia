@@ -34,13 +34,17 @@ The bridge is a plugin. The mod build does not contain it, and there is no marke
 
 **1 — Build and copy the plugin.**
 
+`buddy/build-all.bat` compiles `plugins/BugtopiaMcp` with the mod. The dll lands in
+`plugins/BugtopiaMcp/bin/Release/net6.0/`. A GitHub release also attaches `BugtopiaMcp.dll` and its
+pdb, built against `bugtopia-bepinex.dll`.
+
 ```bat
 buddy\build-mcp.bat
 ```
 
-That builds `plugins/BugtopiaMcp` against the BepInEx `bugtopia.dll` already in `buddy/bin` and
-copies `BugtopiaMcp.dll` to `%LocalLow%/Bugtopia/Plugins/`. It does not rebuild the mod and it does
-not write `BugtopiaMcp.enabled`.
+That builds the plugin against the BepInEx `bugtopia.dll` already in `buddy/bin` and copies
+`BugtopiaMcp.dll` to `%LocalLow%/Bugtopia/Plugins/`. It does not rebuild the mod and it does not
+write `BugtopiaMcp.enabled`. Copying the release asset into that folder is the same step.
 
 **2 — Enable it in the mod menu.**
 
