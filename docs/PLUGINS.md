@@ -142,7 +142,7 @@ load of the same id still works.
 | `plugins/BugtopiaMcp` | `BugtopiaMcp.dll` | Agent bridge. Page title **MCP Bridge**. [MCP_BRIDGE.md](./MCP_BRIDGE.md) |
 | `plugins/HelloBugtopia` | `HelloBugtopia.dll` | Template |
 
-The release workflow builds these once against `bugtopia-bepinex.dll` and attaches the dll and the pdb. `internal-plugins/` is not in the repository, so it is not built or published.
+The release workflow builds these once against `bugtopia-bepinex.dll` and attaches the dll. `internal-plugins/` is not in the repository, so it is not built or published.
 
 ## Build
 

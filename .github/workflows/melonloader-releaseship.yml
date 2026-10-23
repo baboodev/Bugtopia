@@ -251,8 +251,6 @@ jobs:
             $built = @(Get-ChildItem $out -Filter *.dll)
             if ($built.Count -ne 1) { throw "Expected one dll in $out, found $($built.Count)." }
             Copy-Item $built[0].FullName (Join-Path "dist" $built[0].Name) -Force
-            $pdb = [System.IO.Path]::ChangeExtension($built[0].FullName, ".pdb")
-            if (Test-Path $pdb) { Copy-Item $pdb (Join-Path "dist" (Split-Path $pdb -Leaf)) -Force }
             Write-Host "::endgroup::"
           }
 
@@ -301,18 +299,17 @@ jobs:
             $extra = if ($_.Name -eq "BugtopiaMcp.dll") { " The agent bridge; it listens only while Enabled." } else { "" }
             "- **$($_.Name)** — copy into %LocalLow%\Bugtopia\Plugins and turn Enabled on.$extra"
           }) -join "`n"
-          $pluginPdbs = @(Get-ChildItem "dist" -Filter *.pdb | Where-Object { $_.Name -notlike "bugtopia-*" })
           $notes = "Four builds:`n- **bugtopia-universal.dll** — one DLL for both loaders (Mods\ or BepInEx\plugins\).`n- **bugtopia-bepinex.dll** — BepInEx only (BepInEx\plugins\).`n- **bugtopia-melonloader.dll** — MelonLoader only (Mods\).`n- **bugtopia-universal-nolink.dll** — same as universal, built without the Bugtopia News link (no URL or channel reference anywhere in the binary).`n`nDisk plugins, built against bugtopia-bepinex.dll:`n$pluginNotes`n`nAnd the launcher, one exe with everything inside it:`n- **Bugtopia-Launcher-*-offline.exe** — carries this release's mod; downloads nothing, ever.`n- **Bugtopia-Launcher-*-online.exe** — carries no mod and fetches the newest release itself.`n- **Bugtopia-Launcher-*-offline-nolink.exe** — the offline launcher, carrying the BepInEx mod built without the Bugtopia News link.`n`n$generated"
 
           # Globbed rather than named: the launcher files carry the version in their names, and the
-          # plugin files are whatever plugins\ produced. Mod pdbs stay out of the release.
+          # plugin files are whatever plugins\ produced. Pdb files stay out of the release.
           $assets = @(
             "dist/bugtopia-bepinex.dll"
             "dist/bugtopia-melonloader.dll"
             "dist/bugtopia-universal.dll"
             "dist/bugtopia-universal-nolink.dll"
           ) + (Get-ChildItem "dist" -Filter "Bugtopia-Launcher-*.exe" | ForEach-Object { $_.FullName }) `
-            + $pluginDlls.FullName + $pluginPdbs.FullName
+            + $pluginDlls.FullName
 
           gh release create "${{ github.ref_name }}" `
             --title "${{ github.ref_name }}" `

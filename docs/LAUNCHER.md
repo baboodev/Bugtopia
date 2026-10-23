@@ -298,7 +298,7 @@ a second copy built beside it. The offline-nolink launcher embeds `dist\bugtopia
 built with `-p:Telegram=false` and checked for Telegram traces like the Universal no-link DLL; that
 DLL itself goes into the artifacts but not onto the release. The tracked disk plugins
 (`plugins\*\*.csproj`) are built once against `dist\bugtopia-bepinex.dll` and attached to the
-release as their own dll and pdb; copy them into `%LocalLow%\Bugtopia\Plugins` and turn Enabled on.
+release as their own dll; copy them into `%LocalLow%\Bugtopia\Plugins` and turn Enabled on.
 `internal-plugins` is not in the checkout, so it is not built or published. All three exes go into
 the artifacts and onto the release, named from the tag:
 
