@@ -4572,6 +4572,14 @@ namespace HeartopiaMod
                         continue;
                     }
 
+                    // Same prefab-name allow-list the radar uses. The census only stores positions,
+                    // and an unfiltered count makes Combined Farm switch to the bird slice and equip
+                    // the scanner for species the filter rejected.
+                    if (!this.IsRadarBirdObjectAllowed(obj))
+                    {
+                        continue;
+                    }
+
                     this.birdPresencePositions.Add(obj.transform.position);
                 }
             }
