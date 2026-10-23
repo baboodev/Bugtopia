@@ -2231,7 +2231,8 @@ The tab is its own top-level sidebar entry (display position 8, ahead of Setting
 
 Own sidebar entry, shown only while `%LocalLow%/Bugtopia/Plugins` contains at least one plugin dll.
 A dll stays unloaded until Enabled is turned on; that choice is remembered. Inner tabs are
-Installed (enable, reload, quarantine) plus one tab per page a plugin adds. Contract: [PLUGINS.md](./PLUGINS.md).
+Installed (enable, reload, quarantine) plus one tab per page a plugin adds. The MCP bridge, when
+`BugtopiaMcp.dll` is enabled, adds an MCP Bridge page here. Contract: [PLUGINS.md](./PLUGINS.md).
 
 ---
 

@@ -277,11 +277,8 @@ namespace HeartopiaMod
             // without also removing the startup pin; two writers on one key is a coin flip.
             float rowY = 84f;
 
-            // MCP agent-bridge privileges USED TO BE HERE. They moved to the Agent tab
-            // (HeartopiaComplete.UguiAgentContent.cs), which only exists while the bridge is
-            // listening — putting a bridge control on a page every user opens meant a permanently
-            // conditional row in the middle of an otherwise static list. Nothing is left behind on
-            // purpose: the sidebar shows the Agent tab exactly when those toggles are meaningful.
+            // MCP agent-bridge privileges USED TO BE HERE. They live on the MCP Bridge page that the
+            // BugtopiaMcp plugin adds under Plugins, and only while that plugin is loaded.
 
             handle.Bindings = BuildUguiLoggingToggleBindings();
             if (handle.Bindings.Length != LoggingTabRowCount)

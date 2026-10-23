@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -485,7 +485,7 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool TryResolveSelfPlayerNetId(out uint selfPlayerNetId)
+        internal bool TryResolveSelfPlayerNetId(out uint selfPlayerNetId)
         {
             selfPlayerNetId = 0U;
             if (this.TryResolveSelfPlayerNetIdMono(out selfPlayerNetId))

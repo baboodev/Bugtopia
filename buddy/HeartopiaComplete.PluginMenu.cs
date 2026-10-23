@@ -7,9 +7,8 @@ using Object = UnityEngine.Object;
 
 namespace HeartopiaMod
 {
-    // Plugins sidebar tab. The retained page model used to live on the Agent tab; it moved here so a
-    // build without the MCP bridge still has somewhere to show what a plugin added. The Agent tab
-    // keeps Bridge only. The row is omitted while the plugins folder has no dll.
+    // Plugins sidebar tab. Pages a plugin adds are sub-tabs next to Installed, including the
+    // MCP Bridge page from BugtopiaMcp. The row is omitted while the plugins folder has no dll.
     //
     // A page is a model, not GameObjects: AddPage works before the menu has been opened, and a
     // theme rebuild destroys the shell and renders the model again. Callbacks sit behind a host
@@ -400,7 +399,7 @@ namespace HeartopiaMod
             UguiShellPluginsHandle handle = this.uguiShellPlugins;
             if (handle == null || handle.PagesHost == null || page == null || page.Removed || page.Root != null)
             {
-                return; // no shell yet: the model stands, BuildUguiShellMcpContent renders it later
+                return; // no shell yet: the model stands, and the Plugins tab renders it when the shell exists
             }
 
             float w = handle.PageW;

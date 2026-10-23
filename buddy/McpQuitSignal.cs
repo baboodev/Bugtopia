@@ -94,9 +94,6 @@ namespace HeartopiaMod
             {
                 Quitting = true;
                 PluginHost.OnCleanQuit();
-#if FEATURE_MCP
-                McpForensics.ClearResident();
-#endif
                 ModLogger.Msg("[Plugin] clean shutdown — resident-plugin record cleared.");
             }
             catch

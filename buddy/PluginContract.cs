@@ -104,7 +104,7 @@ namespace HeartopiaMod.Plugins
         /// reacts to a state change, so this is what makes that rule testable from a snippet.
         IEventsApi Events { get; }
 
-        /// A page of the plugin's own controls in the mod menu's Agent tab. REMOVED AUTOMATICALLY on
+        /// A page of the plugin's own controls on the Plugins tab. REMOVED AUTOMATICALLY on
         /// unload — the same reason IEventsApi exists rather than letting plugins wire themselves in.
         IUiApi Ui { get; }
     }
@@ -121,7 +121,7 @@ namespace HeartopiaMod.Plugins
     /// trap that makes threads and detours contract violations.
     public interface IUiApi
     {
-        /// Adds a page titled `title`, shown as a sub-tab of the Agent tab next to "Bridge".
+        /// Adds a page titled `title`, shown as a sub-tab of the Plugins tab next to Installed.
         /// Null only when the mod instance is gone (i.e. during shutdown).
         IPluginPage AddPage(string title);
 

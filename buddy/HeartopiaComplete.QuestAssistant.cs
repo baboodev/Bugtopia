@@ -28,7 +28,7 @@ namespace HeartopiaMod
         private const int QuestAssistantMarkCategoryNpc = 2; // CompleteConditionTrackMarkType.Npc
         private const int QuestAssistantMarkCategoryArea = 14; // CompleteConditionTrackMarkType.Area
 
-        private enum QuestObjectiveKind
+        internal enum QuestObjectiveKind
         {
             Unknown = 0,
             Collect,
@@ -45,7 +45,7 @@ namespace HeartopiaMod
             EnterArea, // PlayerEnterArea — self-report PlayerEnterAreaCommand{netId, typeParam=areaId} — added 2026-07-04, §53
         }
 
-        private sealed class ConditionSnapshot
+        internal sealed class ConditionSnapshot
         {
             public string Description;
             public int CheckType;
@@ -65,7 +65,7 @@ namespace HeartopiaMod
             public int LevelId;
         }
 
-        private sealed class QuestSnapshot
+        internal sealed class QuestSnapshot
         {
             public uint TaskNetId;
             public int TaskId;
@@ -106,12 +106,12 @@ namespace HeartopiaMod
         private IntPtr questAssistantTaskSystemClass = IntPtr.Zero;
         private IntPtr questAssistantGetAllTasksMethod = IntPtr.Zero;
 
-        private bool questAssistantBusy = false;
+        internal bool questAssistantBusy = false;
         private float questAssistantLastDumpAt = -999f;
 
-        private List<QuestSnapshot> questAssistantSnapshot = new List<QuestSnapshot>();
-        private List<QuestSnapshot> questAssistantAvailable = new List<QuestSnapshot>();
-        private string questAssistantLastStatus = "Idle. Load into a town, then click the button below.";
+        internal List<QuestSnapshot> questAssistantSnapshot = new List<QuestSnapshot>();
+        internal List<QuestSnapshot> questAssistantAvailable = new List<QuestSnapshot>();
+        internal string questAssistantLastStatus = "Idle. Load into a town, then click the button below.";
 
         // ===== Entry point — purely button-triggered. No OnUpdate TIMER: this must never run before
         // the user explicitly asks for it (world/session data isn't guaranteed to exist at mod load /
@@ -119,7 +119,7 @@ namespace HeartopiaMod
         // refresh below is a SEPARATE, event-driven mechanism (not a timer) — see its own comment for
         // why it doesn't reopen that risk. =====
 
-        private void QuestAssistantOnDumpButtonClicked()
+        internal void QuestAssistantOnDumpButtonClicked()
         {
             float now = Time.unscaledTime;
             if (this.questAssistantBusy || now - this.questAssistantLastDumpAt < QuestAssistantMinSecondsBetweenDumps)

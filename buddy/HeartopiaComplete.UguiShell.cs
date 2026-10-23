@@ -112,7 +112,7 @@ namespace HeartopiaMod
         // Music (display position 9) has NO IMGUI ancestor — it arrived after the menu was
         // retired — so it takes the next free internal id, 10. Its m2-era draft used 9, which is
         // Research's here; that collision is why it is renumbered rather than carried over.
-        private static readonly int[] UguiShellInternalTabIds = new int[] { 0, 2, 3, 8, 12, 4, 5, 6, 9, 10, 7, 11, 13 };
+        private static readonly int[] UguiShellInternalTabIds = new int[] { 0, 2, 3, 8, 12, 4, 5, 6, 9, 10, 7, 13 };
 
         private const float UguiShellWindowW = 960f;
         private const float UguiShellWindowH = 640f;
@@ -242,15 +242,9 @@ namespace HeartopiaMod
             this.ProcessUguiShellRadarSettingsOnUpdate();
             this.ProcessUguiShellRadarFilterOnUpdate();
             this.ProcessUguiShellMusicOnUpdate();
-            this.ProcessUguiShellMcpOnUpdate();
             this.ProcessUguiShellPluginsOnUpdate();
             this.ProcessUguiShellHobbyPumpkinOnUpdate();
         }
-
-        // Implemented in HeartopiaComplete.UguiAgentContent.cs, which is #if FEATURE_MCP. An
-        // unimplemented partial method removes its CALL SITES too, so a non-MCP build costs nothing
-        // here — the same idiom HeartopiaComplete.Mcp.cs uses for the bridge's own frame hooks.
-        partial void ProcessUguiShellMcpOnUpdate();
 
         // Phase 2e: live re-sync of the shell scale while the (still-IMGUI) Settings→Main
         // "UI Scale" slider edits the shared persisted uiScale. Reading GetUiScale() every frame
@@ -450,7 +444,7 @@ namespace HeartopiaMod
                     this.L("Self"), this.L("Resource Gathering"), this.L("Features"),
                     this.L("New Features"), this.L("Hobby"), this.L("Radar"), this.L("Teleport"),
                     this.L("Bag / Warehouse"), this.L("Research / Order"), this.L("Music"),
-                    this.L("Settings"), this.L("Agent"), this.L("Plugins")
+                    this.L("Settings"), this.L("Plugins")
                 };
                 string[] tabSubtitles = new string[]
                 {
@@ -461,7 +455,6 @@ namespace HeartopiaMod
                     this.L("Bulk item tools"), this.L("Institute and order machine"),
                     this.L("Play .bin note tracks"),
                     this.L("Menu, theme and hotkeys"),
-                    this.L("MCP bridge and sandbox plugins"),
                     this.L("Installed plugins")
                 };
                 this.uguiShellPluginsTabIncluded = PluginHost.HasDiskPlugins();
@@ -484,7 +477,6 @@ namespace HeartopiaMod
                     new string[0], // Research / Order — no sub-tabs
                     new string[0], // Music — no sub-tabs
                     settingsSubs,
-                    new string[0], // Agent — Bridge only; the bar is rebuilt in UguiAgentContent.
                     new string[0], // Plugins — Installed plus one tab per plugin page, rebuilt at runtime.
                 };
 
@@ -987,15 +979,6 @@ namespace HeartopiaMod
                             {
                                 this.BuildUguiShellMusicContent(container.transform, 0f, 0f, contentColW, contentH);
                             }
-#if FEATURE_MCP
-                            // Agent (HeartopiaComplete.UguiAgentContent.cs). Gated on tabUnlocked for
-                            // the same reason Music is: the builder is not free, and a tab the
-                            // sidebar cannot reach has nothing to render into.
-                            else if (i == UguiShellMcpTabIndex && tabUnlocked)
-                            {
-                                this.BuildUguiShellMcpContent(container.transform, 0f, 0f, contentColW, contentH, mainW);
-                            }
-#endif
                             else if (i == UguiShellPluginsTabIndex && tabUnlocked)
                             {
                                 this.BuildUguiShellPluginsContent(container.transform, 0f, 0f, contentColW, contentH, mainW);
@@ -1304,18 +1287,6 @@ namespace HeartopiaMod
             if (displayIndex == UguiShellMusicTabIndex)
             {
                 return BetaEnabled;
-            }
-            if (displayIndex == UguiShellMcpTabIndex)
-            {
-                // Same "fixed for the session" property the beta gate relies on: McpBridge.Listening
-                // is decided at startup from the marker file, and the shell is built lazily on the
-                // first hotkey press — long after. Without the marker (or without -p:Mcp=true) the
-                // tab exists as an empty container nothing can select, exactly like a locked tab.
-#if FEATURE_MCP
-                return McpBridge.Listening;
-#else
-                return false;
-#endif
             }
             if (displayIndex == UguiShellPluginsTabIndex)
             {

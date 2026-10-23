@@ -1213,7 +1213,7 @@ namespace HeartopiaMod
             { "Max: unlimited", "Max: unlimited" },
             { "Remaining: unlimited", "Remaining: unlimited" },
 
-            // Agent tab — MCP bridge and sandbox plugins (HeartopiaComplete.UguiAgentContent.cs)
+            // Plugins tab. "Agent" remains so an old config label still resolves.
             { "Agent", "Agent" },
             { "MCP bridge and sandbox plugins", "MCP bridge and sandbox plugins" },
             { "Plugins", "Plugins" },
@@ -2494,7 +2494,7 @@ namespace HeartopiaMod
             { "Max: unlimited", "Máx.: ilimitado" },
             { "Remaining: unlimited", "Restantes: ilimitado" },
 
-            // Agent tab — MCP bridge and sandbox plugins (HeartopiaComplete.UguiAgentContent.cs)
+            // Plugins tab. "Agent" remains so an old config label still resolves.
             { "Agent", "Agente" },
             { "MCP bridge and sandbox plugins", "Puente MCP y plugins de espacio aislado" },
             { "Plugins", "Plugins" },
@@ -3775,7 +3775,7 @@ namespace HeartopiaMod
             { "Max: unlimited", "上限：无限制" },
             { "Remaining: unlimited", "剩余：无限制" },
 
-            // Agent tab — MCP bridge and sandbox plugins (HeartopiaComplete.UguiAgentContent.cs)
+            // Plugins tab. "Agent" remains so an old config label still resolves.
             { "Agent", "代理" },
             { "MCP bridge and sandbox plugins", "MCP 桥接与沙盒插件" },
             { "Plugins", "插件" },
@@ -5047,7 +5047,7 @@ namespace HeartopiaMod
             { "Max: unlimited", "Máx.: ilimitado" },
             { "Remaining: unlimited", "Restantes: ilimitado" },
 
-            // Agent tab — MCP bridge and sandbox plugins (HeartopiaComplete.UguiAgentContent.cs)
+            // Plugins tab. "Agent" remains so an old config label still resolves.
             { "Agent", "Agente" },
             { "MCP bridge and sandbox plugins", "Ponte MCP e plugins de sandbox" },
             { "Plugins", "Plugins" },
@@ -6319,7 +6319,7 @@ namespace HeartopiaMod
             { "Max: unlimited", "สูงสุด: ไม่จำกัด" },
             { "Remaining: unlimited", "คงเหลือ: ไม่จำกัด" },
 
-            // Agent tab — MCP bridge and sandbox plugins (HeartopiaComplete.UguiAgentContent.cs)
+            // Plugins tab. "Agent" remains so an old config label still resolves.
             { "Agent", "เอเจนต์" },
             { "MCP bridge and sandbox plugins", "สะพาน MCP และปลั๊กอินแซนด์บ็อกซ์" },
             { "Plugins", "ปลั๊กอิน" },
@@ -7604,7 +7604,7 @@ namespace HeartopiaMod
             { "Max: unlimited", "최대: 무제한" },
             { "Remaining: unlimited", "남음: 무제한" },
 
-            // Agent tab — MCP bridge and sandbox plugins (HeartopiaComplete.UguiAgentContent.cs)
+            // Plugins tab. "Agent" remains so an old config label still resolves.
             { "Agent", "에이전트" },
             { "MCP bridge and sandbox plugins", "MCP 브리지와 샌드박스 플러그인" },
             { "Plugins", "플러그인" },

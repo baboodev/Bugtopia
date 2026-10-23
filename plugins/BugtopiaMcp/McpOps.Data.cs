@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -21,11 +20,11 @@ namespace HeartopiaMod
     // caching them across frames is legal — the "never cache a MonoObject* in a raw IntPtr" rule
     // (CI lint E3) is about native pointers, and there are none here.
     // ============================================================================================
-    public partial class HeartopiaComplete
+    internal sealed partial class McpRuntime
     {
         private const float McpBackpackMinIntervalSeconds = 2f;
 
-        private List<AutoSellBagItemEntry> mcpBackpackSnapshot;
+        private List<HeartopiaComplete.AutoSellBagItemEntry> mcpBackpackSnapshot;
         private float mcpBackpackSnapshotAt = float.NegativeInfinity;
         private double mcpBackpackScanMs;
 
@@ -52,14 +51,14 @@ namespace HeartopiaMod
             }
 
             this.mcpDataEventHooksRegistered = true;
-            this.RegisterGameEventHook(McpBackpackEventName, McpBackpackEventBytes, this.OnMcpRefreshBackPackEvent);
+            this.Mod.RegisterGameEventHook(McpBackpackEventName, McpBackpackEventBytes, this.OnMcpRefreshBackPackEvent);
             return true;
         }
 
         // Main thread (event drain). Deliberately does NOT read the storage type: backpack.list
         // reports warehouse rows too, so any storage mutation is a reason to re-scan — unlike Auto
         // Sell, which only cares about the player backpack.
-        private void OnMcpRefreshBackPackEvent(GameEventSnapshot e)
+        private void OnMcpRefreshBackPackEvent(HeartopiaComplete.GameEventSnapshot e)
         {
             this.mcpBackpackDirty = true;
             this.mcpBackpackInvalidations++;
@@ -77,9 +76,11 @@ namespace HeartopiaMod
         private static readonly uint[] McpEventLogNetId = new uint[McpEventLogSize];
         private static readonly float[] McpEventLogTime = new float[McpEventLogSize];
         private static readonly int[] McpEventLogLen = new int[McpEventLogSize];
+        private static readonly long[] McpEventLogSeq = new long[McpEventLogSize];
         private static int mcpEventLogWrite;
         private static int mcpEventLogCount;
         private static long mcpEventLogTotal;
+        private static long mcpEventLogHigh;
 
         // Off unless the bridge is up: with no agent listening this is one bool test per dispatched
         // event, on a path that can fire hundreds of times a second.
@@ -100,6 +101,8 @@ namespace HeartopiaMod
                 McpEventLogNetId[idx] = netId;
                 McpEventLogLen[idx] = payloadLen;
                 McpEventLogTime[idx] = Time.unscaledTime;
+                mcpEventLogHigh++;
+                McpEventLogSeq[idx] = mcpEventLogHigh;
                 mcpEventLogWrite++;
                 mcpEventLogTotal++;
                 if (mcpEventLogCount < McpEventLogSize)
@@ -155,6 +158,7 @@ namespace HeartopiaMod
                 + "tail with a non-empty watch list means nothing fired, not that nothing happened.",
                 "{\"type\":\"object\",\"properties\":{"
                 + "\"n\":{\"type\":\"integer\",\"description\":\"max rows (1-256, default 50)\"},"
+                + "\"since\":{\"type\":\"integer\",\"description\":\"return events with seq greater than this; 0 or omitted = last n\"},"
                 + "\"filter\":{\"type\":\"string\",\"description\":\"case-insensitive substring of the event type name\"},"
                 + "\"watching\":{\"type\":\"boolean\",\"description\":\"include the hooked-event list, default true\"}},"
                 + "\"additionalProperties\":false}",
@@ -187,14 +191,14 @@ namespace HeartopiaMod
             {
                 this.mcpBackpackDirty = false;
                 System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
-                this.mcpBackpackSnapshot = this.ScanBackpackForAutoSellItems();
+                this.mcpBackpackSnapshot = this.Mod.ScanBackpackForAutoSellItems();
                 sw.Stop();
                 this.mcpBackpackScanMs = sw.Elapsed.TotalMilliseconds;
                 this.mcpBackpackSnapshotAt = now;
                 age = 0f;
             }
 
-            List<AutoSellBagItemEntry> items = this.mcpBackpackSnapshot;
+            List<HeartopiaComplete.AutoSellBagItemEntry> items = this.mcpBackpackSnapshot;
             McpJsonWriter w = new McpJsonWriter();
             w.BeginObject();
             w.Num("ageMs", age * 1000f);
@@ -213,7 +217,7 @@ namespace HeartopiaMod
             {
                 for (int i = 0; i < items.Count; i++)
                 {
-                    AutoSellBagItemEntry item = items[i];
+                    HeartopiaComplete.AutoSellBagItemEntry item = items[i];
                     if (item == null)
                     {
                         continue;
@@ -302,7 +306,7 @@ namespace HeartopiaMod
                 // PREVIOUS snapshot and the next one sees the new data.
                 try
                 {
-                    this.QuestAssistantOnDumpButtonClicked();
+                    this.Mod.QuestAssistantOnDumpButtonClicked();
                 }
                 catch (Exception ex)
                 {
@@ -312,19 +316,19 @@ namespace HeartopiaMod
 
             McpJsonWriter w = new McpJsonWriter();
             w.BeginObject();
-            w.Str("status", this.questAssistantLastStatus);
-            w.Bool("busy", this.questAssistantBusy);
+            w.Str("status", this.Mod.questAssistantLastStatus);
+            w.Bool("busy", this.Mod.questAssistantBusy);
             w.Bool("refreshRequested", refresh);
-            w.Num("available", this.questAssistantAvailable == null ? 0 : this.questAssistantAvailable.Count);
+            w.Num("available", this.Mod.questAssistantAvailable == null ? 0 : this.Mod.questAssistantAvailable.Count);
 
-            List<QuestSnapshot> quests = this.questAssistantSnapshot;
+            List<HeartopiaComplete.QuestSnapshot> quests = this.Mod.questAssistantSnapshot;
             w.Num("total", quests == null ? 0 : quests.Count);
             w.BeginArray("quests");
             if (quests != null)
             {
                 for (int i = 0; i < quests.Count; i++)
                 {
-                    QuestSnapshot q = quests[i];
+                    HeartopiaComplete.QuestSnapshot q = quests[i];
                     if (q == null)
                     {
                         continue;
@@ -367,7 +371,7 @@ namespace HeartopiaMod
                         w.BeginArray("conditions");
                         for (int c = 0; c < q.Conditions.Count; c++)
                         {
-                            ConditionSnapshot cond = q.Conditions[c];
+                            HeartopiaComplete.ConditionSnapshot cond = q.Conditions[c];
                             if (cond == null)
                             {
                                 continue;
@@ -410,6 +414,7 @@ namespace HeartopiaMod
 
             string filter = McpArgs.GetString(args, "filter");
             bool withWatching = McpArgs.GetBool(args, "watching", true);
+            long since = McpArgs.GetLong(args, "since", 0);
             float now = Time.unscaledTime;
 
             McpJsonWriter w = new McpJsonWriter();
@@ -419,6 +424,7 @@ namespace HeartopiaMod
             w.Num("ringSize", McpEventLogSize);
 
             // Oldest-to-newest walk over the live window, filtered, then trimmed to the last n.
+            // since > 0 keeps only records appended after that cursor.
             List<int> hits = new List<int>(Math.Min(n, McpEventLogSize));
             int start = mcpEventLogWrite - mcpEventLogCount;
             for (int i = 0; i < mcpEventLogCount; i++)
@@ -426,6 +432,11 @@ namespace HeartopiaMod
                 int idx = (start + i) & (McpEventLogSize - 1);
                 string name = McpEventLogName[idx];
                 if (name == null)
+                {
+                    continue;
+                }
+
+                if (since > 0 && McpEventLogSeq[idx] <= since)
                 {
                     continue;
                 }
@@ -439,13 +450,27 @@ namespace HeartopiaMod
                 hits.Add(idx);
             }
 
-            int first = hits.Count > n ? hits.Count - n : 0;
+            int first = 0;
+            int end = hits.Count;
+            long next = mcpEventLogHigh;
+            if (since > 0 && hits.Count > n)
+            {
+                end = n;
+                next = McpEventLogSeq[hits[n - 1]];
+            }
+            else if (since <= 0 && hits.Count > n)
+            {
+                first = hits.Count - n;
+            }
+
             w.Num("matched", hits.Count);
+            w.Num("next", next);
             w.BeginArray("events");
-            for (int i = first; i < hits.Count; i++)
+            for (int i = first; i < end; i++)
             {
                 int idx = hits[i];
                 w.BeginArrayObject();
+                w.Num("seq", McpEventLogSeq[idx]);
                 w.Str("event", McpEventLogName[idx]);
                 w.Num("ageMs", (now - McpEventLogTime[idx]) * 1000f);
                 if (McpEventLogNetId[idx] != 0u)
@@ -467,9 +492,9 @@ namespace HeartopiaMod
                 w.BeginArray("watching");
                 try
                 {
-                    foreach (KeyValuePair<string, GameEventHookEntry> pair in this.gameEventHooksByName)
+                    foreach (KeyValuePair<string, HeartopiaComplete.GameEventHookEntry> pair in this.Mod.gameEventHooksByName)
                     {
-                        GameEventHookEntry entry = pair.Value;
+                        HeartopiaComplete.GameEventHookEntry entry = pair.Value;
                         if (entry == null)
                         {
                             continue;
@@ -494,7 +519,23 @@ namespace HeartopiaMod
             // Sandbox subscriptions are a different channel from the shipped features' hooks, and
             // reporting them together would hide which is which.
             w.BeginObject("sandbox");
-            McpEventBroker.WriteStatusJson(w);
+            List<string> sandboxEvents = new List<string>();
+            List<int> sandboxCounts = new List<int>();
+            List<bool> sandboxRegistered = new List<bool>();
+            McpEventBroker.CopyStatus(sandboxEvents, sandboxCounts, sandboxRegistered, out long sandboxDispatched);
+            w.Num("subscribedTypes", sandboxEvents.Count);
+            w.Num("dispatched", sandboxDispatched);
+            w.BeginArray("subscriptions");
+            for (int s = 0; s < sandboxEvents.Count; s++)
+            {
+                w.BeginArrayObject();
+                w.Str("event", sandboxEvents[s]);
+                w.Num("subscribers", sandboxCounts[s]);
+                w.Bool("engineRegistered", sandboxRegistered[s]);
+                w.EndObject();
+            }
+
+            w.EndArray();
             w.EndObject();
 
             w.EndObject();
@@ -502,4 +543,3 @@ namespace HeartopiaMod
         }
     }
 }
-#endif

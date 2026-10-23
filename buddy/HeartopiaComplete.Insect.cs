@@ -1250,7 +1250,7 @@ namespace HeartopiaMod
             return false;
         }
 
-        private bool ShouldTrackInsectObject(string lowerName)
+        internal bool ShouldTrackInsectObject(string lowerName)
         {
             // Must have p_insect_insect prefix AND (clone) suffix
             return lowerName.Contains("p_insect_insect") && lowerName.Contains("(clone)");

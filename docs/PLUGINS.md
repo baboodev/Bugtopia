@@ -137,23 +137,45 @@ load of the same id still works.
 
 ## Build
 
-Template: `plugins/HelloBugtopia`.
+Template: `plugins/HelloBugtopia`. One plugin is one csproj. Rebuild that project, not the mod:
 
 ```powershell
 dotnet build plugins/HelloBugtopia/HelloBugtopia.csproj -c Release
 ```
 
-Copy `bin/Release/net6.0/HelloBugtopia.dll` and the pdb into the plugins folder. Enter a world
-and turn **Enabled** on under Plugins. The log line is `[Plugin] loaded 'HelloBugtopia'`. The
+Copy only the dll. The pdb is optional: same file name, and it is what turns a stack trace into
+file and line numbers. Without it the plugin runs the same and the log still names the methods.
+
+```powershell
+Copy-Item plugins\HelloBugtopia\bin\Release\net6.0\HelloBugtopia.dll -Destination "$env:USERPROFILE\AppData\LocalLow\Bugtopia\Plugins" -Force
+```
+
+Enter a world and turn **Enabled** on under Plugins. The log line is `[Plugin] loaded 'HelloBugtopia'`. The
 Plugins tab shows the page. Restarting the game loads it again and increments `runs` in
 `state/HelloBugtopia.json`. Without `HelloBugtopia.enabled` it stays unloaded. A sibling
-`HelloBugtopia.disabled` skips it on the next start.
+`HelloBugtopia.disabled` skips it on the next start. A dll that is already loaded is replaced by
+**Plugins → Reload**, or by toggling Enabled off and on.
 
 `BugtopiaDll` and `InteropDir` on the csproj override the reference paths. `InteropDir` must be the
 loader interop folder that contains `UnityEngine.CoreModule.dll`.
 
+### Internal plugins
+
+`internal-plugins/` is gitignored. Projects there are not listed in `buddy.csproj` and are never
+compiled into `bugtopia.dll`. Each subdirectory is one local plugin. The same build and copy
+commands apply, with that plugin's csproj and assembly name:
+
+```powershell
+dotnet build internal-plugins/Disconnect/Disconnect.csproj -c Release
+Copy-Item internal-plugins\Disconnect\bin\Release\net6.0\Disconnect.dll -Destination "$env:USERPROFILE\AppData\LocalLow\Bugtopia\Plugins" -Force
+```
+
+`Disconnect` returns to the city-select screen by calling `GameWorld.EnterLevel(0, null)`, the same
+transition as the in-game settings exit. The button is on its Plugins page.
+
 ## Agent path
 
-`plugin.load` / `plugin.unload` / `plugin.call` load the same host from bytes. That protocol, the
-hot-reload loop, and `tools/SamplePlugin` are in [MCP_BRIDGE.md](./MCP_BRIDGE.md) §4b. The bridge
-is a BepInEx development build (`-p:Mcp=true`). The disk folder does not need it.
+`plugin.load` / `plugin.loadFile` / `plugin.unload` / `plugin.call` load the same host. `plugin.load`
+sends the assembly as base64. `plugin.loadFile` reads `%LocalLow%/Bugtopia/Plugins/<id>.dll` and a
+sibling pdb. That protocol is [MCP_BRIDGE.md](./MCP_BRIDGE.md) §4b. The bridge itself is the
+`BugtopiaMcp` plugin in that same folder (`buddy/build-mcp.bat`); a mod build does not contain it.

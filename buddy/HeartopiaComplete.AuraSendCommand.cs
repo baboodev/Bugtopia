@@ -31,7 +31,7 @@ namespace HeartopiaMod
     // the next is started — they touch server-authoritative paths, so a batch rewrite would be a
     // batch of untested sends. New work should start here rather than add an eighth copy.
     //
-    // This file is deliberately NOT gated on FEATURE_MCP (it was, while the MCP bridge was its only
+    // This file is deliberately always compiled (it was gated while the bridge was its only
     // caller). Its command-type resolver moved out of the gate with it —
     // `FindAuraMonoClassAnySpelling`, HeartopiaComplete.AuraClassResolve.cs.
     //

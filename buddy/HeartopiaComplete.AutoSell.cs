@@ -3338,7 +3338,7 @@ namespace HeartopiaMod
             return "Bag";
         }
 
-        private List<AutoSellBagItemEntry> ScanBackpackForAutoSellItems()
+        internal List<AutoSellBagItemEntry> ScanBackpackForAutoSellItems()
         {
             try
             {
@@ -3727,7 +3727,7 @@ namespace HeartopiaMod
             return false;
         }
 
-        private sealed class AutoSellBagItemEntry
+        internal sealed class AutoSellBagItemEntry
         {
             public string SpriteName = string.Empty;
             public string DisplayName = string.Empty;

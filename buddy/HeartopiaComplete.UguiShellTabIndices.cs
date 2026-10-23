@@ -37,19 +37,11 @@ namespace HeartopiaMod
         private const int UguiShellMusicTabIndex = 9;           // Music (internal id 10)
         private const int UguiShellSettingsTabIndex = 10;       // Settings (internal id 7)
 
-        // Agent (HeartopiaComplete.UguiAgentContent.cs) — the MCP bridge's own tab, visible only
-        // while the bridge is listening. APPENDED after Settings rather than inserted before it, so
-        // that unlike the Music insertion above, not one existing display position moves: this tab
-        // comes and goes with a marker file and a build flag, and an index that shifts with either
-        // would put every constant in this file at the mercy of how the binary was compiled.
-        // It also belongs at the bottom on merit — it is a developer surface, not a feature.
-        private const int UguiShellMcpTabIndex = 11;            // Agent (internal id 11)
-
-        // Plugins (HeartopiaComplete.PluginMenu.cs). Appended after Agent so no earlier display
+        // Plugins (HeartopiaComplete.PluginMenu.cs). Appended after Settings so no earlier display
         // position moves. The sidebar row is hidden while the plugins folder has no dll; opening
         // the menu rebuilds the shell when that changes. No shell sub-tabs: the page owns a bar
-        // it rebuilds (Installed, plus one tab per plugin page).
-        private const int UguiShellPluginsTabIndex = 12;        // Plugins (internal id 13)
+        // it rebuilds (Installed, plus one tab per plugin page). Internal id stays 13.
+        private const int UguiShellPluginsTabIndex = 11;        // Plugins (internal id 13)
 
         // Hobby is display position 4, immediately after New Features. Radar and everything
         // below it shifted +1. Ice Skating stays on New Features.

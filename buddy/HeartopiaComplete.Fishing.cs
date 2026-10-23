@@ -3750,7 +3750,7 @@ namespace HeartopiaMod
             return null;
         }
 
-        private bool ShouldTrackFishShadowObject(string lowerName)
+        internal bool ShouldTrackFishShadowObject(string lowerName)
         {
             if (string.IsNullOrEmpty(lowerName) || !lowerName.EndsWith("(clone)", StringComparison.Ordinal))
             {

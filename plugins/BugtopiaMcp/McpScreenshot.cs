@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -320,4 +319,3 @@ namespace HeartopiaMod
         }
     }
 }
-#endif

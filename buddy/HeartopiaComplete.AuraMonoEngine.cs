@@ -1,4 +1,4 @@
-﻿using HarmonyLib;
+using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -48,16 +48,16 @@ namespace HeartopiaMod
         private delegate IntPtr MonoImageLoadedDelegate([MarshalAs(UnmanagedType.LPStr)] string name);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void MonoAssemblyForeachDelegate(MonoAssemblyForeachCallbackDelegate callback, IntPtr userData);
+        internal delegate void MonoAssemblyForeachDelegate(MonoAssemblyForeachCallbackDelegate callback, IntPtr userData);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void MonoAssemblyForeachCallbackDelegate(IntPtr assembly, IntPtr userData);
+        internal delegate void MonoAssemblyForeachCallbackDelegate(IntPtr assembly, IntPtr userData);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate IntPtr MonoAssemblyGetImageDelegate(IntPtr assembly);
+        internal delegate IntPtr MonoAssemblyGetImageDelegate(IntPtr assembly);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate IntPtr MonoImageGetNameDelegate(IntPtr image);
+        internal delegate IntPtr MonoImageGetNameDelegate(IntPtr image);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr MonoClassFromNameDelegate(IntPtr image, [MarshalAs(UnmanagedType.LPStr)] string nameSpace, [MarshalAs(UnmanagedType.LPStr)] string className);
@@ -100,13 +100,13 @@ namespace HeartopiaMod
         private delegate IntPtr MonoStringToUtf8Delegate(IntPtr monoString);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void MonoFreeDelegate(IntPtr memory);
+        internal delegate void MonoFreeDelegate(IntPtr memory);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr MonoObjectGetClassDelegate(IntPtr obj);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate int MonoClassIsValueTypeDelegate(IntPtr klass);
+        internal delegate int MonoClassIsValueTypeDelegate(IntPtr klass);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr MonoClassGetTypeDelegate(IntPtr klass);
@@ -131,7 +131,7 @@ namespace HeartopiaMod
         private delegate IntPtr MonoTypeGetObjectDelegate(IntPtr domain, IntPtr type);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate IntPtr MonoClassGetParentDelegate(IntPtr klass);
+        internal delegate IntPtr MonoClassGetParentDelegate(IntPtr klass);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate uint MonoClassGetRankDelegate(IntPtr klass);
@@ -149,31 +149,31 @@ namespace HeartopiaMod
         private delegate IntPtr MonoClassGetElementClassDelegate(IntPtr klass);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate IntPtr MonoClassGetNameDelegate(IntPtr klass);
+        internal delegate IntPtr MonoClassGetNameDelegate(IntPtr klass);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate IntPtr MonoClassGetNamespaceDelegate(IntPtr klass);
+        internal delegate IntPtr MonoClassGetNamespaceDelegate(IntPtr klass);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate IntPtr MonoClassGetMethodsDelegate(IntPtr klass, ref IntPtr iter);
+        internal delegate IntPtr MonoClassGetMethodsDelegate(IntPtr klass, ref IntPtr iter);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate IntPtr MonoMethodGetNameDelegate(IntPtr method);
+        internal delegate IntPtr MonoMethodGetNameDelegate(IntPtr method);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr MonoMethodGetClassDelegate(IntPtr method);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate IntPtr MonoClassGetFieldsDelegate(IntPtr klass, ref IntPtr iter);
+        internal delegate IntPtr MonoClassGetFieldsDelegate(IntPtr klass, ref IntPtr iter);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate IntPtr MonoFieldGetNameDelegate(IntPtr field);
+        internal delegate IntPtr MonoFieldGetNameDelegate(IntPtr field);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate IntPtr MonoMethodSignatureDelegate(IntPtr method);
+        internal delegate IntPtr MonoMethodSignatureDelegate(IntPtr method);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate uint MonoSignatureGetParamCountDelegate(IntPtr signature);
+        internal delegate uint MonoSignatureGetParamCountDelegate(IntPtr signature);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate UIntPtr MonoArrayLengthDelegate(IntPtr array);
@@ -188,30 +188,30 @@ namespace HeartopiaMod
         private delegate int MonoArrayElementSizeDelegate(IntPtr arrayClass);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate uint MonoFieldGetOffsetDelegate(IntPtr field);
+        internal delegate uint MonoFieldGetOffsetDelegate(IntPtr field);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate uint MonoFieldGetFlagsDelegate(IntPtr field);
+        internal delegate uint MonoFieldGetFlagsDelegate(IntPtr field);
 
         // Read-only metadata table access, for mono.search.
         //
         // Deliberately NOT mono_class_get: that materializes a MonoClass, so sweeping every type in
         // every loaded image would initialise thousands of classes nobody asked for. Decoding the
         // TypeDef table and reading the string heap yields the same names while loading nothing.
-        private delegate IntPtr MonoImageGetTableInfoDelegate(IntPtr image, int tableId);
+        internal delegate IntPtr MonoImageGetTableInfoDelegate(IntPtr image, int tableId);
 
-        private delegate int MonoTableInfoGetRowsDelegate(IntPtr table);
+        internal delegate int MonoTableInfoGetRowsDelegate(IntPtr table);
 
-        private delegate uint MonoMetadataDecodeRowColDelegate(IntPtr table, int idx, uint col);
+        internal delegate uint MonoMetadataDecodeRowColDelegate(IntPtr table, int idx, uint col);
 
-        private delegate IntPtr MonoMetadataStringHeapDelegate(IntPtr image, uint index);
+        internal delegate IntPtr MonoMetadataStringHeapDelegate(IntPtr image, uint index);
 
         // Field TYPE reporting, for mono.describe. `mono_type_get_name` returns a g_malloc'd string
         // that the caller must release with mono_free — unlike mono_field_get_name, which points
         // into metadata and must NOT be freed.
-        private delegate IntPtr MonoFieldGetTypeDelegate(IntPtr field);
+        internal delegate IntPtr MonoFieldGetTypeDelegate(IntPtr field);
 
-        private delegate IntPtr MonoTypeGetNameDelegate(IntPtr type);
+        internal delegate IntPtr MonoTypeGetNameDelegate(IntPtr type);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr MonoFieldGetParentDelegate(IntPtr field);
@@ -243,11 +243,11 @@ namespace HeartopiaMod
 
         private static MonoImageLoadedDelegate auraMonoImageLoaded;
 
-        private static MonoAssemblyForeachDelegate auraMonoAssemblyForeach;
+        internal static MonoAssemblyForeachDelegate auraMonoAssemblyForeach;
 
-        private static MonoAssemblyGetImageDelegate auraMonoAssemblyGetImage;
+        internal static MonoAssemblyGetImageDelegate auraMonoAssemblyGetImage;
 
-        private static MonoImageGetNameDelegate auraMonoImageGetName;
+        internal static MonoImageGetNameDelegate auraMonoImageGetName;
 
         private static MonoClassFromNameDelegate auraMonoClassFromName;
 
@@ -273,11 +273,11 @@ namespace HeartopiaMod
 
         private static MonoStringToUtf8Delegate auraMonoStringToUtf8;
 
-        private static MonoFreeDelegate auraMonoFree;
+        internal static MonoFreeDelegate auraMonoFree;
 
         private static MonoObjectGetClassDelegate auraMonoObjectGetClass;
 
-        private static MonoClassIsValueTypeDelegate auraMonoClassIsValueType;
+        internal static MonoClassIsValueTypeDelegate auraMonoClassIsValueType;
 
         private static MonoClassGetTypeDelegate auraMonoClassGetType;
 
@@ -289,7 +289,7 @@ namespace HeartopiaMod
 
         private static MonoTypeGetObjectDelegate auraMonoTypeGetObject;
 
-        private static MonoClassGetParentDelegate auraMonoClassGetParent;
+        internal static MonoClassGetParentDelegate auraMonoClassGetParent;
 
         private static MonoClassGetRankDelegate auraMonoClassGetRank;
 
@@ -301,23 +301,23 @@ namespace HeartopiaMod
 
         private static MonoClassGetElementClassDelegate auraMonoClassGetElementClass;
 
-        private static MonoClassGetNameDelegate auraMonoClassGetName;
+        internal static MonoClassGetNameDelegate auraMonoClassGetName;
 
-        private static MonoClassGetNamespaceDelegate auraMonoClassGetNamespace;
+        internal static MonoClassGetNamespaceDelegate auraMonoClassGetNamespace;
 
-        private static MonoClassGetMethodsDelegate auraMonoClassGetMethods;
+        internal static MonoClassGetMethodsDelegate auraMonoClassGetMethods;
 
-        private static MonoMethodGetNameDelegate auraMonoMethodGetName;
+        internal static MonoMethodGetNameDelegate auraMonoMethodGetName;
 
         private static MonoMethodGetClassDelegate auraMonoMethodGetClass;
 
-        private static MonoClassGetFieldsDelegate auraMonoClassGetFields;
+        internal static MonoClassGetFieldsDelegate auraMonoClassGetFields;
 
-        private static MonoFieldGetNameDelegate auraMonoFieldGetName;
+        internal static MonoFieldGetNameDelegate auraMonoFieldGetName;
 
-        private static MonoMethodSignatureDelegate auraMonoMethodSignature;
+        internal static MonoMethodSignatureDelegate auraMonoMethodSignature;
 
-        private static MonoSignatureGetParamCountDelegate auraMonoSignatureGetParamCount;
+        internal static MonoSignatureGetParamCountDelegate auraMonoSignatureGetParamCount;
 
         private static MonoArrayLengthDelegate auraMonoArrayLength;
 
@@ -327,19 +327,19 @@ namespace HeartopiaMod
 
         private static MonoArrayElementSizeDelegate auraMonoArrayElementSize;
 
-        private static MonoFieldGetOffsetDelegate auraMonoFieldGetOffset;
+        internal static MonoFieldGetOffsetDelegate auraMonoFieldGetOffset;
 
         // Both required by TryGetAuraMonoStaticObjectField to make a raw static read safe: the flags
         // prove the field IS static, the parent gives the class whose vtable actually owns its
         // storage (mono_class_get_field_from_name walks the hierarchy, so the field can belong to a
         // base class). Missing exports => that read refuses instead of guessing.
-        private static MonoFieldGetFlagsDelegate auraMonoFieldGetFlags;
-        private static MonoFieldGetTypeDelegate auraMonoFieldGetType;
-        private static MonoTypeGetNameDelegate auraMonoTypeGetName;
-        private static MonoImageGetTableInfoDelegate auraMonoImageGetTableInfo;
-        private static MonoTableInfoGetRowsDelegate auraMonoTableInfoGetRows;
-        private static MonoMetadataDecodeRowColDelegate auraMonoMetadataDecodeRowCol;
-        private static MonoMetadataStringHeapDelegate auraMonoMetadataStringHeap;
+        internal static MonoFieldGetFlagsDelegate auraMonoFieldGetFlags;
+        internal static MonoFieldGetTypeDelegate auraMonoFieldGetType;
+        internal static MonoTypeGetNameDelegate auraMonoTypeGetName;
+        internal static MonoImageGetTableInfoDelegate auraMonoImageGetTableInfo;
+        internal static MonoTableInfoGetRowsDelegate auraMonoTableInfoGetRows;
+        internal static MonoMetadataDecodeRowColDelegate auraMonoMetadataDecodeRowCol;
+        internal static MonoMetadataStringHeapDelegate auraMonoMetadataStringHeap;
 
         private static MonoFieldGetParentDelegate auraMonoFieldGetParent;
 

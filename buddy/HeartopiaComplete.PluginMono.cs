@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 
 namespace HeartopiaMod
 {
-    // Plugin-host and MCP-op face over the AuraMono helpers. Lives outside FEATURE_MCP so a
+    // Plugin-host and bridge-op face over the AuraMono helpers. Always compiled so a
     // shipping build can hand IHostApi.Mono to a dll in the plugins folder. The MCP ops in
     // McpOps.Mono.cs call the same methods.
     public partial class HeartopiaComplete

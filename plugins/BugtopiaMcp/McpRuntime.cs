@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -16,57 +15,35 @@ namespace HeartopiaMod
     // touching — the bridge publishes the registry through `rpc.describe`, so the external MCP
     // server picks a new op up on its next connect without a rebuild.
     // ============================================================================================
-    public partial class HeartopiaComplete
+    internal sealed partial class McpRuntime
     {
+        internal HeartopiaComplete Mod;
+
         private FeatureBreakerState mcpBreaker;
 
-        // Called from OnInitializeMelon, right after the beta gate. Order matters: the marker is
-        // read, the registry is filled, and only then does the listener start — socket threads must
-        // never observe a half-built op registry.
-        //
-        // These three are `partial void` implementations of hooks declared in HeartopiaComplete.cs.
-        // With -p:Mcp=false this file is not compiled, the implementations do not exist, and the
-        // C# compiler removes the CALL SITES too — the lifecycle glue needs no #if of its own.
-        partial void InitializeMcpBridge()
+        internal McpRuntime(HeartopiaComplete mod)
+        {
+            this.Mod = mod;
+        }
+
+        internal bool Start()
         {
             try
             {
-                McpBridge.CheckMarker();
-                if (!McpBridge.MarkerPresent)
-                {
-                    // Silent by design. No marker means the feature does not exist this session,
-                    // and a log line every launch would advertise a surface that is not there.
-                    return;
-                }
-
-                // Ring FIRST, then the first log line — otherwise the bridge's own startup message
-                // is the one thing `log.tail` cannot show. Everything logged before this point
-                // (loader banner, localization, beta gate) stays out of the ring by design; the
-                // loader's own log file is the record for that.
-                ModLogger.EnableRing();
-                ModLogger.Msg("[Mcp] marker found — starting the agent bridge. "
-                              + "Writes and unsafe ops stay OFF until switched on for the session.");
-
-                // Before anything can arm a new record: read what the PREVIOUS session was doing
-                // when it died, quarantine whatever that was, and clear the file.
+                ModLogger.Msg("[Mcp] starting the agent bridge. "
+                    + "Writes and unsafe ops stay OFF until switched on for the session.");
                 McpForensics.ReadPreviousSession();
-                // Distinguishes "quit" from "killed". ProcessExit was the obvious choice and is
-                // measurably useless here (it never runs on this game's shutdown), so the real
-                // signal is Unity's Application.quitting — see McpQuitSignal.cs. Installed AFTER the
-                // previous session is read, because that read is what decides using the OLD
-                // session's flag, not this one's.
-                McpQuitSignal.Install();
                 this.RegisterMcpOps();
-                McpBridge.Start();
+                return McpBridge.Start();
             }
             catch (Exception ex)
             {
-                // Never let the bridge take the mod's startup with it.
                 ModLogger.Warning("[Mcp] init failed (bridge disabled): " + ex);
+                return false;
             }
         }
 
-        partial void ShutdownMcpBridge()
+        internal void Stop()
         {
             try
             {
@@ -78,9 +55,7 @@ namespace HeartopiaMod
             }
         }
 
-        // One call per frame from OnUpdate. With no marker this is a single bool test; with the
-        // bridge idle it is one more test on an empty queue.
-        partial void ProcessMcpOnUpdate()
+        internal void Tick()
         {
             if (!McpBridge.Listening)
             {
@@ -101,23 +76,6 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 this.mcpBreaker.Failure("Mcp", ex, now);
-            }
-        }
-
-        partial void ProcessMcpOnLateUpdate()
-        {
-            if (!McpBridge.Listening)
-            {
-                return;
-            }
-
-            try
-            {
-                McpScreenshot.OnLateUpdateFallback();
-            }
-            catch (Exception ex)
-            {
-                ModEntryGuard.Report("Mcp.LateUpdate", ex);
             }
         }
 
@@ -143,10 +101,11 @@ namespace HeartopiaMod
                 "log.tail",
                 McpOpFlags.Read,
                 McpOpCost.Cheap,
-                "Last N lines the mod logged this session (ring buffer, newest last). The ring starts "
-                + "when the bridge does, so earlier startup lines live only in the loader's log file.",
+                "Last N lines the mod logged this session (ring buffer, newest last). Pass since "
+                + "(the previous response's next) to read only lines appended after that cursor.",
                 "{\"type\":\"object\",\"properties\":{"
                 + "\"n\":{\"type\":\"integer\",\"description\":\"how many lines (1-500, default 100)\"},"
+                + "\"since\":{\"type\":\"integer\",\"description\":\"return lines with seq greater than this; 0 or omitted = last n\"},"
                 + "\"filter\":{\"type\":\"string\",\"description\":\"case-insensitive substring\"}},"
                 + "\"additionalProperties\":false}",
                 this.HandleMcpLogTail);
@@ -180,7 +139,7 @@ namespace HeartopiaMod
             // The bag-change hook that invalidates backpack.list's cache. On the GATE, never from
             // OnUpdate — AGENTS.md §1: resolving/inflating game code before a world exists fails at
             // best and AVs at worst.
-            this.RegisterWorldReadyCallback("McpDataEventHooks", this.EnsureMcpDataEventHooks);
+            this.Mod.RegisterWorldReadyCallback("McpDataEventHooks", this.EnsureMcpDataEventHooks);
         }
 
         // ────────────────────────────────────────────────────────────────────────────────────────
@@ -200,14 +159,14 @@ namespace HeartopiaMod
             // injected-MonoBehaviour fallback means ClassInjector already ran) — worth one field.
             w.Str("pump", PlayerLoopProbe.DriveMod ? "playerloop" : "monobehaviour");
             w.Str("pumpStatus", PlayerLoopProbe.Status);
-            w.Bool("beta", BetaEnabled);
+            w.Bool("beta", HeartopiaComplete.BetaEnabled);
             w.EndObject();
 
             w.BeginObject("world");
-            w.Bool("ready", this.IsWorldReady);
-            w.Bool("loadingScreen", this.IsWorldLoadingScreenVisible);
-            w.Bool("dataQueryable", this.IsGameDataQueryable);
-            w.Num("epoch", AuraMonoWorldEpoch);
+            w.Bool("ready", this.Mod.IsWorldReady);
+            w.Bool("loadingScreen", this.Mod.IsWorldLoadingScreenVisible);
+            w.Bool("dataQueryable", this.Mod.IsGameDataQueryable);
+            w.Num("epoch", HeartopiaComplete.AuraMonoWorldEpoch);
             w.EndObject();
 
             w.BeginObject("runtime");
@@ -218,8 +177,8 @@ namespace HeartopiaMod
             // FPS Watchdog (FpsWatchdogFeature.cs). The raw `fps` above is one frame and says
             // nothing about stability; these are the smoothed reading, the baseline it is judged
             // against, and how much of the last frame the mod itself cost.
-            w.Str("fpsWatchdog", this.BuildFpsWatchdogSummaryText());
-            w.Num("modFrameMs", this.fpsWatchdogModMs);
+            w.Str("fpsWatchdog", this.Mod.BuildFpsWatchdogSummaryText());
+            w.Num("modFrameMs", this.Mod.fpsWatchdogModMs);
             w.EndObject();
 
             w.BeginObject("mcp");
@@ -237,12 +196,12 @@ namespace HeartopiaMod
             w.BeginArray("features");
             try
             {
-                List<LiveFeatureStatusEntry> entries = this.CollectLiveFeatureStatusEntries();
+                List<HeartopiaComplete.LiveFeatureStatusEntry> entries = this.Mod.CollectLiveFeatureStatusEntries();
                 if (entries != null)
                 {
                     for (int i = 0; i < entries.Count; i++)
                     {
-                        LiveFeatureStatusEntry entry = entries[i];
+                        HeartopiaComplete.LiveFeatureStatusEntry entry = entries[i];
                         if (entry == null)
                         {
                             continue;
@@ -256,7 +215,7 @@ namespace HeartopiaMod
                             w.BeginArray("details");
                             for (int d = 0; d < entry.Details.Count; d++)
                             {
-                                LiveFeatureStatusDetail detail = entry.Details[d];
+                                HeartopiaComplete.LiveFeatureStatusDetail detail = entry.Details[d];
                                 if (detail == null)
                                 {
                                     continue;
@@ -297,7 +256,7 @@ namespace HeartopiaMod
             {
                 // Everything derives from where THIS assembly actually loaded from, so it stays
                 // correct for a BepInEx installed outside the game folder (which is this setup).
-                modPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                modPath = typeof(HeartopiaComplete).Assembly.Location;
                 if (!string.IsNullOrEmpty(modPath))
                 {
                     pluginsDir = System.IO.Path.GetDirectoryName(modPath);
@@ -350,16 +309,18 @@ namespace HeartopiaMod
             }
 
             string filter = McpArgs.GetString(args, "filter");
-            string[] lines = ModLogger.RingSnapshot(n, filter);
+            long since = McpArgs.GetLong(args, "since", 0);
+            ModLogger.RingEntry[] lines = ModLogger.RingSnapshot(n, filter, since, out long next);
 
             McpJsonWriter w = new McpJsonWriter();
             w.BeginObject();
             w.Num("count", lines.Length);
+            w.Num("next", next);
             w.Bool("ringEnabled", ModLogger.RingEnabled);
             w.BeginArray("lines");
             for (int i = 0; i < lines.Length; i++)
             {
-                w.ArrayStr(lines[i]);
+                w.ArrayStr(lines[i].Text);
             }
 
             w.EndArray();
@@ -368,4 +329,3 @@ namespace HeartopiaMod
         }
     }
 }
-#endif

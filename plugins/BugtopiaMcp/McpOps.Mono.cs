@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -25,7 +24,7 @@ namespace HeartopiaMod
     // `mono_type_get_name` returns a g_malloc'd string that MUST be freed with mono_free. Getting
     // that backwards is a leak in one direction and a heap corruption in the other.
     // ============================================================================================
-    public partial class HeartopiaComplete
+    internal sealed partial class McpRuntime
     {
         private const int McpMonoMemberCap = 400;
 
@@ -92,10 +91,10 @@ namespace HeartopiaMod
                 throw new McpOpException("bad_args", "'query' is required");
             }
 
-            if (auraMonoImageGetTableInfo == null || auraMonoTableInfoGetRows == null
-                || auraMonoMetadataDecodeRowCol == null || auraMonoMetadataStringHeap == null
-                || auraMonoAssemblyForeach == null || auraMonoAssemblyGetImage == null
-                || auraMonoImageGetName == null)
+            if (HeartopiaComplete.auraMonoImageGetTableInfo == null || HeartopiaComplete.auraMonoTableInfoGetRows == null
+                || HeartopiaComplete.auraMonoMetadataDecodeRowCol == null || HeartopiaComplete.auraMonoMetadataStringHeap == null
+                || HeartopiaComplete.auraMonoAssemblyForeach == null || HeartopiaComplete.auraMonoAssemblyGetImage == null
+                || HeartopiaComplete.auraMonoImageGetName == null)
             {
                 throw new McpOpException("internal",
                     "metadata table exports unavailable on this build — search is not possible");
@@ -111,13 +110,13 @@ namespace HeartopiaMod
             // Same image sweep FindAuraMonoClassAnySpelling uses (HeartopiaComplete.AuraClassResolve.cs);
             // both are synchronous and main-thread, so sharing the buffer and the kept-alive callback
             // is safe.
-            AuraMonoSweepImages.Clear();
-            if (auraMonoSweepCallbackKeepAlive == null)
+            HeartopiaComplete.AuraMonoSweepImages.Clear();
+            if (HeartopiaComplete.auraMonoSweepCallbackKeepAlive == null)
             {
-                auraMonoSweepCallbackKeepAlive = AuraMonoSweepCollect;
+                HeartopiaComplete.auraMonoSweepCallbackKeepAlive = HeartopiaComplete.AuraMonoSweepCollect;
             }
 
-            auraMonoAssemblyForeach(auraMonoSweepCallbackKeepAlive, IntPtr.Zero);
+            HeartopiaComplete.auraMonoAssemblyForeach(HeartopiaComplete.auraMonoSweepCallbackKeepAlive, IntPtr.Zero);
 
             McpJsonWriter w = new McpJsonWriter();
             w.BeginObject();
@@ -128,9 +127,9 @@ namespace HeartopiaMod
             int matched = 0;
             int emitted = 0;
 
-            for (int i = 0; i < AuraMonoSweepImages.Count; i++)
+            for (int i = 0; i < HeartopiaComplete.AuraMonoSweepImages.Count; i++)
             {
-                IntPtr image = AuraMonoSweepImages[i];
+                IntPtr image = HeartopiaComplete.AuraMonoSweepImages[i];
                 if (image == IntPtr.Zero)
                 {
                     continue;
@@ -139,7 +138,7 @@ namespace HeartopiaMod
                 string imageName;
                 try
                 {
-                    imageName = Marshal.PtrToStringAnsi(auraMonoImageGetName(image)) ?? string.Empty;
+                    imageName = Marshal.PtrToStringAnsi(HeartopiaComplete.auraMonoImageGetName(image)) ?? string.Empty;
                 }
                 catch
                 {
@@ -156,13 +155,13 @@ namespace HeartopiaMod
                 int rows;
                 try
                 {
-                    table = auraMonoImageGetTableInfo(image, MonoTableTypeDef);
+                    table = HeartopiaComplete.auraMonoImageGetTableInfo(image, MonoTableTypeDef);
                     if (table == IntPtr.Zero)
                     {
                         continue;
                     }
 
-                    rows = auraMonoTableInfoGetRows(table);
+                    rows = HeartopiaComplete.auraMonoTableInfoGetRows(table);
                 }
                 catch
                 {
@@ -179,10 +178,10 @@ namespace HeartopiaMod
                     {
                         // Names only — no MonoClass is created, so nothing is loaded or initialised
                         // by searching.
-                        uint nameIdx = auraMonoMetadataDecodeRowCol(table, row, MonoTypeDefColName);
-                        uint nsIdx = auraMonoMetadataDecodeRowCol(table, row, MonoTypeDefColNamespace);
-                        typeName = Marshal.PtrToStringAnsi(auraMonoMetadataStringHeap(image, nameIdx));
-                        typeNamespace = Marshal.PtrToStringAnsi(auraMonoMetadataStringHeap(image, nsIdx));
+                        uint nameIdx = HeartopiaComplete.auraMonoMetadataDecodeRowCol(table, row, MonoTypeDefColName);
+                        uint nsIdx = HeartopiaComplete.auraMonoMetadataDecodeRowCol(table, row, MonoTypeDefColNamespace);
+                        typeName = Marshal.PtrToStringAnsi(HeartopiaComplete.auraMonoMetadataStringHeap(image, nameIdx));
+                        typeNamespace = Marshal.PtrToStringAnsi(HeartopiaComplete.auraMonoMetadataStringHeap(image, nsIdx));
                     }
                     catch
                     {
@@ -234,7 +233,7 @@ namespace HeartopiaMod
         }
 
         // Name candidates + the exhaustive image sweep moved to HeartopiaComplete.AuraClassResolve.cs
-        // (BuildAuraMonoNameCandidates / TryResolveAuraMonoClassAnySpelling / FindAuraMonoClassAnySpelling)
+        // (HeartopiaComplete.BuildAuraMonoNameCandidates / TryResolveAuraMonoClassAnySpelling / FindAuraMonoClassAnySpelling)
         // when TryAuraSendCommand started resolving command types through them: that helper ships in
         // normal builds, so its resolver cannot live behind this gate.
 
@@ -246,7 +245,7 @@ namespace HeartopiaMod
                 throw new McpOpException("bad_args", "'name' is required");
             }
 
-            bool found = this.TryResolveAuraMonoClassAnySpelling(name, out IntPtr klass, out string resolved);
+            bool found = this.Mod.TryResolveAuraMonoClassAnySpelling(name, out IntPtr klass, out string resolved);
 
             McpJsonWriter w = new McpJsonWriter();
             w.BeginObject();
@@ -261,7 +260,7 @@ namespace HeartopiaMod
             else
             {
                 w.BeginArray("tried");
-                List<string> candidates = BuildAuraMonoNameCandidates(name);
+                List<string> candidates = HeartopiaComplete.BuildAuraMonoNameCandidates(name);
                 for (int i = 0; i < candidates.Count; i++)
                 {
                     w.ArrayStr(candidates[i]);
@@ -278,25 +277,25 @@ namespace HeartopiaMod
 
         private void WriteMcpMonoClassIdentity(McpJsonWriter w, IntPtr klass)
         {
-            string ns = auraMonoClassGetNamespace != null
-                ? Marshal.PtrToStringAnsi(auraMonoClassGetNamespace(klass)) : null;
-            string cn = auraMonoClassGetName != null
-                ? Marshal.PtrToStringAnsi(auraMonoClassGetName(klass)) : null;
+            string ns = HeartopiaComplete.auraMonoClassGetNamespace != null
+                ? Marshal.PtrToStringAnsi(HeartopiaComplete.auraMonoClassGetNamespace(klass)) : null;
+            string cn = HeartopiaComplete.auraMonoClassGetName != null
+                ? Marshal.PtrToStringAnsi(HeartopiaComplete.auraMonoClassGetName(klass)) : null;
             w.Str("namespace", ns);
             w.Str("class", cn);
-            w.Bool("valueType", auraMonoClassIsValueType != null && auraMonoClassIsValueType(klass) != 0);
+            w.Bool("valueType", HeartopiaComplete.auraMonoClassIsValueType != null && HeartopiaComplete.auraMonoClassIsValueType(klass) != 0);
 
             w.BeginArray("baseChain");
-            IntPtr parent = auraMonoClassGetParent != null ? auraMonoClassGetParent(klass) : IntPtr.Zero;
+            IntPtr parent = HeartopiaComplete.auraMonoClassGetParent != null ? HeartopiaComplete.auraMonoClassGetParent(klass) : IntPtr.Zero;
             int guard = 0;
             while (parent != IntPtr.Zero && guard++ < 16)
             {
-                string pns = auraMonoClassGetNamespace != null
-                    ? Marshal.PtrToStringAnsi(auraMonoClassGetNamespace(parent)) : null;
-                string pcn = auraMonoClassGetName != null
-                    ? Marshal.PtrToStringAnsi(auraMonoClassGetName(parent)) : null;
+                string pns = HeartopiaComplete.auraMonoClassGetNamespace != null
+                    ? Marshal.PtrToStringAnsi(HeartopiaComplete.auraMonoClassGetNamespace(parent)) : null;
+                string pcn = HeartopiaComplete.auraMonoClassGetName != null
+                    ? Marshal.PtrToStringAnsi(HeartopiaComplete.auraMonoClassGetName(parent)) : null;
                 w.ArrayStr(string.IsNullOrEmpty(pns) ? pcn : pns + "." + pcn);
-                parent = auraMonoClassGetParent(parent);
+                parent = HeartopiaComplete.auraMonoClassGetParent(parent);
             }
 
             w.EndArray();
@@ -310,7 +309,7 @@ namespace HeartopiaMod
                 throw new McpOpException("bad_args", "'name' is required");
             }
 
-            if (!this.TryResolveAuraMonoClassAnySpelling(name, out IntPtr klass, out string resolved))
+            if (!this.Mod.TryResolveAuraMonoClassAnySpelling(name, out IntPtr klass, out string resolved))
             {
                 throw new McpOpException("bad_args",
                     "no type resolved for '" + name + "' — run mono.find to see the spellings tried");
@@ -349,7 +348,7 @@ namespace HeartopiaMod
                         break;
                     }
 
-                    cursor = auraMonoClassGetParent != null ? auraMonoClassGetParent(cursor) : IntPtr.Zero;
+                    cursor = HeartopiaComplete.auraMonoClassGetParent != null ? HeartopiaComplete.auraMonoClassGetParent(cursor) : IntPtr.Zero;
                 }
 
                 w.EndArray();
@@ -373,7 +372,7 @@ namespace HeartopiaMod
                         break;
                     }
 
-                    cursor = auraMonoClassGetParent != null ? auraMonoClassGetParent(cursor) : IntPtr.Zero;
+                    cursor = HeartopiaComplete.auraMonoClassGetParent != null ? HeartopiaComplete.auraMonoClassGetParent(cursor) : IntPtr.Zero;
                 }
 
                 w.EndArray();
@@ -398,7 +397,7 @@ namespace HeartopiaMod
         // stopping.
         private bool WriteMcpMonoFields(McpJsonWriter w, IntPtr klass, string filter, bool fromBase, ref int count)
         {
-            if (auraMonoClassGetFields == null || auraMonoFieldGetName == null)
+            if (HeartopiaComplete.auraMonoClassGetFields == null || HeartopiaComplete.auraMonoFieldGetName == null)
             {
                 return true;
             }
@@ -406,13 +405,13 @@ namespace HeartopiaMod
             IntPtr iter = IntPtr.Zero;
             while (true)
             {
-                IntPtr field = auraMonoClassGetFields(klass, ref iter);
+                IntPtr field = HeartopiaComplete.auraMonoClassGetFields(klass, ref iter);
                 if (field == IntPtr.Zero)
                 {
                     return true;
                 }
 
-                string fieldName = Marshal.PtrToStringAnsi(auraMonoFieldGetName(field));
+                string fieldName = Marshal.PtrToStringAnsi(HeartopiaComplete.auraMonoFieldGetName(field));
                 if (string.IsNullOrEmpty(fieldName))
                 {
                     continue;
@@ -434,16 +433,16 @@ namespace HeartopiaMod
                 w.Str("name", fieldName);
                 w.Str("type", McpMonoFieldTypeName(field));
 
-                uint flags = auraMonoFieldGetFlags != null ? auraMonoFieldGetFlags(field) : 0u;
+                uint flags = HeartopiaComplete.auraMonoFieldGetFlags != null ? HeartopiaComplete.auraMonoFieldGetFlags(field) : 0u;
                 // FIELD_ATTRIBUTE_STATIC = 0x10, FIELD_ATTRIBUTE_FIELD_ACCESS_MASK = 0x07.
                 w.Bool("static", (flags & 0x10u) != 0u);
                 w.Num("access", flags & 0x07u);
-                if (auraMonoFieldGetOffset != null)
+                if (HeartopiaComplete.auraMonoFieldGetOffset != null)
                 {
                     // The raw mono offset. Reading an instance field through a MonoObject* means
                     // subtracting 2*IntPtr.Size for the object header — see the struct-offset note in
                     // project memory before using this for pointer arithmetic.
-                    w.Num("offset", auraMonoFieldGetOffset(field));
+                    w.Num("offset", HeartopiaComplete.auraMonoFieldGetOffset(field));
                 }
 
                 if (fromBase)
@@ -457,7 +456,7 @@ namespace HeartopiaMod
 
         private bool WriteMcpMonoMethods(McpJsonWriter w, IntPtr klass, string filter, bool fromBase, ref int count)
         {
-            if (auraMonoClassGetMethods == null || auraMonoMethodGetName == null)
+            if (HeartopiaComplete.auraMonoClassGetMethods == null || HeartopiaComplete.auraMonoMethodGetName == null)
             {
                 return true;
             }
@@ -465,13 +464,13 @@ namespace HeartopiaMod
             IntPtr iter = IntPtr.Zero;
             while (true)
             {
-                IntPtr method = auraMonoClassGetMethods(klass, ref iter);
+                IntPtr method = HeartopiaComplete.auraMonoClassGetMethods(klass, ref iter);
                 if (method == IntPtr.Zero)
                 {
                     return true;
                 }
 
-                string methodName = Marshal.PtrToStringAnsi(auraMonoMethodGetName(method));
+                string methodName = Marshal.PtrToStringAnsi(HeartopiaComplete.auraMonoMethodGetName(method));
                 if (string.IsNullOrEmpty(methodName))
                 {
                     continue;
@@ -495,12 +494,12 @@ namespace HeartopiaMod
                 // Arity is what callers actually need: every AuraMono invoke resolves a method by
                 // name AND parameter count, and picking the wrong overload is a documented way to AV
                 // the process (AGENTS.md §12).
-                if (auraMonoMethodSignature != null && auraMonoSignatureGetParamCount != null)
+                if (HeartopiaComplete.auraMonoMethodSignature != null && HeartopiaComplete.auraMonoSignatureGetParamCount != null)
                 {
-                    IntPtr sig = auraMonoMethodSignature(method);
+                    IntPtr sig = HeartopiaComplete.auraMonoMethodSignature(method);
                     if (sig != IntPtr.Zero)
                     {
-                        w.Num("params", auraMonoSignatureGetParamCount(sig));
+                        w.Num("params", HeartopiaComplete.auraMonoSignatureGetParamCount(sig));
                     }
                 }
 
@@ -515,18 +514,18 @@ namespace HeartopiaMod
 
         private static string McpMonoFieldTypeName(IntPtr field)
         {
-            if (auraMonoFieldGetType == null || auraMonoTypeGetName == null)
+            if (HeartopiaComplete.auraMonoFieldGetType == null || HeartopiaComplete.auraMonoTypeGetName == null)
             {
                 return null;
             }
 
-            IntPtr type = auraMonoFieldGetType(field);
+            IntPtr type = HeartopiaComplete.auraMonoFieldGetType(field);
             if (type == IntPtr.Zero)
             {
                 return null;
             }
 
-            IntPtr namePtr = auraMonoTypeGetName(type);
+            IntPtr namePtr = HeartopiaComplete.auraMonoTypeGetName(type);
             if (namePtr == IntPtr.Zero)
             {
                 return null;
@@ -540,10 +539,9 @@ namespace HeartopiaMod
             {
                 // mono_type_get_name g_malloc's its result — unlike the metadata-owned name pointers
                 // above, this one leaks unless it is handed back.
-                auraMonoFree?.Invoke(namePtr);
+                HeartopiaComplete.auraMonoFree?.Invoke(namePtr);
             }
         }
 
     }
 }
-#endif

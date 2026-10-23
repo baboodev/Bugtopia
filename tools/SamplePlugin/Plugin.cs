@@ -8,7 +8,7 @@ namespace SamplePlugin
 {
     // Reference sandbox plugin. Exercises every part of the contract that matters for hot reload:
     // a Tick, a host-managed coroutine (the classic thing that pins a load context when it is not
-    // revoked), a page of its own controls in the menu's Agent tab, and a Call entry point for
+    // revoked), a page of its own controls on the Plugins tab, and a Call entry point for
     // `plugin.call`.
     //
     // Edit, rebuild, `plugin.load` again with the same id — the host unloads the previous version

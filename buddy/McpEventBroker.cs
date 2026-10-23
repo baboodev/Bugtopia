@@ -145,23 +145,24 @@ namespace HeartopiaMod
             return removed;
         }
 
-#if FEATURE_MCP
-        internal static void WriteStatusJson(McpJsonWriter w)
+        internal static void CopyStatus(List<string> eventNames, List<int> subscriberCounts, List<bool> engineRegistered,
+            out long dispatchedCount)
         {
-            w.Num("subscribedTypes", Subscribers.Count);
-            w.Num("dispatched", dispatched);
-            w.BeginArray("subscriptions");
-            foreach (KeyValuePair<string, List<Subscription>> pair in Subscribers)
+            dispatchedCount = dispatched;
+            if (eventNames == null)
             {
-                w.BeginArrayObject();
-                w.Str("event", pair.Key);
-                w.Num("subscribers", pair.Value.Count);
-                w.Bool("engineRegistered", EngineRegistered.Contains(pair.Key));
-                w.EndObject();
+                return;
             }
 
-            w.EndArray();
+            eventNames.Clear();
+            subscriberCounts.Clear();
+            engineRegistered.Clear();
+            foreach (KeyValuePair<string, List<Subscription>> pair in Subscribers)
+            {
+                eventNames.Add(pair.Key);
+                subscriberCounts.Add(pair.Value.Count);
+                engineRegistered.Add(EngineRegistered.Contains(pair.Key));
+            }
         }
-#endif
     }
 }

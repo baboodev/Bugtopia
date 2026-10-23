@@ -5,13 +5,13 @@ namespace HeartopiaMod
 {
     public partial class HeartopiaComplete
     {
-        private sealed class LiveFeatureStatusDetail
+        internal sealed class LiveFeatureStatusDetail
         {
             public string Label;
             public string Value;
         }
 
-        private sealed class LiveFeatureStatusEntry
+        internal sealed class LiveFeatureStatusEntry
         {
             public string Label;
             public string Summary;
@@ -125,7 +125,7 @@ namespace HeartopiaMod
             return count.ToString() + " " + this.L("filtered");
         }
 
-        private List<LiveFeatureStatusEntry> CollectLiveFeatureStatusEntries()
+        internal List<LiveFeatureStatusEntry> CollectLiveFeatureStatusEntries()
         {
             List<LiveFeatureStatusEntry> entries = new List<LiveFeatureStatusEntry>(24);
 

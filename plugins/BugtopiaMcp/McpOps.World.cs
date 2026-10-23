@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -22,7 +21,7 @@ namespace HeartopiaMod
     // scan converts to plain strings/Vector3/int inside one frame and drops the array before it
     // returns — nothing native survives into the cache.
     // ============================================================================================
-    public partial class HeartopiaComplete
+    internal sealed partial class McpRuntime
     {
         // How long a world scan stays servable, and the floor an agent may ask for. The radar pays
         // ~2 s for the same FindObjectsOfType walk, so this matches its cadence rather than adding
@@ -238,7 +237,7 @@ namespace HeartopiaMod
             McpJsonWriter w = new McpJsonWriter();
             w.BeginObject();
 
-            bool havePos = this.TryGetLocalPlayerPosition(out Vector3 pos);
+            bool havePos = this.Mod.TryGetLocalPlayerPosition(out Vector3 pos);
             w.Bool("positionKnown", havePos);
             if (havePos)
             {
@@ -253,7 +252,7 @@ namespace HeartopiaMod
             // so an agent never mistakes "unknown" for "facing north".
             try
             {
-                GameObject anchor = GetLocalPlayer();
+                GameObject anchor = HeartopiaComplete.GetLocalPlayer();
                 if (anchor != null)
                 {
                     w.Num("yaw", anchor.transform.eulerAngles.y);
@@ -264,12 +263,12 @@ namespace HeartopiaMod
             {
             }
 
-            if (this.TryResolveSelfPlayerNetId(out uint selfNetId))
+            if (this.Mod.TryResolveSelfPlayerNetId(out uint selfNetId))
             {
                 w.Num("netId", selfNetId);
             }
 
-            w.Num("worldEpoch", AuraMonoWorldEpoch);
+            w.Num("worldEpoch", HeartopiaComplete.AuraMonoWorldEpoch);
             w.EndObject();
             return w.ToString();
         }
@@ -414,7 +413,7 @@ namespace HeartopiaMod
                 return; // serve the slightly-stale one rather than pay for a second scan this second
             }
 
-            if (!this.TryGetLocalPlayerPosition(out Vector3 origin))
+            if (!this.Mod.TryGetLocalPlayerPosition(out Vector3 origin))
             {
                 return;
             }
@@ -525,11 +524,11 @@ namespace HeartopiaMod
 
             try
             {
-                if (this.ShouldTrackInsectObject(lower)) return "insect";
-                if (this.ShouldTrackFishShadowObject(lower)) return "fish";
-                if (this.ShouldTrackMeteorObject(lower)) return "meteor";
-                if (this.ShouldTrackBirdObject(lower)) return "bird";
-                if (this.ShouldTrackBubbleObject(lower)) return "bubble";
+                if (this.Mod.ShouldTrackInsectObject(lower)) return "insect";
+                if (this.Mod.ShouldTrackFishShadowObject(lower)) return "fish";
+                if (this.Mod.ShouldTrackMeteorObject(lower)) return "meteor";
+                if (this.Mod.ShouldTrackBirdObject(lower)) return "bird";
+                if (this.Mod.ShouldTrackBubbleObject(lower)) return "bubble";
             }
             catch
             {
@@ -715,7 +714,7 @@ namespace HeartopiaMod
                     hits.Add(new McpUiHit
                     {
                         Name = name,
-                        Path = this.GetHierarchyPath(go.transform),
+                        Path = this.Mod.GetHierarchyPath(go.transform),
                         Interactable = button.interactable,
                         Label = label,
                         Target = go,
@@ -850,7 +849,7 @@ namespace HeartopiaMod
             }
             else
             {
-                dispatched = this.SimulateClick(target.Target) ? "SimulateClick" : "none";
+                dispatched = this.Mod.SimulateClick(target.Target) ? "SimulateClick" : "none";
             }
 
             McpJsonWriter w = new McpJsonWriter();
@@ -975,4 +974,3 @@ namespace HeartopiaMod
         }
     }
 }
-#endif

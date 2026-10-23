@@ -107,7 +107,7 @@ namespace HeartopiaMod
             public bool ReadBool(int offset) => this.ReadByte(offset) != 0;
         }
 
-        private sealed class GameEventHookEntry
+        internal sealed class GameEventHookEntry
         {
             public string EventFullName;
             public int PayloadBytes;
@@ -124,7 +124,7 @@ namespace HeartopiaMod
             public Delegate Trampoline;
         }
 
-        private readonly Dictionary<string, GameEventHookEntry> gameEventHooksByName = new Dictionary<string, GameEventHookEntry>(StringComparer.Ordinal);
+        internal readonly Dictionary<string, GameEventHookEntry> gameEventHooksByName = new Dictionary<string, GameEventHookEntry>(StringComparer.Ordinal);
         private readonly GameEventHookEntry[] gameEventHookSlots = new GameEventHookEntry[MaxEventHookSlots];
         private int gameEventHookSlotCount;
         private bool gameEventHooksHardFailed; // EventCenter / DispatchEvent / compile unavailable
@@ -1091,13 +1091,21 @@ namespace HeartopiaMod
 
                 GameEventSnapshot snap = new GameEventSnapshot(entry.EventFullName, netId, buf, len, strBuf, strLen);
 
-#if FEATURE_MCP
-                // Agent observation log (McpOps.Data.cs). Deliberately HERE and not in
-                // PushEventToRing: this is the main thread, whereas the ring is filled from the
-                // detour body, where allocating or touching Mono deadlocks the game. One bool test
-                // when no agent is connected.
-                McpNoteGameEvent(entry.EventFullName, netId, len);
-#endif
+                // Agent observation log. The bridge plugin sets this; one null test when it is not
+                // loaded. Deliberately here and not in PushEventToRing: this is the main thread,
+                // whereas the ring is filled from the detour body, where allocating or touching
+                // Mono deadlocks the game.
+                Action<string, uint, int> observed = GameEventObserved;
+                if (observed != null)
+                {
+                    try
+                    {
+                        observed(entry.EventFullName, netId, len);
+                    }
+                    catch
+                    {
+                    }
+                }
 
                 if (MasterLogGameEvents)
                 {

@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -248,7 +248,7 @@ namespace HeartopiaMod
             return null;
         }
 
-        private bool ShouldTrackBubbleObject(string lowerName)
+        internal bool ShouldTrackBubbleObject(string lowerName)
         {
             if (string.IsNullOrEmpty(lowerName))
             {

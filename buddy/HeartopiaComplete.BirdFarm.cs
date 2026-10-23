@@ -4455,7 +4455,7 @@ namespace HeartopiaMod
             return this.cachedBirdPhotoCommandMonoClass;
         }
 
-        private bool ShouldTrackBirdObject(string lowerName)
+        internal bool ShouldTrackBirdObject(string lowerName)
         {
             return !string.IsNullOrEmpty(lowerName)
                 && lowerName.StartsWith("p_bird_bird", StringComparison.Ordinal)

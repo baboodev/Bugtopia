@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -37,7 +37,7 @@ namespace HeartopiaMod
             return this.TryOpenWeatherExchangeShopPanelByStoreId(MeteorStarfallExchangeStoreId, 0, label);
         }
 
-        private bool ShouldTrackMeteorObject(string lowerName)
+        internal bool ShouldTrackMeteorObject(string lowerName)
         {
             return !string.IsNullOrEmpty(lowerName)
                 && lowerName.StartsWith("p_rock_meteorite", StringComparison.Ordinal);

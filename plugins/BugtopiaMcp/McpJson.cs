@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -357,6 +356,17 @@ namespace HeartopiaMod
             return fallback;
         }
 
+        internal static long GetLong(Dictionary<string, object> args, string key, long fallback)
+        {
+            if (args != null && args.TryGetValue(key, out object v) && v is double d
+                && !double.IsNaN(d) && d >= long.MinValue && d <= long.MaxValue)
+            {
+                return (long)d;
+            }
+
+            return fallback;
+        }
+
         internal static bool GetBool(Dictionary<string, object> args, string key, bool fallback)
         {
             if (args != null && args.TryGetValue(key, out object v) && v is bool b)
@@ -368,4 +378,3 @@ namespace HeartopiaMod
         }
     }
 }
-#endif

@@ -15,6 +15,10 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyCulture("")]
 
 [assembly: ComVisible(false)]
+
+// The agent bridge is a separate plugin (plugins/BugtopiaMcp). It calls internal helpers; nothing
+// it needs is public. Unsigned assembly, so the friend name is enough.
+[assembly: InternalsVisibleTo("BugtopiaMcp")]
 [assembly: Guid("4c8e08b8-adf5-49c2-a4d0-e182ffa9dcee")]
 
 // Assembly version attributes are generated in obj/**/ModVersion.g.cs at build time.

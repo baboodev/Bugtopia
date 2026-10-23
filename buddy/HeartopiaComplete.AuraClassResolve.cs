@@ -16,7 +16,7 @@ namespace HeartopiaMod
     // This is that fallback written once: try the spelling variants AGENTS.md §7 tells a human to
     // enumerate by hand, then ask EVERY loaded image directly via `mono_assembly_foreach`.
     //
-    // It lived inside `#if FEATURE_MCP` (McpOps.Mono.cs) while `mono.find` was its only caller.
+    // It lived in the bridge's mono ops while `mono.find` was its only caller.
     // It is out here now because `HeartopiaComplete.TryAuraSendCommand` resolves command types
     // through it, and that helper has to exist in normal builds.
     // ============================================================================================
@@ -24,7 +24,7 @@ namespace HeartopiaMod
     {
         // The spelling variants AGENTS.md §7 tells a human to write out by hand. Doing it here is the
         // entire point: the caller states the type once and learns which form the build actually uses.
-        private static List<string> BuildAuraMonoNameCandidates(string name)
+        internal static List<string> BuildAuraMonoNameCandidates(string name)
         {
             List<string> candidates = new List<string>(6) { name };
 
@@ -66,7 +66,7 @@ namespace HeartopiaMod
             return candidates;
         }
 
-        private bool TryResolveAuraMonoClassAnySpelling(string name, out IntPtr klass, out string resolvedName)
+        internal bool TryResolveAuraMonoClassAnySpelling(string name, out IntPtr klass, out string resolvedName)
         {
             klass = IntPtr.Zero;
             resolvedName = null;
@@ -105,8 +105,8 @@ namespace HeartopiaMod
         }
 
         // Collected by the native callback below; only ever touched inside the synchronous sweep.
-        private static readonly List<IntPtr> AuraMonoSweepImages = new List<IntPtr>();
-        private static MonoAssemblyForeachCallbackDelegate auraMonoSweepCallbackKeepAlive;
+        internal static readonly List<IntPtr> AuraMonoSweepImages = new List<IntPtr>();
+        internal static MonoAssemblyForeachCallbackDelegate auraMonoSweepCallbackKeepAlive;
 
         private IntPtr FindAuraMonoClassInAnyImage(string fullTypeName)
         {
@@ -159,7 +159,7 @@ namespace HeartopiaMod
             return IntPtr.Zero;
         }
 
-        private static void AuraMonoSweepCollect(IntPtr assembly, IntPtr userData)
+        internal static void AuraMonoSweepCollect(IntPtr assembly, IntPtr userData)
         {
             // Returns into native code — nothing may escape.
             try

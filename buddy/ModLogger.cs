@@ -20,39 +20,43 @@ public static class ModLogger
     public static void Msg(string message)
     {
         _msg?.Invoke(message);
-#if FEATURE_MCP
         RingAdd("INFO", message);
-#endif
     }
 
     public static void Warning(string message)
     {
         _warn?.Invoke(message);
-#if FEATURE_MCP
         RingAdd("WARN", message);
-#endif
     }
 
-#if FEATURE_MCP
-    // ── Session log ring, for the MCP bridge's `log.tail` ────────────────────────────────────────
+    // Session log ring, for the bridge's log.tail.
+    //
     // Reading the loader's own log FILE would mean racing the StreamWriter that is still appending
     // to it, from a different thread, with no shared lock. A ring the log front owns is race-free
     // and gives the agent the mod's lines only — not BepInEx's whole console.
     //
-    // Allocated on demand: without the `%LocalLow%/Bugtopia/mcp` marker, EnableRing() is never
-    // called, the array is never created, and every log call costs one bool test.
-    // ⚠️ 256 LINES IS TWENTY SECONDS. That is what it held in practice: the farm alone writes three
-    // or four lines a second, and every request to "look at the log" arrived after the interesting
-    // part had already been overwritten — a livelock, a pair of teleports and a whole bubble walk
-    // were each lost that way. A filtered tail can only find what is still in the ring.
-    //
-    // 4096 lines is about five minutes of a chatty run and costs well under a megabyte of strings,
-    // allocated only when the MCP marker file turns the ring on at all.
+    // Allocated when the plugin host installs. 4096 lines is about five minutes of a chatty run
+    // and costs well under a megabyte of strings. Each line has a monotonic seq so a caller can
+    // poll with `since` and not miss the gap when the ring wraps.
     private const int RingCapacity = 4096;
     private static readonly object RingLock = new object();
     private static string[] _ring;
+    private static long[] _ringSeq;
     private static int _ringNext;
     private static int _ringCount;
+    private static long _ringHigh;
+
+    internal readonly struct RingEntry
+    {
+        internal readonly long Seq;
+        internal readonly string Text;
+
+        internal RingEntry(long seq, string text)
+        {
+            this.Seq = seq;
+            this.Text = text;
+        }
+    }
 
     internal static bool RingEnabled { get; private set; }
 
@@ -63,6 +67,7 @@ public static class ModLogger
             if (_ring == null)
             {
                 _ring = new string[RingCapacity];
+                _ringSeq = new long[RingCapacity];
             }
 
             RingEnabled = true;
@@ -86,7 +91,9 @@ public static class ModLogger
                     return;
                 }
 
+                _ringHigh++;
                 _ring[_ringNext] = line;
+                _ringSeq[_ringNext] = _ringHigh;
                 _ringNext = (_ringNext + 1) % _ring.Length;
                 if (_ringCount < _ring.Length)
                 {
@@ -100,22 +107,32 @@ public static class ModLogger
         }
     }
 
-    // Oldest-to-newest, optionally filtered, then trimmed to the last `max` entries.
-    internal static string[] RingSnapshot(int max, string filter)
+    // Oldest-to-newest. `since` <= 0 keeps the previous "last max lines" behaviour. Otherwise only
+    // lines with a greater seq are returned, still capped at max. `next` is the high-water seq,
+    // including lines the filter dropped, so the caller's cursor does not stall on a filter.
+    internal static RingEntry[] RingSnapshot(int max, string filter, long since, out long next)
     {
-        List<string> matched = new List<string>(Math.Min(max, RingCapacity));
+        List<RingEntry> matched = new List<RingEntry>(Math.Min(max, RingCapacity));
         lock (RingLock)
         {
+            next = _ringHigh;
             if (_ring == null || _ringCount == 0)
             {
-                return Array.Empty<string>();
+                return Array.Empty<RingEntry>();
             }
 
             int start = (_ringNext - _ringCount + _ring.Length) % _ring.Length;
             for (int i = 0; i < _ringCount; i++)
             {
-                string line = _ring[(start + i) % _ring.Length];
+                int slot = (start + i) % _ring.Length;
+                string line = _ring[slot];
                 if (line == null)
+                {
+                    continue;
+                }
+
+                long seq = _ringSeq[slot];
+                if (since > 0 && seq <= since)
                 {
                     continue;
                 }
@@ -126,7 +143,7 @@ public static class ModLogger
                     continue;
                 }
 
-                matched.Add(line);
+                matched.Add(new RingEntry(seq, line));
             }
         }
 
@@ -135,9 +152,17 @@ public static class ModLogger
             return matched.ToArray();
         }
 
+        if (since > 0)
+        {
+            // A lagging caller gets the oldest page, and the cursor stops there so the rest is
+            // still waiting. The unpaged path below keeps "last max" for callers that omit since.
+            RingEntry[] head = matched.GetRange(0, max).ToArray();
+            next = head[head.Length - 1].Seq;
+            return head;
+        }
+
         return matched.GetRange(matched.Count - max, max).ToArray();
     }
-#endif
 }
 
 // MelonLoader-backed sink. Only compiled under LOADER_MELON (MelonLoader / Universal), so a

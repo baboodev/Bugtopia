@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -707,7 +707,7 @@ namespace HeartopiaMod
             return null;
         }
 
-        private string GetHierarchyPath(Transform transform)
+        internal string GetHierarchyPath(Transform transform)
         {
             if (transform == null)
             {

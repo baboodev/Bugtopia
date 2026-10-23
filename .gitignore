@@ -15,6 +15,7 @@ tools/SamplePlugin/bin
 tools/SamplePlugin/obj
 plugins/HelloBugtopia/bin
 plugins/HelloBugtopia/obj
+plugins/*/obj
 tools/cpp2il_out
 tools/reports
 tools/ilspy-verify
@@ -72,3 +73,6 @@ tools/FishRouteProbe
 
 # China build (TapTap CN) copy + decompilation — local research only
 cn-version/
+
+# Local internal plugins. Separate projects, never compiled into bugtopia.dll, never published.
+internal-plugins/

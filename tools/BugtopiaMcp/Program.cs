@@ -15,10 +15,9 @@ namespace BugtopiaMcp
     // write to stdout: a stray Console.WriteLine corrupts the stream and the client drops the
     // server. All diagnostics go to stderr, which the client shows as server logs.
     //
-    // Tools are a STATIC core plus a `game_rpc` passthrough. The game already self-describes its op
-    // registry over `rpc.describe` (phase 2 turns that into a dynamic tool list); until then the
-    // passthrough is what reaches any op this bridge does not know by name, so the game can grow
-    // ops without a bridge rebuild.
+    // Tools are one MCP tool per game op, taken from `rpc.describe` after connect, plus the named
+    // tools game_status, game_ping, game_log_tail, game_eval and game_rpc. game_rpc stays when
+    // describe fails.
     // ============================================================================================
     internal static class Program
     {
@@ -139,7 +138,7 @@ namespace BugtopiaMcp
               .Append(",\"version\":").Append(Quote(ServerVersion)).Append('}');
             sb.Append(",\"instructions\":").Append(Quote(
                 "Live view of a running Heartopia game through the Bugtopia mod. Tools answer only "
-                + "while the game is running with the %LocalLow%/Bugtopia/mcp marker file present. "
+                + "while the game is running and the BugtopiaMcp plugin is enabled. "
                 + "Use game_rpc to reach ops this bridge does not expose by name; game_status lists "
                 + "every registered op under its `describe` payload."));
             sb.Append('}');
@@ -226,6 +225,15 @@ namespace BugtopiaMcp
                     + "gate, frame/FPS, and every active mod feature. Answers on the login screen too. "
                     + "(Offline fallback entry — the real tool list comes from the running game.)",
                     "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}");
+
+                sb.Append(',');
+                AppendTool(sb, "game_log_tail",
+                    "The mod's own log ring. {n, filter, since}; the reply carries next. "
+                    + "(Offline fallback entry.)",
+                    "{\"type\":\"object\",\"properties\":{"
+                    + "\"n\":{\"type\":\"integer\"},"
+                    + "\"filter\":{\"type\":\"string\"},"
+                    + "\"since\":{\"type\":\"integer\"}},\"additionalProperties\":false}");
             }
 
             // Always present, never from the registry: `ping` is answered on the socket thread so it
@@ -932,17 +940,15 @@ namespace BugtopiaMcp
             string path = EndpointPath();
             if (!File.Exists(path))
             {
-                // Three distinct causes produce this one symptom, and two of them are silent on the
-                // game side by design (no marker ⇒ nothing logs; no FEATURE_MCP ⇒ the code is not
-                // even in the binary). Name all three, or the next person debugs it blind.
+                // The endpoint file exists only while BugtopiaMcp is loaded. Name the causes, or the
+                // next person debugs a missing file blind.
                 error = "no endpoint file at " + path + " — the bridge is not up in the game. Causes,"
                         + " in order of likelihood:\n"
-                        + "  1. bugtopia.dll was built WITHOUT -p:Mcp=true. Note that build-all.bat"
-                        + " produces the Universal flavour, which cannot carry the bridge and"
-                        + " auto-deploys over BepInEx\\plugins — run buddy\\build-mcp.bat instead.\n"
-                        + "  2. the marker file %LocalLow%\\Bugtopia\\mcp is missing (it is read once"
-                        + " at startup and the mod never creates it).\n"
-                        + "  3. the game is not running.";
+                        + "  1. BugtopiaMcp.dll is not enabled. It lives in %LocalLow%\\Bugtopia\\Plugins"
+                        + " and stays unloaded until Enabled is turned on under Plugins. buddy\\build-mcp.bat"
+                        + " builds it and copies it there; it does not enable it.\n"
+                        + "  2. the game is not running, or it is still on the way to the first world.\n"
+                        + "  3. the plugin failed to load — read Logs\\bugtopia.log for [Mcp] or [Plugin].";
                 return false;
             }
 

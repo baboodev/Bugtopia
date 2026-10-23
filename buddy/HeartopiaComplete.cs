@@ -499,17 +499,12 @@ namespace HeartopiaMod
             }
         }
 
-        // MCP agent bridge hooks — implemented in HeartopiaComplete.Mcp.cs, which only compiles
-        // under -p:Mcp=true (a BepInEx-only build flavour). An unimplemented `partial void` and its
-        // CALL SITES are both removed by the compiler, so a build without the flag carries no trace
-        // of the bridge and this glue needs no #if of its own.
-        partial void InitializeMcpBridge();
+        // The bridge plugin's after-render hook. Screenshot fallback capture reads the backbuffer
+        // from LateUpdate; the plugin sets this in Load and the host clears it on unload.
+        internal static Action LateTick;
 
-        partial void ProcessMcpOnUpdate();
-
-        partial void ProcessMcpOnLateUpdate();
-
-        partial void ShutdownMcpBridge();
+        // Set by the bridge plugin. One null test per dispatched event when the plugin is not loaded.
+        internal static Action<string, uint, int> GameEventObserved;
 
         public void OnInitializeMelon()
         {
@@ -528,10 +523,6 @@ namespace HeartopiaMod
             // the %LocalLow%/Bugtopia/beta marker decides whether experimental surfaces exist this
             // session. Nothing re-reads it later by design.
             RefreshBetaFlag();
-            // MCP agent bridge (HeartopiaComplete.Mcp.cs) — same gate discipline as the beta flag:
-            // the %LocalLow%/Bugtopia/mcp marker is read ONCE, here, and the mod never creates it.
-            // No marker ⇒ no listener, no op registry, no per-frame cost.
-            this.InitializeMcpBridge();
             this.LoadRadarSpeciesIconIndex();
             this.LoadCustomTeleports();
             this.LoadKeybinds();
@@ -571,10 +562,19 @@ namespace HeartopiaMod
         // Token: 0x06000004 RID: 4 RVA: 0x00002390 File Offset: 0x00000590
         public void OnLateUpdate()
         {
-            // Screenshot fallback capture site, used ONLY when the after-render player-loop node
-            // could not be installed (McpScreenshot.cs). No-op otherwise, and entirely absent from a
-            // build without -p:Mcp=true.
-            this.ProcessMcpOnLateUpdate();
+            Action late = LateTick;
+            if (late != null)
+            {
+                try
+                {
+                    late();
+                }
+                catch (Exception ex)
+                {
+                    ModEntryGuard.Report("Mcp.LateUpdate", ex);
+                }
+            }
+
             this.ProcessNoclipVehicleOnLateUpdate();
             this.ProcessVehicleTeleportOnLateUpdate();
             // Retained-mode UGUI overlay (HeartopiaComplete.UguiOverlay.cs) — replaces the IMGUI
@@ -631,11 +631,6 @@ namespace HeartopiaMod
             // once the world is actually up. Must tick BEFORE the feature ticks below so a feature
             // reading IsWorldReady this frame sees the state the events left.
             this.ProcessWorldReadyOnUpdate();
-            // MCP agent bridge (HeartopiaComplete.Mcp.cs): drains RPC calls queued by the socket
-            // threads and runs their handlers HERE, on the main thread — the bridge's one hard
-            // invariant. Placed after the world-ready tick so an op reading IsWorldReady sees this
-            // frame's state, exactly like the feature ticks below.
-            this.ProcessMcpOnUpdate();
             // Sandbox plugins (PluginHostFeature.cs). One empty-collection walk when nothing is
             // loaded. Independent of the MCP pump: disk plugins tick in a build without the bridge.
             PluginHost.Tick();
@@ -3855,7 +3850,7 @@ namespace HeartopiaMod
 
         // Get display name from sprite name
 
-        bool SimulateClick(GameObject target)
+        internal bool SimulateClick(GameObject target)
         {
             EventSystem eventSystem = this.EnsureGameplayEventSystemAvailable();
             PointerEventData eventData = new PointerEventData(eventSystem);
@@ -5135,10 +5130,6 @@ namespace HeartopiaMod
 
             // Long cooldowns learned in the last half-minute would otherwise miss the file.
             try { this.FlushPersistedColdLedger(true); } catch { }
-
-            // Close the agent bridge first: it owns background threads and a bound port, and any
-            // in-flight call must be answered rather than left to time out against a dying process.
-            this.ShutdownMcpBridge();
 
             // Camera Toggle flips the GAME's own MouseControlMode, which persists to PlayerPrefs —
             // put it back, or turning the mod off would leave the player's setting changed for good.

@@ -222,6 +222,15 @@ namespace HeartopiaMod
                 ModLogger.Warning("[Plugin] '" + id + "' threw in Unload(): " + ex.Message);
             }
 
+            // Backstop for the bridge plugin. Its Unload is supposed to drop these itself; if it
+            // threw first, the host would otherwise keep a delegate into the load context.
+            if (string.Equals(id, "BugtopiaMcp", StringComparison.Ordinal))
+            {
+                HeartopiaComplete.GameEventObserved = null;
+                HeartopiaComplete.LateTick = null;
+                CleanQuit = null;
+            }
+
             try
             {
                 entry.Api.RevokeAll();
@@ -380,41 +389,53 @@ namespace HeartopiaMod
             }
         }
 
-#if FEATURE_MCP
-        internal static void WriteListJson(McpJsonWriter w)
+        internal struct LoadedSnapshot
         {
-            w.Num("loaded", Loaded.Count);
-            w.Num("unloading", Watches.Count);
-            w.BeginArray("plugins");
+            internal string Id;
+            internal string Sha256;
+            internal long Ticks;
+            internal DateTime LoadedUtc;
+            internal bool FromDisk;
+            internal int Coroutines;
+            internal string LastError;
+        }
+
+        internal static int UnloadingCount => Watches.Count;
+
+        internal static void CopyLoaded(List<LoadedSnapshot> into, List<string> leaked)
+        {
+            if (into == null)
+            {
+                return;
+            }
+
+            into.Clear();
             foreach (KeyValuePair<string, LoadedPlugin> pair in Loaded)
             {
                 LoadedPlugin entry = pair.Value;
-                w.BeginArrayObject();
-                w.Str("id", entry.Id);
-                w.Str("sha256", entry.Sha256);
-                w.Num("ticks", entry.Ticks);
-                w.Str("loadedUtc", entry.LoadedUtc.ToString("O"));
-                w.Str("source", entry.Source == PluginSource.Disk ? "disk" : "mcp");
-                w.Num("coroutines", entry.Api == null ? 0 : entry.Api.CoroutineCount);
-                if (!string.IsNullOrEmpty(entry.LastError))
+                into.Add(new LoadedSnapshot
                 {
-                    w.Str("lastError", entry.LastError);
-                }
-
-                w.EndObject();
+                    Id = entry.Id,
+                    Sha256 = entry.Sha256,
+                    Ticks = entry.Ticks,
+                    LoadedUtc = entry.LoadedUtc,
+                    FromDisk = entry.Source == PluginSource.Disk,
+                    Coroutines = entry.Api == null ? 0 : entry.Api.CoroutineCount,
+                    LastError = entry.LastError,
+                });
             }
 
-            w.EndArray();
+            if (leaked == null)
+            {
+                return;
+            }
 
-            w.BeginArray("leaked");
+            leaked.Clear();
             for (int i = 0; i < LeakedIds.Count; i++)
             {
-                w.ArrayStr(LeakedIds[i]);
+                leaked.Add(LeakedIds[i]);
             }
-
-            w.EndArray();
         }
-#endif
 
         internal static bool TryGetSha(string id, out string sha)
         {
@@ -911,6 +932,11 @@ namespace HeartopiaMod
                 }
 
                 MetadataReader md = pe.GetMetadataReader();
+                string assemblyName = md.GetString(md.GetAssemblyDefinition().Name);
+                // The bridge owns the accept thread and one thread per client. Those cannot run on
+                // the Unity thread, and a host-owned thread would hold a plugin delegate and pin
+                // the context the same way. Every other ban still applies to this assembly.
+                bool allowThreads = string.Equals(assemblyName, "BugtopiaMcp", StringComparison.Ordinal);
 
                 foreach (AssemblyReferenceHandle handle in md.AssemblyReferences)
                 {
@@ -931,14 +957,20 @@ namespace HeartopiaMod
                     string full = Combine(md.GetString(tr.Namespace), md.GetString(tr.Name));
                     for (int i = 0; i < BannedTypes.Length; i++)
                     {
-                        if (string.Equals(full, BannedTypes[i], StringComparison.Ordinal))
+                        if (!string.Equals(full, BannedTypes[i], StringComparison.Ordinal))
                         {
-                            violations.Add("uses " + full + " — it would keep the load context alive forever"
-                                + (full.EndsWith("Thread", StringComparison.Ordinal)
-                                    || full.EndsWith("Timer", StringComparison.Ordinal)
-                                    ? "; use host.StartCoroutine instead"
-                                    : string.Empty));
+                            continue;
                         }
+
+                        bool threadOrTimer = full.EndsWith("Thread", StringComparison.Ordinal)
+                            || full.EndsWith("Timer", StringComparison.Ordinal);
+                        if (allowThreads && threadOrTimer)
+                        {
+                            continue;
+                        }
+
+                        violations.Add("uses " + full + " — it would keep the load context alive forever"
+                            + (threadOrTimer ? "; use host.StartCoroutine instead" : string.Empty));
                     }
                 }
 

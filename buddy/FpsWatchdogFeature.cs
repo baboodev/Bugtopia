@@ -122,7 +122,7 @@ namespace HeartopiaMod
         // ---- mod self-cost ----------------------------------------------------------------------
         private long fpsWatchdogFrameStartTicks;
         private bool fpsWatchdogFrameOpen;
-        private float fpsWatchdogModMs;              // last COMPLETED OnUpdate, in ms
+        internal float fpsWatchdogModMs;              // last COMPLETED OnUpdate, in ms
 
         // ---- section attribution (Breadcrumbs.PhaseObserver) -------------------------------------
         private const int FpsWatchdogMaxSections = 64;

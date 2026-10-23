@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -169,7 +168,7 @@ namespace HeartopiaMod
                 foreach (string sha in shas)
                 {
                     AddQuarantine(sha, "was resident and ticking when the previous session was killed "
-                        + "— suspicion, not proof: release it with session.report unquarantine");
+                        + "— suspicion, not proof: release it with session.unquarantine");
                 }
             }
             catch (Exception ex)
@@ -476,4 +475,3 @@ namespace HeartopiaMod
         }
     }
 }
-#endif

@@ -46,10 +46,15 @@ namespace HeartopiaMod
             internal long Ticks;
         }
 
+        internal static event Action CleanQuit;
+
         internal static void Install()
         {
             try
             {
+                // Before any other install log line, so startup is in the ring. The bridge plugin
+                // loads later, on world-ready, and would otherwise miss everything until then.
+                ModLogger.EnableRing();
                 EnsureFolder();
                 McpQuitSignal.Install();
                 ReadPreviousResident();
@@ -77,6 +82,17 @@ namespace HeartopiaMod
             }
 
             WriteResidentRaw("{\"quitSignal\":true,\"plugins\":[]}");
+            Action quit = CleanQuit;
+            if (quit != null)
+            {
+                try
+                {
+                    quit();
+                }
+                catch
+                {
+                }
+            }
         }
 
         // Once per process, on the first world-ready. Loads only dlls the user has turned on.
@@ -511,7 +527,7 @@ namespace HeartopiaMod
             return true;
         }
 
-        private static bool IsPluginId(string id)
+        internal static bool IsPluginId(string id)
         {
             if (string.IsNullOrEmpty(id) || id.Length > 64)
             {

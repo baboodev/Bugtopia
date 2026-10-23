@@ -1,4 +1,3 @@
-#if FEATURE_MCP
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -31,21 +30,13 @@ namespace HeartopiaMod
     // and are drained on the main thread.
     //
     // ── THE GATE ─────────────────────────────────────────────────────────────────────────────────
-    // The bridge exists this session if and only if `%LocalLow%/Bugtopia/mcp` is present at
-    // startup. Read ONCE (next to RefreshBetaFlag), never re-read, and THE MOD NEVER CREATES IT on
-    // any code path. Marker absent ⇒ no listener, no bound port, no op registry, no per-frame cost
-    // beyond one bool test. Deleting it mid-session does not stop the session — that is the same
-    // deliberate semantics as the beta marker (HeartopiaComplete.Beta.cs).
+    // The bridge listens only while this plugin is loaded. Enabling the dll is the gate. Writes
+    // and unsafe stay off until the MCP Bridge page turns them on for the session.
     // ============================================================================================
     internal static class McpBridge
     {
         // Bumped when the wire contract changes shape. The bridge refuses a version it does not know.
         internal const int RpcProtocolVersion = 1;
-
-        // Extension ignored, exactly like the beta marker: Explorer hides known extensions, so a
-        // file created as "mcp" often lands as "mcp.txt". "mcp", "mcp.txt", "mcp.on" all count;
-        // "mcpanything" does not.
-        private const string MarkerBaseName = "mcp";
 
         private const int FirstPort = 8770;
         private const int PortAttempts = 5;
@@ -60,14 +51,13 @@ namespace HeartopiaMod
         private const int MaxClients = 4;
         private const double DrainBudgetMs = 3.0;
 
-        internal static bool MarkerPresent;
         internal static bool Listening;
         internal static int Port;
         internal static string Status = "not started";
         internal static long OpsServed;
         internal static DateTime StartedUtc;
 
-        // Privilege tiers. The marker authorises the CHANNEL; these authorise what it may do, and
+        // Privilege tiers. Enabling the plugin authorises the channel; these authorise what it may
         // both stay off until SetPrivileges turns them on for the session (no config key, no
         // persistence — a privilege that survives a restart is one nobody remembers granting).
         internal static bool AllowWrites = false;
@@ -119,53 +109,11 @@ namespace HeartopiaMod
         }
 
         // ────────────────────────────────────────────────────────────────────────────────────────
-        // Gate
-        // ────────────────────────────────────────────────────────────────────────────────────────
-
-        // One-shot startup read. Fail-closed: any IO problem leaves the bridge disabled.
-        // Creates NOTHING — note the deliberate absence of HelperPaths.GetFile/GetDirectory here,
-        // both of which call EnsureDirectory (same discipline as MonoAssemblyDump's opt-in folder).
-        internal static void CheckMarker()
-        {
-            bool found = false;
-            string root = null;
-            try
-            {
-                root = HelperPaths.Root;
-                if (!string.IsNullOrEmpty(root) && Directory.Exists(root))
-                {
-                    foreach (string path in Directory.EnumerateFiles(root, MarkerBaseName + "*"))
-                    {
-                        if (string.Equals(Path.GetFileNameWithoutExtension(path), MarkerBaseName,
-                                StringComparison.OrdinalIgnoreCase))
-                        {
-                            found = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[Mcp] marker check failed (staying disabled): " + ex.Message);
-                found = false;
-            }
-
-            MarkerPresent = found;
-            Status = found ? "marker found, not started" : "disabled (no marker)";
-        }
-
-        // ────────────────────────────────────────────────────────────────────────────────────────
         // Lifecycle
         // ────────────────────────────────────────────────────────────────────────────────────────
 
         internal static bool Start()
         {
-            if (!MarkerPresent)
-            {
-                return false;
-            }
-
             if (Listening)
             {
                 return true;
@@ -845,4 +793,3 @@ namespace HeartopiaMod
         }
     }
 }
-#endif

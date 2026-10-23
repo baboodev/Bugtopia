@@ -4,8 +4,8 @@ A loopback socket in the mod plus a small stdio MCP server, so an agent (Claude 
 running game: mod state, the world-ready gate, the log, and — as later phases land — entities,
 backpack, UI, screenshots, and hot-loaded experimental code.
 
-**Status:** phase 1 (transport, main-thread pump, `status` / `log.tail` / `ping` / `rpc.describe`).
-Design and remaining phases: `docs/plans/2026-08-15-mcp-bridge-and-plugin-host.md`.
+**Status:** the bridge is the `BugtopiaMcp` disk plugin. A normal mod build has no socket, no op
+registry and no Agent tab.
 
 ---
 
@@ -16,9 +16,10 @@ Claude Code ──stdio (MCP/JSON-RPC)──▶ tools/BugtopiaMcp   (separate pr
                                             │
                                             │ NDJSON over TCP 127.0.0.1:8770, token-authed
                                             ▼
-                                      bugtopia.dll  ── McpBridgeFeature.cs   (socket + pump)
-                                                     ── McpOps.cs             (op registry)
-                                                     ── HeartopiaComplete.Mcp.cs (handlers)
+                                      BugtopiaMcp.dll   (disk plugin, plugins/BugtopiaMcp)
+                                         McpBridgeFeature.cs   socket + pump
+                                         McpOps.cs             op registry
+                                         McpRuntime.cs         handlers
 ```
 
 The game side is deliberately **not** an MCP server. MCP protocol churn lives in the external
@@ -29,35 +30,28 @@ process stays answerable while the game is closed, so the tool list never vanish
 
 ## 2. Turning it on
 
-Three independent things must all be true. This is intentional: each one is a different kind of
-mistake to make.
+The bridge is a plugin. The mod build does not contain it, and there is no marker file.
 
-**1 — Build with the feature.** It is compiled out by default, and it is BepInEx-only.
+**1 — Build and copy the plugin.**
 
-```bash
-dotnet build buddy/buddy.csproj -c Release -p:Loader=BepInEx -p:Mcp=true
+```bat
+buddy\build-mcp.bat
 ```
 
-`-p:Mcp=true` with any other `Loader` is a build error, not a silently different binary. Without the
-flag, `#if FEATURE_MCP` strips the code *and* its string literals — such a build cannot be switched
-on by any file on disk, because there is nothing to switch on.
+That builds `plugins/BugtopiaMcp` against the BepInEx `bugtopia.dll` already in `buddy/bin` and
+copies `BugtopiaMcp.dll` to `%LocalLow%/Bugtopia/Plugins/`. It does not rebuild the mod and it does
+not write `BugtopiaMcp.enabled`.
 
-**2 — Create the marker file.**
+**2 — Enable it in the mod menu.**
 
-```bash
-type nul > "%USERPROFILE%\AppData\LocalLow\Bugtopia\mcp"
-```
+Enter a world, open the menu (Insert), and turn **Enabled** on for BugtopiaMcp under Plugins. The
+first load is always that checkbox. Later launches load it again because the `.enabled` file is
+still there. The log line is `[Mcp] listening on 127.0.0.1:8770`.
 
-Same gate class as `beta`: read **once** at startup, never re-read, and **the mod never creates it**
-on any code path. The extension is ignored (`mcp`, `mcp.txt`, `mcp.on` all count) because Explorer
-hides known extensions. No marker ⇒ no listener, no bound port, no op registry, and one bool test
-per frame. Deleting it mid-session does not stop that session — it takes effect on the next launch.
+The plugin adds an **MCP Bridge** page on the Plugins tab: live status, and the write / unsafe toggles.
+Both default off and are forgotten when the game exits.
 
-With the marker, the mod menu grows an **Agent** tab at the bottom of the sidebar: the bridge's live
-status, its write/unsafe toggles, and a sub-tab for each page a sandbox plugin has added. Without it
-the tab is not in the sidebar at all and cannot be selected.
-
-**3 — Build and register the bridge.**
+**3 — Build and register the stdio server.**
 
 ```bash
 dotnet build tools/BugtopiaMcp/BugtopiaMcp.csproj -c Release
@@ -74,10 +68,9 @@ dotnet build tools/BugtopiaMcp/BugtopiaMcp.csproj -c Release
 Point it at the built **DLL**, never `dotnet run` — `run` writes build output to stdout, which *is*
 the MCP transport, and corrupts the first message.
 
-On startup the mod writes `%LocalLow%/Bugtopia/McpBridge/endpoint.json` (port, token, pid, version).
-The bridge reads it on its first tool call and reconnects by itself after a game restart. Note the
-folder name: the marker is a *file* called `mcp` in the parent directory, so runtime state cannot
-live in a folder of that name.
+On startup the plugin writes `%LocalLow%/Bugtopia/McpBridge/endpoint.json` (port, token, pid, version).
+The stdio server reads it on its first tool call and reconnects by itself after a game restart.
+Unloading the plugin removes the listener; the file is removed on `Stop()`.
 
 ---
 
@@ -91,7 +84,7 @@ this machine                                    Ideapad.local
 ────────────                                    ─────────────
 client ──▶ 127.0.0.1:8780 ──ssh -L──────────────▶ 127.0.0.1:<bridge port>  (8770-8774)
                                                         │
-                                                  bugtopia.dll
+                                                  BugtopiaMcp.dll
 ```
 
 **Local port is 8780, not 8770.** The game usually also runs on the local machine and already owns
@@ -116,10 +109,9 @@ It mirrors the remote endpoint into `%LOCALAPPDATA%\BugtopiaMcpIdeapad\endpoint.
 
 ### On the Ideapad side
 
-1. `bugtopia.dll` deployed to its `BepInEx\plugins\`.
-2. The marker file `%USERPROFILE%\AppData\LocalLow\Bugtopia\mcp` — an **empty file** named `mcp`,
-   next to (not inside) the `McpBridge` folder the mod writes its runtime state into.
-3. Game running and past the login screen. The log then shows
+1. `bugtopia.dll` deployed to its `BepInEx\plugins\`, and `BugtopiaMcp.dll` enabled under Plugins
+   (`%USERPROFILE%\AppData\LocalLow\Bugtopia\Plugins\BugtopiaMcp.dll` plus the sibling `.enabled`).
+2. Game running and past the login screen. The log then shows
    `[Mcp] listening on 127.0.0.1:8770 — N ops registered`.
 
 ### Talking to it
@@ -179,10 +171,10 @@ bridge and hot-reloads it into the running game (§4b).
 | Tool | Op | Notes |
 |---|---|---|
 | `game_status` | `status` | Mod build, loader, active pump, world gate, frame/FPS, live feature summaries. Answers on the login screen too |
-| `game_log_tail` | `log.tail` | `{n≤500, filter}` — the mod's own log ring, not BepInEx's console |
+| `game_log_tail` | `log.tail` | `{n≤500, filter, since}` — the mod's own log ring. `next` is the cursor for the following call |
 | `game_ping` | `ping` | Liveness; served on the socket thread, so it answers even mid-freeze |
 | `game_eval` | *composite* | Compile a C# snippet here, run it in the game, unload it — see §4c |
-| `game_rpc` | *any* | Escape hatch for ops newer than the bridge. Phase 2 replaces most of its use with a `rpc.describe`-driven dynamic tool list |
+| `game_rpc` | *any* | Escape hatch when `rpc.describe` was unreachable. While the game is up, `tools/list` publishes one tool per op from that catalogue |
 
 ## 4. Ops (game side)
 
@@ -205,11 +197,20 @@ bridge and hot-reloads it into the running game (§4b).
 | `mono.describe` | Read, NeedsWorld | **Heavy** | main thread |
 | `plugin.list` | Read | Cheap | main thread |
 | `plugin.load` | Write+**Unsafe** | **Heavy** | main thread |
+| `plugin.loadFile` | Write+**Unsafe** | **Heavy** | main thread |
 | `plugin.unload` | Write+**Unsafe** | Cheap | main thread |
 | `plugin.call` | Write+**Unsafe** | **Heavy** | main thread |
+| `session.report` | Read | Cheap | main thread |
+| `session.unquarantine` | Write | Cheap | main thread |
 
 **Snapshot ops carry `ageMs`.** `entities.list` and `backpack.list` serve a cached scan rather than
 rescanning per call, because an agent polls.
+
+**`log.tail` and `events.tail` take `since`.** Omit it, or pass 0, and the reply is the last `n`
+entries, same as before. Pass the previous reply's `next` and the reply is everything newer. When
+more than `n` entries match, the reply is the oldest `n` of them and `next` is the seq of the last
+one returned, so a lagging caller does not skip. When the page is not truncated, `next` is the
+high-water seq.
 
 `entities.list` uses a 2 s TTL. A cold scan in a loaded town costs ~5 ms at 2800 objects (~1.0 µs
 per object, linear in object count), and `entities.list` reports the split so this never has to be
@@ -326,51 +327,22 @@ reported at once so they can be fixed in one pass.
 
 Measured: 20 load→tick→call→unload cycles, 0 failures, 0 leaks, ≤240 ms to confirm collection.
 
-### Loading a built plugin from disk, without shipping base64
+### Loading a built plugin from disk
 
-`plugin.load` takes the assembly as **base64**, which is right for the protocol and wrong for the
-iteration loop: a 19 KB probe is ~25 000 characters, and paying that on every edit-build-reload cycle
-dwarfs the work itself. `game_eval` runs *inside* the game process, so it can read the file itself.
+`plugin.load` takes the assembly as **base64**. `plugin.loadFile` reads
+`%LocalLow%/Bugtopia/Plugins/<id>.dll` and a sibling `<id>.pdb` when it is there. The id is a file
+name: letters, digits, `.`, `_`, `-`. No path is accepted.
 
-Build the plugin, then reload it with a short snippet instead of a wall of base64:
-
-```bash
-dotnet build tools/YourPlugin/YourPlugin.csproj -c Release
+```json
+{ "op": "plugin.loadFile", "a": { "id": "YourPlugin", "replace": true } }
 ```
 
-```csharp
-// game_eval — usings: System.IO, System.Reflection
-string dir = @"C:\...\tools\YourPlugin\bin\Release\net6.0\";
-var hostType = typeof(HeartopiaMod.HeartopiaComplete).Assembly.GetType("HeartopiaMod.PluginHost");
-var flags = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+Copy the built dll into that folder first (or build it with that folder as the output). `replace`
+unloads an existing plugin with the same id. A sha256 that crashed the previous session is refused
+until `session.unquarantine` or `force: true`. Same validator and same collectible context as
+`plugin.load`.
 
-// Unload first, so this is a true hot reload rather than an "already loaded" refusal.
-try { hostType.GetMethod("TryUnload", flags).Invoke(null, new object[] { "yourid", null }); } catch { }
-
-object[] a = new object[] { "yourid", File.ReadAllBytes(dir + "YourPlugin.dll"),
-    File.Exists(dir + "YourPlugin.pdb") ? File.ReadAllBytes(dir + "YourPlugin.pdb") : null, null, null };
-bool ok = (bool)hostType.GetMethod("TryLoad", flags).Invoke(null, a);
-return "reloaded=" + ok + " error=" + (a[3] ?? "-");
-```
-
-Four things that will otherwise cost you a puzzled minute each:
-
-- **`PluginHost` lives in namespace `HeartopiaMod`, not `HeartopiaMod.Plugins`.** Only the *contract*
-  types are in `.Plugins`. `GetType("HeartopiaMod.Plugins.PluginHost")` returns null.
-- **Reflection is required even though the snippet compiles against the mod.** An eval snippet is its
-  own assembly, so it cannot see `internal` members — `PluginHost`, `IsWorldReady` and friends are
-  all invisible to a direct call and fine through reflection.
-- **Unload before load.** `TryLoad` refuses an id that is already loaded; the try/catch swallows the
-  "not loaded" case on the first run.
-- **Ship the pdb.** It is one extra `File.ReadAllBytes` and it turns plugin stack traces into line
-  numbers.
-
-This path skips nothing that `plugin.load` does — same validator, same collectible context, same
-unload verification. It only changes who reads the bytes. Everything else about the loop is unchanged:
-edit, `dotnet build`, run the snippet, and the previous version is gone within a frame.
-
-⚠️ `eval` is an **unsafe** op, so this needs unsafe enabled (Agent → Bridge). If it is off, use
-`plugin.load` with base64 — that is a write-tier op.
+`plugin.loadFile` is Write+Unsafe, so the MCP Bridge page has to have unsafe on.
 
 ### A plugin's own page in the menu
 
@@ -600,7 +572,8 @@ The two reads are now separate methods with no shared control flow.
 Whatever was running is auto-**quarantined** by sha256, and `plugin.load` refuses those bytes unless
 `force: true` — otherwise an agent that auto-reloads its work walks back into the same crash every
 launch. `session.report` returns the record, the quarantine list and the newest crash dumps (feed the
-first straight into the `crash-dump-stack` skill); it also releases a sha via `unquarantine`. The
+first straight into the `crash-dump-stack` skill). Releasing a sha is `session.unquarantine`, a
+write op that takes `sha256`. The
 bridge prepends the whole story to the **first** tool result after any reconnect, once.
 
 ---
@@ -616,7 +589,7 @@ writes to a shared `StreamWriter`.
 
 Everything else follows from that:
 
-- **Register in `RegisterMcpOps()`** (`HeartopiaComplete.Mcp.cs`) with flags, cost and an argument
+- **Register in `RegisterMcpOps()`** (`plugins/BugtopiaMcp/McpRuntime.cs`) with flags, cost and an argument
   schema. The registry is filled before the listener starts and never mutated, so socket threads
   only ever read a frozen map. `rpc.describe` publishes it, so a new op needs no bridge rebuild.
 - **`McpOpFlags.NeedsWorld`** for anything that resolves, inflates or invokes game code. The pump
@@ -642,10 +615,9 @@ This is a remote-code-execution channel into the game process. It is treated as 
 - The tiers are a **ladder: unsafe implies write.** An unsafe op runs arbitrary code and arbitrary
   code writes whatever it likes, so requiring both for `plugin.load` was false granularity that only
   produced a confusing refusal for anyone who granted the scarier privilege alone.
-- `AllowWrites` / `AllowUnsafe` default to **off even with the marker present** — the marker
-  authorises the channel, not the privileges. They are turned on by a human, in the menu's
-  **Agent → Bridge** page, and that whole tab only exists while the bridge is listening.
-  Session-scoped with no config key, so a privilege cannot survive a restart unnoticed. The two
+- `AllowWrites` / `AllowUnsafe` default to **off**. Loading the plugin opens the channel and does
+  not grant either privilege. They are turned on by a human, on the plugin's **MCP Bridge** page under
+  Plugins. Session-scoped with no config key, so a privilege cannot survive a restart unnoticed. The two
   checkboxes move together in both directions, because the op gate treats them as the ladder above:
   showing "writes off" while unsafe was on would misdescribe what the bridge actually accepts.
 - No new IL2CPP `.text` patches: AGENTS.md §1 still holds.
@@ -656,7 +628,7 @@ This is a remote-code-execution channel into the game process. It is treated as 
 
 | Symptom | Cause |
 |---|---|
-| `no endpoint file at …` | Game not running, or built without `-p:Mcp=true`, or the marker file is missing |
+| `no endpoint file at …` | Game not running, or BugtopiaMcp.dll is not enabled under Plugins |
 | `no answer on 127.0.0.1:8770 — the endpoint file is stale` | The game exited without a clean shutdown; the file is removed on `Stop()` |
 | `the game rejected the handshake (stale token)` | The game restarted and rotated its token — the bridge re-reads `endpoint.json` on its next reconnect, so just retry |
 | `world_not_ready` | Login or loading screen. `status`, `ping`, `log.tail` still work |
