@@ -79,6 +79,8 @@ namespace HeartopiaMod
         private const float PetFeedEatenFavoriteCacheSeconds = 8f;
         private bool petFeedSkipFiveStarFood = true;
         private bool petFeedSkipRareFood = true;
+        private readonly Dictionary<int, int> entityRarityByStaticId = new Dictionary<int, int>();
+        private bool entityRarityUnavailableLogged;
         private readonly List<PetFeedFavoriteUiRow> petFeedFavoriteUiRows = new List<PetFeedFavoriteUiRow>();
         private Vector2 petFeedFavoriteUiScroll = Vector2.zero;
 
@@ -1934,7 +1936,84 @@ namespace HeartopiaMod
 
             candidates.RemoveAll(food => food != null
                 && food.StaticId > 0
-                && WildAnimalFeedRareFishStaticIds.Contains(food.StaticId));
+                && (WildAnimalFeedRareFishStaticIds.Contains(food.StaticId)
+                    || this.IsEntityRarityFive(food.StaticId)));
+        }
+
+        // TableEntity.rarity (byte 1-5). Catalog rarity, not the stack's starRate.
+        private bool IsEntityRarityFive(int staticId)
+        {
+            return this.TryGetEntityRarity(staticId, out int rarity) && rarity == 5;
+        }
+
+        private bool TryGetEntityRarity(int staticId, out int rarity)
+        {
+            rarity = 0;
+            if (staticId <= 0)
+            {
+                return false;
+            }
+
+            if (this.entityRarityByStaticId.TryGetValue(staticId, out rarity))
+            {
+                return true;
+            }
+
+            if (!this.TryReadEntityRarityAuraMono(staticId, out rarity))
+            {
+                return false;
+            }
+
+            this.entityRarityByStaticId[staticId] = rarity;
+            return true;
+        }
+
+        private unsafe bool TryReadEntityRarityAuraMono(int staticId, out int rarity)
+        {
+            rarity = 0;
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                IntPtr tableDataClass = this.TryGetPetFeedAuraMonoTableDataClass();
+                if (tableDataClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr getEntityMethod = this.FindAuraMonoMethodOnHierarchy(tableDataClass, "GetEntity", 2);
+                if (getEntityMethod == IntPtr.Zero)
+                {
+                    if (!this.entityRarityUnavailableLogged)
+                    {
+                        this.entityRarityUnavailableLogged = true;
+                        this.PetFeedLog("Entity rarity unavailable: TableData.GetEntity(int,bool) missing");
+                    }
+
+                    return false;
+                }
+
+                bool needException = false;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&staticId);
+                args[1] = (IntPtr)(&needException);
+                IntPtr entityObj = auraMonoRuntimeInvoke(getEntityMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || entityObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                return this.TryGetMonoIntMember(entityObj, "rarity", out rarity);
+            }
+            catch
+            {
+                rarity = 0;
+                return false;
+            }
         }
 
         private HashSet<int> BuildPetFeedStaticIdSet(List<int> staticIds)

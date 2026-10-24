@@ -111,7 +111,7 @@ Transfer grid can filter tiles by star when picking stacks (same `autoSellStarFi
 | **Daily Quest probe** | Same | N/A (reads `DailyOrderSystem` / tasks) | AuraMono table + task rows | Logs only | N/A | BepInEx / `bugtopia.log` dump |
 | **Wild animal feed** | New Features → Animal Care | Backpack (+ AuraMono path) | `GetAllItem` per storage; `GetAnimalFoodThough` | Allowed food static IDs; fullness for animal **group**; skip 5★ food; favorites boost bond in score | **SortScore ↓** = `bondExp×10000 + fullness` (favorite bond % bonus) | Trough feed commands |
 | **Wild animal gifts** | Animal Care | ECS entity scan (`WildAnimalGiftFeature`) | Pending `AnimalGroup` from `HaveGift()`; gift box or `HaveGift(entity)` + group match | Order discovered in entity list | `AnimalProtocolManager.TakeGift` per `netId` (~0.45 s apart) |
-| **Pet feed** | Features → Pet Care | `PetSystem.InitFoods` + `GetFoods()` | `InitDogFoods` / `InitCatFoods` (`TableDogfood.dogfood`, `TableCatfood.catFood`) | `Count > 0`, `Fullness > 0`, not locked; picker is per species; per-pet **type** (`staticId`); skip 5-star and skip-rare | Chosen type: **star ↑**. Otherwise favorite rank, then **fullness ↑**, **star ↑**, **staticId ↑** | `Begin` feed with the chosen stacks' `netId`s |
+| **Pet feed** | Features → Pet Care | `PetSystem.InitFoods` + `GetFoods()` | `InitDogFoods` / `InitCatFoods` (`TableDogfood.dogfood`, `TableCatfood.catFood`) | `Count > 0`, `Fullness > 0`, not locked; picker is per species; per-pet **type** (`staticId`); skip 5-star (`starRate`) and skip-rare (weather fish + `Entity.rarity == 5`) | Chosen type: **star ↑**. Otherwise favorite rank, then **fullness ↑**, **star ↑**, **staticId ↑** | `Begin` feed with the chosen stacks' `netId`s |
 | **Auto Eat / Auto Repair** | Features → Food & Repair | Bag UI automation | Hard-coded UI paths under `XDUIRoot` | Repair kit / configured food key | First matching UI slot | Clicks Use / eat |
 | **Warehouse Anywhere** | Bag / Warehouse (toggle) | N/A while bag closed | Detects bag open via Mono | Unlocks warehouse tab in bag UI (`TabWidget`, `SetBtnFrame`) | N/A | Client UI only — **not** API transfer |
 
@@ -177,7 +177,7 @@ Config: **Skip 5 Star Items** persisted in `KeybindConfigData.dailyQuestSubmitSk
 
 - Scans backpack storage(s) for food static IDs valid for the trough **group**.
 - **Skip 5 Star Food** excludes `starRate >= 5` before scoring.
-- **Skip Rare Food** excludes the weather-gated fish in `WildAnimalFeedRareFishStaticIds` (never spawn in sunny weather; regenerate with `conditional_spawns.py --weather-not 1` after an update that adds fish).
+- **Skip Rare Food** excludes the weather-gated fish in `WildAnimalFeedRareFishStaticIds` (never spawn in sunny weather; regenerate with `conditional_spawns.py --weather-not 1` after an update that adds fish) and any item with `TableEntity.rarity == 5`.
 - Picks highest **SortScore** (bond + fullness, favorites weighted).
 - Reserves `netId` counts within one bulk run so the same stack is not double-spent.
 

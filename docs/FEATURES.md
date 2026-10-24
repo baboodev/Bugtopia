@@ -1651,7 +1651,7 @@ Reuse a captured stove set on every start **without re-scanning**, so you can ru
 - Cooldown between bulk feed runs.
 - Per-pet single feed from UI list.
 - Food list from `PetSystem.InitFoods` + `GetFoods()` (not a full-bag scan). `InitDogFoods` keeps rows with `TableDogfood.dogfood`; `InitCatFoods` keeps rows with `TableCatfood.catFood`. The picker shows only the open pet's species, so a dog does not see fish. With no per-pet choice, sorts by favorite rank, then **lowest fullness**, then **lowest star**, then `staticId`.
-- Each owned pet remembers a food **type** (`staticId`), keyed by `breedId:eyeId:whiteId:sex` from the saved pet record. The choice does not pin a backpack stack. At feed time the mod takes that type's lowest-star stack. **Skip 5 star food** drops `starRate == 5` with no fallback. **Skip Rare Food** (persisted, default on) drops the same fish staticIds as animal troughs. A pet with no choice still uses the favorite ranking, under both filters.
+- Each owned pet remembers a food **type** (`staticId`), keyed by `breedId:eyeId:whiteId:sex` from the saved pet record. The choice does not pin a backpack stack. At feed time the mod takes that type's lowest-star stack. **Skip 5 star food** drops `starRate == 5` with no fallback. **Skip Rare Food** (persisted, default on) drops the same fish staticIds as animal troughs, and any item whose `TableEntity.rarity` is 5 (`TableData.GetEntity`). A pet with no choice still uses the favorite ranking, under both filters.
 
 See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
 
@@ -1823,7 +1823,7 @@ Full pipeline: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#bag--warehouse-tr
 
 - Scans **backpack** via `GetAllItem`; matches food allowed for the animal **group** (fullness table per `staticId` + star).
 - **Skip 5 Star Food** (default on): never uses 5★ food. This, Skip Rare Food and Skip Egg are saved in the config.
-- **Skip Rare Food** (default on): never uses the 31 fish that cannot be caught in sunny weather (rain/snow and/or rainbow only) — `WildAnimalFeedRareFishStaticIds`, generated with `tools/HeartopiaTables/conditional_spawns.py --weather-not 1`.
+- **Skip Rare Food** (default on): never uses the 31 fish that cannot be caught in sunny weather (rain/snow and/or rainbow only) — `WildAnimalFeedRareFishStaticIds`, generated with `tools/HeartopiaTables/conditional_spawns.py --weather-not 1` — and never uses an item whose `TableEntity.rarity` is 5.
 - Picks food with highest score: bond EXP (favorites weighted) + fullness contribution.
 - Manual **Feed**; separate from daily quests.
 

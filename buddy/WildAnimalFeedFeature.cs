@@ -1768,7 +1768,8 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (this.wildAnimalFeedSkipRareFood && staticId > 0 && WildAnimalFeedRareFishStaticIds.Contains(staticId))
+            if (this.wildAnimalFeedSkipRareFood && staticId > 0
+                && (WildAnimalFeedRareFishStaticIds.Contains(staticId) || this.IsEntityRarityFive(staticId)))
             {
                 skipReason = WildAnimalFeedSkipReason.Rare;
                 return false;
