@@ -382,9 +382,6 @@ namespace HeartopiaMod
             // load covers a session. It reflects and allocates a little on each sample, which is
             // fine HERE and only here — do not move this call onto a per-frame path.
             this.RegisterWorldReadyCallback(InjectionGateCanary.WorldReadyCallbackName, InjectionGateCanary.SampleOnWorldReady);
-            // User dlls in %LocalLow%/Bugtopia/Plugins. Once per process; the callback returns
-            // true on later worlds without scanning again (PluginHost.OnWorldReady).
-            this.RegisterWorldReadyCallback("UserPlugins", PluginHost.OnWorldReady);
             // The hook-state report is emitted by the canary itself, alongside every reading it
             // logs — no separate callback, so the two can never drift apart in the log.
         }

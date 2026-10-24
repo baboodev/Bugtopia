@@ -24,7 +24,7 @@ build-all.bat
 
 Configure your game path: copy `buddy/Directory.Build.props.example` → `buddy/Directory.Build.props`.
 
-That build also compiles every project under `plugins/`, and every project under `internal-plugins/` when that folder exists. Output is each project's `bin/Release`. Nothing is copied into the game folder and nothing is enabled for you. `-p:BuildPlugins=false` skips the plugins.
+That build also compiles every project under `plugins/`, and every project under `internal-plugins/` when that folder exists, and copies each dll into `%LocalLow%/Bugtopia/Plugins`. It does not enable them. `-p:BuildPlugins=false` skips the plugins.
 
 ## Plugins
 
@@ -37,7 +37,7 @@ A release attaches the tracked plugins, built against `bugtopia-bepinex.dll`:
 | `BugtopiaMcp.dll` | Agent bridge. Adds an **MCP Bridge** page. Writes and unsafe stay off until switched on for that session. [docs/MCP_BRIDGE.md](docs/MCP_BRIDGE.md) |
 | `HelloBugtopia.dll` | Sample plugin |
 
-Copy the dll into the Plugins folder and enable it. `buddy/build-mcp.bat` builds `BugtopiaMcp` and copies it there; it still does not enable it.
+A local `buddy/build-all.bat` copies those dlls into the Plugins folder and does not enable them. A dll from a release still has to be copied there by hand.
 
 `internal-plugins/` is local and gitignored. The same mod build compiles it when the folder is present, and skips it when it is not. Those projects are not in the release.
 

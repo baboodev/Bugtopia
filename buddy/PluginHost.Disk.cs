@@ -52,8 +52,8 @@ namespace HeartopiaMod
         {
             try
             {
-                // Before any other install log line, so startup is in the ring. The bridge plugin
-                // loads later, on world-ready, and would otherwise miss everything until then.
+                // Before any other install log line, so startup is in the ring. Enabled plugins load
+                // at the end of OnInitializeMelon, after this, and read the ring from there.
                 ModLogger.EnableRing();
                 EnsureFolder();
                 McpQuitSignal.Install();
@@ -95,13 +95,15 @@ namespace HeartopiaMod
             }
         }
 
-        // Once per process, on the first world-ready. Loads only dlls the user has turned on.
-        // A new dll stays unloaded until Enabled is checked. Later worlds do not reload; Reload does.
-        internal static bool OnWorldReady()
+        // Once per process, from the end of OnInitializeMelon — before a world exists. Loads only
+        // dlls the user has turned on. A new dll stays unloaded until Enabled is checked.
+        // Later worlds do not reload; Reload does. A plugin's Load and Tick must not resolve game
+        // code until IHostApi.IsWorldReady.
+        internal static void LoadEnabledFromDisk()
         {
             if (diskLoaded)
             {
-                return true;
+                return;
             }
 
             diskLoaded = true;
@@ -113,8 +115,6 @@ namespace HeartopiaMod
             {
                 ModLogger.Warning("[Plugin] disk scan failed: " + ex.Message);
             }
-
-            return true;
         }
 
         internal static void ReloadFromDisk()

@@ -557,6 +557,11 @@ namespace HeartopiaMod
             {
                 ModLogger.Msg("[ERR] BubbleFeature init failed: " + ex.Message);
             }
+
+            // Enabled disk plugins. After the toast path exists, and before the first OnUpdate, so
+            // they are loaded on the login screen. Their Load/Tick must not resolve game code until
+            // IsWorldReady — this scan itself only reads the Plugins folder.
+            PluginHost.LoadEnabledFromDisk();
         }
 
         // Token: 0x06000004 RID: 4 RVA: 0x00002390 File Offset: 0x00000590

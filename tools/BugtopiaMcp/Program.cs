@@ -945,9 +945,9 @@ namespace BugtopiaMcp
                 error = "no endpoint file at " + path + " — the bridge is not up in the game. Causes,"
                         + " in order of likelihood:\n"
                         + "  1. BugtopiaMcp.dll is not enabled. It lives in %LocalLow%\\Bugtopia\\Plugins"
-                        + " and stays unloaded until Enabled is turned on under Plugins. buddy\\build-mcp.bat"
+                        + " and stays unloaded until Enabled is turned on under Plugins. buddy\\build-all.bat"
                         + " builds it and copies it there; it does not enable it.\n"
-                        + "  2. the game is not running, or it is still on the way to the first world.\n"
+                        + "  2. the game is not running, or the mod has not finished starting.\n"
                         + "  3. the plugin failed to load — read Logs\\bugtopia.log for [Mcp] or [Plugin].";
                 return false;
             }

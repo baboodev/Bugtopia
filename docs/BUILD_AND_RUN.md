@@ -98,7 +98,7 @@ Output — a single DLL that works under both MelonLoader and BepInEx (needs bot
 buddy/bin/Universal/Release/bugtopia.dll
 ```
 
-The same command compiles every `plugins/*/*.csproj`, and every `internal-plugins/*/*.csproj` when that folder exists, into each project's `bin/Release/net6.0/`. It does not copy those dlls into `%LocalLow%/Bugtopia/Plugins` and does not enable them. `-p:BuildPlugins=false` skips the plugin projects. A GitHub release attaches the tracked plugin dlls, built against `bugtopia-bepinex.dll`. See [PLUGINS.md](PLUGINS.md).
+The same command compiles every `plugins/*/*.csproj`, and every `internal-plugins/*/*.csproj` when that folder exists, and copies each dll into `%LocalLow%/Bugtopia/Plugins`. It does not enable them. `-p:BuildPlugins=false` skips the plugin projects. A GitHub release attaches the tracked plugin dlls, built against `bugtopia-bepinex.dll`. See [PLUGINS.md](PLUGINS.md).
 
 ### Single loader (needs only that loader installed)
 

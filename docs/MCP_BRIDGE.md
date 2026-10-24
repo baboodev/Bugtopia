@@ -34,23 +34,17 @@ The bridge is a plugin. The mod build does not contain it, and there is no marke
 
 **1 — Build and copy the plugin.**
 
-`buddy/build-all.bat` compiles `plugins/BugtopiaMcp` with the mod. The dll lands in
-`plugins/BugtopiaMcp/bin/Release/net6.0/`. A GitHub release also attaches `BugtopiaMcp.dll`,
-built against `bugtopia-bepinex.dll`.
-
-```bat
-buddy\build-mcp.bat
-```
-
-That builds the plugin against the BepInEx `bugtopia.dll` already in `buddy/bin` and copies
-`BugtopiaMcp.dll` to `%LocalLow%/Bugtopia/Plugins/`. It does not rebuild the mod and it does not
-write `BugtopiaMcp.enabled`. Copying the release asset into that folder is the same step.
+`buddy/build-all.bat` builds the mod and every disk plugin, and copies each dll into
+`%LocalLow%/Bugtopia/Plugins`. It does not write `BugtopiaMcp.enabled`. A GitHub release also
+attaches `BugtopiaMcp.dll`, built against `bugtopia-bepinex.dll`; copying that file into the same
+folder is the same step.
 
 **2 — Enable it in the mod menu.**
 
-Enter a world, open the menu (Insert), and turn **Enabled** on for BugtopiaMcp under Plugins. The
-first load is always that checkbox. Later launches load it again because the `.enabled` file is
-still there. The log line is `[Mcp] listening on 127.0.0.1:8770`.
+Open the menu (Insert) and turn **Enabled** on for BugtopiaMcp under Plugins. The first load is
+always that checkbox. Later launches load it at mod start, before a world, because the `.enabled`
+file is still there. The log line is `[Mcp] listening on 127.0.0.1:8770`. Ops that need a world
+answer `world_not_ready` until the gate opens.
 
 The plugin adds an **MCP Bridge** page on the Plugins tab: live status, and the write / unsafe toggles.
 Both default off and are forgotten when the game exits.

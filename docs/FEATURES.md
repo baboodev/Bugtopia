@@ -2231,10 +2231,11 @@ The tab is its own top-level sidebar entry (display position 8, ahead of Setting
 ## Plugins Tab
 
 Own sidebar entry, shown only while `%LocalLow%/Bugtopia/Plugins` contains at least one plugin dll.
-A dll stays unloaded until Enabled is turned on; that choice is remembered. Inner tabs are
+A dll stays unloaded until Enabled is turned on; that choice is remembered, and the next launch
+loads it at mod start, before a world. Inner tabs are
 Installed (enable, reload, quarantine) plus one tab per page a plugin adds.
 
-Shipped with the release, and also compiled by `buddy/build-all.bat`:
+Shipped with the release. `buddy/build-all.bat` compiles them and copies the dlls into the Plugins folder:
 
 | Dll | Page |
 |-----|------|

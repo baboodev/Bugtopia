@@ -116,6 +116,7 @@ public partial class HeartopiaComplete  // NOT MelonMod
 3. Load config: localization, radar icons, teleports, keybinds, theme, patrols, radar, bird farm.
 4. Log legacy auto-fish disabled message.
 5. `ModCoroutines.Start(NetCookCoroutineWarmupRoutine())`.
+6. `PluginHost.LoadEnabledFromDisk()` — enabled plugins, before a world. Their game Mono waits for `IsWorldReady`.
 
 The mod installs **no** Harmony / IL2CPP `.text` patches — game code is reached via Mono
 `NativeDetour`, AuraMono, EventCenter dispatch-detours, and `SendCommand`. Do not add new

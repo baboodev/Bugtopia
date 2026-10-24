@@ -43,11 +43,13 @@ namespace HeartopiaMod.Plugins
     /// Every method runs on the Unity main thread.
     public interface IBugtopiaPlugin
     {
-        /// Called once, immediately after load. Throwing here aborts the load and unloads the ALC.
+        /// Called once, immediately after load. An enabled disk plugin is loaded at mod start,
+        /// before a world exists. Throwing here aborts the load and unloads the ALC.
         void Load(IHostApi host);
 
-        /// Called every frame from the mod's OnUpdate, inside a circuit breaker: a tick that throws
-        /// repeatedly cools down and is eventually disabled rather than spamming every frame.
+        /// Called every frame from the mod's OnUpdate, including the login screen, inside a circuit
+        /// breaker: a tick that throws repeatedly cools down and is eventually disabled rather than
+        /// spamming every frame. Game Mono waits until <see cref="IHostApi.IsWorldReady"/>.
         void Tick();
 
         /// Called once before unload. Best-effort cleanup; the host revokes coroutines itself.
@@ -58,7 +60,8 @@ namespace HeartopiaMod.Plugins
         string Call(string method, string argsJson);
     }
 
-    /// What the host lends a plugin. Everything here is safe to call from Load/Tick/Unload.
+    /// What the host lends a plugin. Safe to call from Load/Tick/Unload. Game Mono is the exception:
+    /// FindClass, Invoke and GetComponents fault the process until <see cref="IHostApi.IsWorldReady"/>.
     public interface IHostApi
     {
         /// The plugin's id: the file name without extension for a dll in the plugins folder,
@@ -204,7 +207,8 @@ namespace HeartopiaMod.Plugins
     public interface IMonoApi
     {
         /// Resolves a type by full name, trying the build's spelling variants (Gameplay/GamePlay,
-        /// Il2Cpp prefix, ScriptsRefactory). IntPtr.Zero when nothing matched.
+        /// Il2Cpp prefix, ScriptsRefactory). IntPtr.Zero when nothing matched. Faults the process
+        /// if called before <see cref="IHostApi.IsWorldReady"/>.
         IntPtr FindClass(string fullName);
 
         /// Finds a method by name AND parameter count, walking the base chain. The arity matters:

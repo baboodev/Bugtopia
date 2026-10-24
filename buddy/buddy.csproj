@@ -11,10 +11,12 @@
          leave "https://t.me/..." sitting in the DLL's string heap for anyone to grep. -->
     <Telegram Condition="'$(Telegram)' == ''">true</Telegram>
     <!-- BuildPlugins: true (default) builds every plugins\*\*.csproj and, when the folder exists,
-         every internal-plugins\*\*.csproj, against the dll just produced. false skips that. A missing
+         every internal-plugins\*\*.csproj, against the dll just produced, then copies each dll and
+         pdb into UserPluginsDir. It does not write .enabled. false skips that. A missing
          internal-plugins folder is not an error. CI sets ContinuousIntegrationBuild and skips both,
          because those projects need the local interop folder. -->
     <BuildPlugins Condition="'$(BuildPlugins)' == ''">true</BuildPlugins>
+    <UserPluginsDir Condition="'$(UserPluginsDir)' == ''">$(USERPROFILE)\AppData\LocalLow\Bugtopia\Plugins</UserPluginsDir>
     <HeartopiaDir Condition="'$(HeartopiaDir)' == ''">D:\SteamLibrary\steamapps\common\Heartopia</HeartopiaDir>
     <!-- BepInEx root. Defaults to the install-next-to-the-game layout (and CI, where the deps zip
          extracts to BepInEx\core + MelonLoader\net6 side by side under HeartopiaDir), but Doorstop's
@@ -597,7 +599,8 @@
   </Target>
 
   <!-- Disk plugins reference bugtopia.dll as a file, so they build after this project and take its
-       output path. A plugin failure fails this build. -->
+       output path. A plugin failure fails this build. The copy does not: a game that has the dll
+       loaded locks it, and that warns instead of failing, same as DeployModToGame. -->
   <Target Name="BuildDiskPlugins" AfterTargets="Build"
           Condition="'$(ContinuousIntegrationBuild)' != 'true' and '$(BuildPlugins)' != 'false'">
     <ItemGroup>
@@ -609,5 +612,28 @@
              Condition="'@(DiskPluginProject)' != ''" />
     <Exec Command="dotnet build &quot;%(DiskPluginProject.FullPath)&quot; -c Release -p:BugtopiaDll=&quot;$(TargetPath)&quot; -p:InteropDir=&quot;$(BepInExDir)\interop&quot; -p:BepInExCore=&quot;$(BepInExDir)\core&quot; --nologo"
           Condition="'@(DiskPluginProject)' != ''" />
+    <ItemGroup>
+      <BuiltPluginDll Include="$(MSBuildThisFileDirectory)..\plugins\*\bin\Release\net6.0\*.dll" />
+      <BuiltPluginDll Include="$(MSBuildThisFileDirectory)..\internal-plugins\*\bin\Release\net6.0\*.dll"
+                      Condition="Exists('$(MSBuildThisFileDirectory)..\internal-plugins')" />
+      <BuiltPluginPdb Include="$(MSBuildThisFileDirectory)..\plugins\*\bin\Release\net6.0\*.pdb" />
+      <BuiltPluginPdb Include="$(MSBuildThisFileDirectory)..\internal-plugins\*\bin\Release\net6.0\*.pdb"
+                      Condition="Exists('$(MSBuildThisFileDirectory)..\internal-plugins')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BuiltPluginDll)"
+          DestinationFolder="$(UserPluginsDir)"
+          ContinueOnError="true"
+          Condition="'@(BuiltPluginDll)' != ''">
+      <Output TaskParameter="CopiedFiles" ItemName="DeployedPluginDll" />
+    </Copy>
+    <Copy SourceFiles="@(BuiltPluginPdb)"
+          DestinationFolder="$(UserPluginsDir)"
+          ContinueOnError="true"
+          Condition="'@(BuiltPluginPdb)' != ''" />
+    <Message Importance="high"
+             Text="Deployed %(DeployedPluginDll.Filename)%(DeployedPluginDll.Extension) -> $(UserPluginsDir)"
+             Condition="'@(DeployedPluginDll)' != ''" />
+    <Warning Text="A plugin dll was NOT copied into $(UserPluginsDir) (destination locked — is the game running?). That folder still has the previous file."
+             Condition="'@(BuiltPluginDll)' != '' and '@(DeployedPluginDll)' == ''" />
   </Target>
 </Project>
