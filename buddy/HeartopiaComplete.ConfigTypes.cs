@@ -357,6 +357,9 @@ namespace HeartopiaMod
             public bool MasterLogTutorialBlock = true;
             public bool autoIceSkatingEnabled;
             public int autoIceSkatingMinUltimateScore = 900;
+            // Absent on an old Config.xml. The initializer is what XmlSerializer keeps, so an
+            // upgrade still reports 100 on every stage.
+            public int pumpkinStageScore = 100;
             public bool autoIceSkatingOnlyX2Ultimate = true;
             public bool autoIceSkatingLast30sUltimate = true;
             public bool autoIceSkatingPerfectMove = true;

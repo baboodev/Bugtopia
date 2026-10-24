@@ -24,6 +24,8 @@ namespace HeartopiaMod
         private const float PumpkinResultTimeoutSeconds = 8f;
         private const float PumpkinPlaceBackoffSeconds = 1.0f;
         private const float PumpkinScanRadius = 60f;
+        private const int PumpkinForeignCap = 8;
+        private const float PumpkinHelpResultTimeoutSeconds = 45f;
         // Manual placement holds the rough entity 0.5 m above the base pivot. The placement
         // ghost root sits another 0.2 m up (its surface_frame); that is not the entity position.
         private const float PumpkinRoughAboveBaseMeters = 0.5f;
@@ -60,6 +62,7 @@ namespace HeartopiaMod
         private bool autoPumpkinEnabled;
         private bool autoPumpkinCollect;
         private bool autoPumpkinPlace;
+        private int pumpkinStageScore = PumpkinPerfectScore;
         private bool autoPumpkinWasEnabled;
         private KeyCode autoPumpkinHotkey = KeyCode.None;
 
@@ -90,6 +93,11 @@ namespace HeartopiaMod
         private uint pumpkinActiveNetId;
         private uint pumpkinActiveBaseNetId;
         private uint pumpkinIgnoreRoughNetId;
+        private readonly uint[] pumpkinForeignNetIds = new uint[PumpkinForeignCap];
+        private int pumpkinForeignCount;
+        private uint pumpkinCachedSelfNetId;
+        private bool pumpkinHelpSession;
+        private bool pumpkinJoinPredicateInstalled;
         private bool pumpkinResultSeen;
         private bool pumpkinResultSuccess;
         private uint pumpkinResultNetId;
@@ -237,17 +245,60 @@ namespace HeartopiaMod
             this.pumpkinResolveReady = this.IsGameEventHookInstalled(PumpkinJoinEventName)
                 && this.IsGameEventHookInstalled(PumpkinExpireEventName)
                 && this.IsGameEventHookInstalled(PumpkinResultEventName);
+            if (this.pumpkinResolveReady && !this.pumpkinJoinPredicateInstalled)
+            {
+                this.SetGameEventHookSuppressPredicate(PumpkinJoinEventName, PumpkinShouldSwallowJoin);
+                this.pumpkinJoinPredicateInstalled = true;
+            }
+
             return this.pumpkinResolveReady;
         }
 
         private void OnPumpkinJoinEvent(GameEventSnapshot e)
         {
-            if (!MasterLogPumpkinCarving)
+            uint player = e.ReadUInt32(0);
+            uint pumpkin = e.ReadUInt32(4);
+            if (MasterLogPumpkinCarving)
+            {
+                ModLogger.Msg("[PumpkinCarving] join player=" + player + " pumpkin=" + pumpkin);
+            }
+
+            if (!this.autoPumpkinEnabled
+                || this.pumpkinApiState != PumpkinApiState.FindRough
+                || this.pumpkinHelpSession
+                || player == 0U
+                || player != this.pumpkinCachedSelfNetId
+                || !this.PumpkinForeignContains(pumpkin))
             {
                 return;
             }
 
-            ModLogger.Msg("[PumpkinCarving] join player=" + e.ReadUInt32(0) + " pumpkin=" + e.ReadUInt32(4));
+            this.PumpkinBeginHelpSession(pumpkin);
+        }
+
+        private void PumpkinBeginHelpSession(uint pumpkinNetId)
+        {
+            this.pumpkinHelpSession = true;
+            this.pumpkinActiveNetId = pumpkinNetId;
+            this.pumpkinActiveBaseNetId = 0U;
+            this.pumpkinResultSeen = false;
+            this.pumpkinResultSuccess = false;
+            this.pumpkinResultNetId = 0U;
+            this.PumpkinSetSessionSuppress(true);
+            if (!this.TryPumpkinFinish(pumpkinNetId, out string status))
+            {
+                this.PumpkinSetStatus(status);
+                this.PumpkinEndSession();
+                this.pumpkinNextActionAt = Time.unscaledTime + PumpkinStartBackoffSeconds;
+                return;
+            }
+
+            this.PumpkinSetStatus("help " + status);
+            this.AddMenuNotification(this.L("Helped carve a pumpkin"), new Color(0.45f, 1f, 0.55f));
+            this.pumpkinApiState = PumpkinApiState.WaitResult;
+            this.pumpkinWaitStartedAt = Time.unscaledTime;
+            this.pumpkinSessionDeadline = this.pumpkinWaitStartedAt + PumpkinHelpResultTimeoutSeconds;
+            this.pumpkinNextActionAt = Time.unscaledTime;
         }
 
         private void OnPumpkinExpireEvent(GameEventSnapshot e)
@@ -370,8 +421,16 @@ namespace HeartopiaMod
                         return;
                     }
 
+                    this.PumpkinRefreshForeignStarted();
                     if (!this.TryFindPumpkinRough(out uint baseNetId, out uint pumpkinNetId, out string findStatus))
                     {
+                        if (this.pumpkinForeignCount > 0)
+                        {
+                            this.PumpkinSetStatus("help ready");
+                            this.pumpkinNextActionAt = Time.unscaledTime + PumpkinApiTickSeconds;
+                            return;
+                        }
+
                         if (this.autoPumpkinPlace && findStatus == "no rough" && Time.unscaledTime >= this.pumpkinPlaceNextAt)
                         {
                             bool placed = this.TryPumpkinAutoPlace(out string placeStatus);
@@ -420,6 +479,12 @@ namespace HeartopiaMod
                     return;
 
                 case PumpkinApiState.WaitResult:
+                    if (this.pumpkinHelpSession)
+                    {
+                        this.PumpkinWaitHelpResult();
+                        return;
+                    }
+
                     float waited = Time.unscaledTime;
                     bool roughBlocks = this.TryPumpkinActiveRoughStillCarvable();
                     if (!this.pumpkinResultSeen && roughBlocks && waited < this.pumpkinSessionDeadline)
@@ -500,10 +565,202 @@ namespace HeartopiaMod
         private void PumpkinEndSession()
         {
             this.PumpkinSetSessionSuppress(false);
+            this.pumpkinHelpSession = false;
             this.pumpkinActiveNetId = 0U;
             this.pumpkinActiveBaseNetId = 0U;
             this.pumpkinResultNetId = 0U;
             this.pumpkinApiState = PumpkinApiState.FindRough;
+        }
+
+        private void PumpkinWaitHelpResult()
+        {
+            float waited = Time.unscaledTime;
+            bool present = this.TryPumpkinRoughViewPresent(this.pumpkinActiveNetId);
+            if (!this.pumpkinResultSeen && present && waited < this.pumpkinSessionDeadline)
+            {
+                return;
+            }
+
+            int elapsedMs = (int)((waited - this.pumpkinWaitStartedAt) * 1000f);
+            bool success = this.pumpkinResultSeen && this.pumpkinResultSuccess;
+            bool gone = !this.pumpkinResultSeen && !present;
+            if (success || gone)
+            {
+                if (gone)
+                {
+                    this.PumpkinLogTiming("help rough gone " + elapsedMs + "ms net=" + this.pumpkinActiveNetId);
+                }
+
+                this.pumpkinDoneCount++;
+                this.PumpkinSetStatus("help done " + this.pumpkinDoneCount);
+            }
+            else
+            {
+                this.PumpkinLogTiming((this.pumpkinResultSeen ? "help fail " : "help result timeout ") + elapsedMs + "ms");
+                this.PumpkinSetStatus(this.pumpkinResultSeen ? "help fail" : "help result timeout");
+            }
+
+            uint spentRough = this.pumpkinActiveNetId;
+            this.PumpkinEndSession();
+            if (spentRough != 0U)
+            {
+                this.pumpkinIgnoreRoughNetId = spentRough;
+            }
+
+            this.pumpkinNextActionAt = Time.unscaledTime + PumpkinScanBackoffSeconds;
+        }
+
+        private bool TryPumpkinRoughViewPresent(uint netId)
+        {
+            if (netId == 0U || this.pumpkinViewClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                return true;
+            }
+
+            List<uint> pins = new List<uint>();
+            try
+            {
+                if (!this.TryAuraMonoGetComponentObjects(this.pumpkinViewClass, out List<IntPtr> views, pins) || views == null)
+                {
+                    return true;
+                }
+
+                for (int i = 0; i < views.Count; i++)
+                {
+                    IntPtr view = views[i];
+                    if (view != IntPtr.Zero
+                        && this.TryHomelandFarmTryReadAuraMonoComponentNetId(view, out uint id)
+                        && id == netId)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+        }
+
+        private static bool PumpkinShouldSwallowJoin(IntPtr eventPtr)
+        {
+            HeartopiaComplete host = Instance;
+            if (host == null || !host.autoPumpkinEnabled || eventPtr == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            uint player = (uint)Marshal.ReadInt32(eventPtr, 0);
+            if (player == 0U || player != host.pumpkinCachedSelfNetId)
+            {
+                return false;
+            }
+
+            uint pumpkin = (uint)Marshal.ReadInt32(eventPtr, 4);
+            int count = host.pumpkinForeignCount;
+            for (int i = 0; i < count; i++)
+            {
+                if (host.pumpkinForeignNetIds[i] == pumpkin)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool PumpkinForeignContains(uint netId)
+        {
+            int count = this.pumpkinForeignCount;
+            for (int i = 0; i < count; i++)
+            {
+                if (this.pumpkinForeignNetIds[i] == netId)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void PumpkinRefreshForeignStarted()
+        {
+            this.pumpkinForeignCount = 0;
+            this.pumpkinCachedSelfNetId = 0U;
+            if (!this.autoPumpkinEnabled
+                || !this.TryResolveSelfPlayerNetId(out uint self)
+                || self == 0U
+                || !this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                return;
+            }
+
+            this.pumpkinCachedSelfNetId = self;
+            List<uint> pins = new List<uint>();
+            try
+            {
+                if (!this.TryAuraMonoGetComponentObjects(this.pumpkinBuildClass, out List<IntPtr> builds, pins) || builds == null)
+                {
+                    return;
+                }
+
+                Dictionary<uint, uint> ownerByNet = new Dictionary<uint, uint>();
+                for (int i = 0; i < builds.Count; i++)
+                {
+                    IntPtr build = builds[i];
+                    if (build != IntPtr.Zero
+                        && this.TryHomelandFarmTryReadAuraMonoComponentNetId(build, out uint netId)
+                        && netId != 0U
+                        && this.TryPumpkinInvokeUInt(build, this.pumpkinBuildOwnerMethod, out uint ownerId))
+                    {
+                        ownerByNet[netId] = ownerId;
+                    }
+                }
+
+                if (!this.TryAuraMonoGetComponentObjects(this.pumpkinViewClass, out List<IntPtr> views, pins) || views == null)
+                {
+                    return;
+                }
+
+                bool havePlayer = this.TryGetLocalPlayerPosition(out Vector3 playerPos);
+                int count = 0;
+                for (int i = 0; i < views.Count && count < PumpkinForeignCap; i++)
+                {
+                    IntPtr view = views[i];
+                    if (view == IntPtr.Zero
+                        || !this.TryReadPumpkinComponentData(view, out int finishedId, out bool rotate)
+                        || !rotate
+                        || finishedId == 0
+                        || !this.TryHomelandFarmTryReadAuraMonoComponentNetId(view, out uint roughNetId)
+                        || roughNetId == 0U
+                        || !ownerByNet.TryGetValue(roughNetId, out uint ownerId)
+                        || ownerId == self)
+                    {
+                        continue;
+                    }
+
+                    if (havePlayer && this.TryGetAuraMonoEntityPositionFromComponent(view, out Vector3 pos)
+                        && Vector3.Distance(playerPos, pos) > PumpkinScanRadius)
+                    {
+                        continue;
+                    }
+
+                    this.pumpkinForeignNetIds[count++] = roughNetId;
+                }
+
+                this.pumpkinForeignCount = count;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
         }
 
         private void PumpkinSetStatus(string message)
@@ -550,7 +807,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            int score = PumpkinPerfectScore;
+            int score = Mathf.Clamp(this.pumpkinStageScore, 0, PumpkinPerfectScore);
             IntPtr* addArgs = stackalloc IntPtr[1];
             addArgs[0] = (IntPtr)(&score);
             for (int i = 0; i < PumpkinStageCount; i++)
@@ -607,7 +864,8 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                status = "Finish(" + pumpkinNetId + ",[100,100,100,100])";
+                int score = Mathf.Clamp(this.pumpkinStageScore, 0, PumpkinPerfectScore);
+                status = "Finish(" + pumpkinNetId + ",[" + score + "," + score + "," + score + "," + score + "])";
                 return true;
             }
             finally

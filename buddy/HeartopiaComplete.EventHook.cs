@@ -114,6 +114,7 @@ namespace HeartopiaMod
             public int StringFieldOffset = -1; // -1 = capture no string field
             public bool ByNetId; // true => hook the 2-arg DispatchEvent<T>(uint netId, in T) overload
             public bool SuppressForward; // when true, detour swallows dispatch (no trampoline call)
+            public Func<IntPtr, bool> SuppressPredicate; // global detour only; Marshal reads, no mono calls
             public float NextResolveLogAt;
             public readonly List<Action<GameEventSnapshot>> Handlers = new List<Action<GameEventSnapshot>>();
             public int Slot;
@@ -134,6 +135,7 @@ namespace HeartopiaMod
         // Per-slot offset of a `string` field inside the event struct to capture BY VALUE, or -1.
         private static readonly int[] eventSlotStringOffset = CreateEventStringOffsets();
         private static readonly bool[] eventSlotSuppressForward = new bool[MaxEventHookSlots];
+        private static readonly Func<IntPtr, bool>[] eventSlotSuppressPredicate = new Func<IntPtr, bool>[MaxEventHookSlots];
         private static readonly int[] eventSlotHandlerCount = new int[MaxEventHookSlots];
         private static readonly DispatchEventHookDelegate[] eventSlotTrampoline = new DispatchEventHookDelegate[MaxEventHookSlots];
         private static readonly DispatchEventByNetIdHookDelegate[] eventSlotTrampolineNetId = new DispatchEventByNetIdHookDelegate[MaxEventHookSlots];
@@ -215,6 +217,23 @@ namespace HeartopiaMod
             if (entry.Installed)
             {
                 eventSlotSuppressForward[entry.Slot] = suppress;
+            }
+        }
+
+        // Global DispatchEvent only. The predicate runs inside the detour, before the trampoline,
+        // and may only Marshal.Read the event struct. A mono call here deadlocks.
+        internal void SetGameEventHookSuppressPredicate(string eventFullName, Func<IntPtr, bool> predicate)
+        {
+            if (string.IsNullOrEmpty(eventFullName)
+                || !this.gameEventHooksByName.TryGetValue(eventFullName, out GameEventHookEntry entry))
+            {
+                return;
+            }
+
+            entry.SuppressPredicate = predicate;
+            if (entry.Installed && !entry.ByNetId && entry.Slot >= 0 && entry.Slot < MaxEventHookSlots)
+            {
+                eventSlotSuppressPredicate[entry.Slot] = predicate;
             }
         }
 
@@ -558,6 +577,10 @@ namespace HeartopiaMod
 
                 eventSlotPayloadLen[entry.Slot] = entry.PayloadBytes;
                 eventSlotSuppressForward[entry.Slot] = entry.SuppressForward;
+                if (!entry.ByNetId)
+                {
+                    eventSlotSuppressPredicate[entry.Slot] = entry.SuppressPredicate;
+                }
                 eventSlotStringOffset[entry.Slot] = entry.StringFieldOffset;
                 this.SyncGameEventHookSlotHandlerCount(entry);
                 entry.Installed = true;
@@ -799,7 +822,24 @@ namespace HeartopiaMod
 
         private static void RouteEventSlot(int slot, IntPtr eventPtr)
         {
-            if (eventSlotSuppressForward[slot])
+            bool swallow = eventSlotSuppressForward[slot];
+            if (!swallow)
+            {
+                Func<IntPtr, bool> predicate = eventSlotSuppressPredicate[slot];
+                if (predicate != null)
+                {
+                    try
+                    {
+                        swallow = predicate(eventPtr);
+                    }
+                    catch (Exception)
+                    {
+                        swallow = false;
+                    }
+                }
+            }
+
+            if (swallow)
             {
                 if (eventSlotHandlerCount[slot] > 0)
                 {

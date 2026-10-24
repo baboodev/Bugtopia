@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -14,6 +15,8 @@ namespace HeartopiaMod
             public Toggle AutoToggle;
             public Toggle PlaceToggle;
             public Toggle CollectToggle;
+            public InputField ScoreField;
+            public string ScoreSeen;
             public GameObject StatusLabel;
             public string StatusShown;
             public int ErrorCount;
@@ -45,25 +48,34 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.AutoToggle.gameObject, 8f, 42f, 420f, 30f);
 
             GameObject hint = this.CreateUguiLabel(scrollContent, "Hint",
-                this.L("Reports a perfect score immediately. The carving panel stays closed."),
+                this.L("Reports the stage score immediately. The carving panel stays closed."),
                 11f, muted, false);
             this.TrySetUguiLabelWrapped(hint);
             PlaceUguiTopLeft(hint, 8f, 78f, w - 36f, 36f);
 
+            GameObject scoreCaption = this.CreateUguiLabel(scrollContent, "StageScoreCaption",
+                this.L("Stage score"), 12f, this.UguiKitTextColor(), false);
+            PlaceUguiTopLeft(scoreCaption, 8f, 118f, 150f, 22f);
+            handle.ScoreSeen = this.pumpkinStageScore.ToString();
+            handle.ScoreField = this.CreateUguiInputField(scrollContent, "StageScoreField",
+                handle.ScoreSeen, 3,
+                new System.Action<string>(this.OnUguiHobbyPumpkinScoreEdited));
+            PlaceUguiTopLeft(handle.ScoreField.gameObject, 164f, 116f, 64f, 24f);
+
             handle.PlaceToggle = this.CreateUguiCheckbox(scrollContent, "AutoPlacePumpkin",
                 this.L("Auto-place pumpkin from backpack"), this.autoPumpkinPlace,
                 new System.Action<bool>(this.OnUguiHobbyPumpkinPlaceToggled));
-            PlaceUguiTopLeft(handle.PlaceToggle.gameObject, 8f, 122f, 460f, 30f);
+            PlaceUguiTopLeft(handle.PlaceToggle.gameObject, 8f, 150f, 460f, 30f);
 
             handle.CollectToggle = this.CreateUguiCheckbox(scrollContent, "AutoCollectPumpkin",
                 this.L("Auto-collect carved pumpkin"), this.autoPumpkinCollect,
                 new System.Action<bool>(this.OnUguiHobbyPumpkinCollectToggled));
-            PlaceUguiTopLeft(handle.CollectToggle.gameObject, 8f, 158f, 420f, 30f);
+            PlaceUguiTopLeft(handle.CollectToggle.gameObject, 8f, 186f, 420f, 30f);
 
             handle.StatusShown = this.BuildUguiHobbyPumpkinStatusText();
             handle.StatusLabel = this.CreateUguiLabel(scrollContent, "Status", handle.StatusShown, 12f, this.UguiKitTextColor(), false);
-            PlaceUguiTopLeft(handle.StatusLabel, 8f, 196f, w - 36f, 22f);
-            this.SetUguiScrollContentHeight(scrollContent, 236f);
+            PlaceUguiTopLeft(handle.StatusLabel, 8f, 224f, w - 36f, 22f);
+            this.SetUguiScrollContentHeight(scrollContent, 260f);
 
             handle.Root = block;
             this.uguiShellHobbyPumpkin = handle;
@@ -96,6 +108,36 @@ namespace HeartopiaMod
         private void OnUguiHobbyPumpkinCollectToggled(bool value)
         {
             this.autoPumpkinCollect = value;
+        }
+
+        private void OnUguiHobbyPumpkinScoreEdited(string text)
+        {
+            UguiShellHobbyPumpkinHandle handle = this.uguiShellHobbyPumpkin;
+            if (handle == null)
+            {
+                return;
+            }
+
+            string raw = text ?? string.Empty;
+            if (!int.TryParse(raw, out int parsed))
+            {
+                handle.ScoreSeen = raw;
+                return;
+            }
+
+            int prev = this.pumpkinStageScore;
+            this.pumpkinStageScore = Mathf.Clamp(parsed, 0, PumpkinPerfectScore);
+            if (this.pumpkinStageScore != prev)
+            {
+                try { this.SaveAllSettings(); } catch { }
+            }
+
+            string normalized = this.pumpkinStageScore.ToString();
+            handle.ScoreSeen = normalized;
+            if (handle.ScoreField != null && !string.Equals(normalized, raw, StringComparison.Ordinal))
+            {
+                try { handle.ScoreField.SetTextWithoutNotify(normalized); } catch { }
+            }
         }
 
         private bool IsUguiShellHobbySubTabActive(int subIndex)
@@ -133,6 +175,15 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.AutoToggle, this.autoPumpkinEnabled);
                 this.SyncUguiToggleFromField(handle.PlaceToggle, this.autoPumpkinPlace);
                 this.SyncUguiToggleFromField(handle.CollectToggle, this.autoPumpkinCollect);
+                if (handle.ScoreField != null && !handle.ScoreField.isFocused)
+                {
+                    string shown = this.pumpkinStageScore.ToString();
+                    if (!string.Equals(handle.ScoreSeen, shown, StringComparison.Ordinal))
+                    {
+                        handle.ScoreSeen = shown;
+                        try { handle.ScoreField.SetTextWithoutNotify(shown); } catch { }
+                    }
+                }
                 this.SyncUguiSelfLabelText(handle.StatusLabel, ref handle.StatusShown, this.BuildUguiHobbyPumpkinStatusText());
             }
             catch

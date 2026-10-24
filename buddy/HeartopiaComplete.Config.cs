@@ -348,6 +348,7 @@ namespace HeartopiaMod
             // floods the log, so it always starts OFF and must be re-armed per session.
             data.autoIceSkatingEnabled = this.autoIceSkatingEnabled;
             data.autoIceSkatingMinUltimateScore = this.autoIceSkatingMinUltimateScore;
+            data.pumpkinStageScore = this.pumpkinStageScore;
             data.autoIceSkatingOnlyX2Ultimate = this.autoIceSkatingOnlyX2Ultimate;
             data.autoIceSkatingLast30sUltimate = this.autoIceSkatingLast30sUltimate;
             data.autoIceSkatingPerfectMove = this.autoIceSkatingPerfectMove;
@@ -781,6 +782,7 @@ namespace HeartopiaMod
             this.chatTranslateVerboseLog = false; // session-only diagnostic; never restored from config
             this.autoIceSkatingEnabled = data.autoIceSkatingEnabled;
             this.autoIceSkatingMinUltimateScore = Mathf.Clamp(data.autoIceSkatingMinUltimateScore, 0, AutoIceSkatingMinUltimateScoreSliderMax);
+            this.pumpkinStageScore = Mathf.Clamp(data.pumpkinStageScore, 0, PumpkinPerfectScore);
             this.autoIceSkatingOnlyX2Ultimate = data.autoIceSkatingOnlyX2Ultimate;
             this.autoIceSkatingLast30sUltimate = data.autoIceSkatingLast30sUltimate;
             this.autoIceSkatingPerfectMove = data.autoIceSkatingPerfectMove;
