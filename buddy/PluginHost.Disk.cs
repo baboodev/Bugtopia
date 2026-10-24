@@ -426,6 +426,11 @@ namespace HeartopiaMod
 
         // Opt-in is a sibling <id>.enabled written by the Plugins tab. <id>.disabled still wins,
         // so an older skip marker keeps the dll off even if both files are present.
+        internal static bool IsDiskEnabled(string id)
+        {
+            return IsPluginId(id) && IsDiskOptedIn(Folder(), id);
+        }
+
         private static bool IsDiskOptedIn(string dir, string id)
         {
             if (File.Exists(Path.Combine(dir, id + ".disabled")))

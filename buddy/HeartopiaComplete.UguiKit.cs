@@ -1912,6 +1912,8 @@ namespace HeartopiaMod
 
         // Checkbox: small square + accent checkmark faded by the Toggle itself. The whole row is
         // clickable (transparent raycast surface). Caller positions the returned Toggle's GO.
+        // The fade does not survive the page being deactivated and shown again — callers that
+        // stay on screen re-apply it via SyncUguiToggleFromField.
         private Toggle CreateUguiCheckbox(Transform parent, string name, string label, bool initial, System.Action<bool> onChanged)
         {
             GameObject row = this.CreateUguiGo(name, parent);

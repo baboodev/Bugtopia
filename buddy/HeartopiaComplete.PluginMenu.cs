@@ -570,6 +570,8 @@ namespace HeartopiaMod
             public readonly List<GameObject> TickLabels = new List<GameObject>();
             public readonly List<string> TickIds = new List<string>();
             public readonly List<string> TickSuffix = new List<string>();
+            public readonly List<Toggle> EnabledToggles = new List<Toggle>();
+            public readonly List<string> EnabledIds = new List<string>();
             public int ErrorCount;
         }
 
@@ -692,6 +694,8 @@ namespace HeartopiaMod
             handle.TickLabels.Clear();
             handle.TickIds.Clear();
             handle.TickSuffix.Clear();
+            handle.EnabledToggles.Clear();
+            handle.EnabledIds.Clear();
 
             float width = handle.PageW - 16f - 22f;
             float y = 8f;
@@ -739,6 +743,8 @@ namespace HeartopiaMod
                     Toggle toggle = this.CreateUguiCheckbox(handle.ListContent, "Enabled", this.L("Enabled"),
                         row.Enabled, value => PluginHost.SetDiskEnabled(id, value));
                     PlaceUguiTopLeft(toggle.gameObject, buttonX, y, 140f, 24f);
+                    handle.EnabledToggles.Add(toggle);
+                    handle.EnabledIds.Add(id);
                 }
 
                 if (row.Quarantined && !row.Loaded)
@@ -820,13 +826,25 @@ namespace HeartopiaMod
 
             try
             {
-                if (handle.SeenGeneration != PluginHost.Generation)
+                bool rebuilt = handle.SeenGeneration != PluginHost.Generation;
+                if (rebuilt)
                 {
                     this.RefreshPluginRows(handle);
-                    return;
                 }
 
-                if ((Time.frameCount % 15) != 0)
+                // Installed is sub-tab 0. Same checkmark repair as Settings: after this page is
+                // shown again, Image.OnEnable paints the mark opaque. SyncUguiToggleFromField
+                // forces the mark's GameObject active state from the real .enabled file.
+                if (handle.Bar != null && handle.Bar.ActiveIndex == 0)
+                {
+                    for (int i = 0; i < handle.EnabledToggles.Count && i < handle.EnabledIds.Count; i++)
+                    {
+                        this.SyncUguiToggleFromField(handle.EnabledToggles[i],
+                            PluginHost.IsDiskEnabled(handle.EnabledIds[i]));
+                    }
+                }
+
+                if (rebuilt || (Time.frameCount % 15) != 0)
                 {
                     return;
                 }
