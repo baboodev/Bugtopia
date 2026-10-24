@@ -695,13 +695,15 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
 
 - A floating window with a graphics-app picker (SV square + hue strip + hex field + the item's own
   palette), shown automatically while a **dyeable** object is focused in build mode.
-- **Why it is possible at all:** the game's palette is a client-UI limit, not a data or server one.
-  `DyeColorData.color` is a raw packed int, the live renderer `DyeColorClientUtil.GetDyeColor` uses
-  it directly with no palette lookup, and `DyeColorCosts` keys on `(staticId, body)` — the PART, so
-  the price does not depend on the colour. Measured 2026-09-09 on Workbench 330001: a pure-magenta
-  `0xFF00FFFF` applied, saved, survived a level transition out of the build sandbox, and the server
-  **charged 2 units of Dye (41001), 11 → 9**. A rejected op would have hit
-  `RevertInvalidLocalOperations` + `CraftBank.RevertCurrency` instead.
+- **What the owner sees is not what a visitor sees.** The owner's renderer
+  (`DyeColorClientUtil.GetDyeColor`) paints the raw packed `Color32`. A second client shows the
+  colour only when that `Color32` is byte-identical to one entry of this item's palette. One
+  channel off is drawn as the part's default, not as a near colour. Full rule, the window
+  measurement, and the Confirm/Save split: [DYE_REPLICATION.md](./DYE_REPLICATION.md).
+- `DyeColorCosts` keys on `(staticId, body)` — the part, so the price does not depend on which
+  swatch was picked. Measured 2026-09-09 on Workbench 330001: a pure-magenta `0xFF00FFFF` was
+  accepted and the server charged 2 Dye (`41001`, 11 → 9). That was not a two-client check. A
+  rejected op would have hit `RevertInvalidLocalOperations` + `CraftBank.RevertCurrency`.
 - The game itself ships an unreachable version of this: `DyeColorPanel_Auto` binds
   `customDyeBar@go` (H/S/V sliders, three recent-colour slots, confirm/cancel) and the server syncs
   `LatestUsedDayColorComponent` for the recent list — but the only code that reveals it hangs off a
@@ -718,8 +720,10 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
   black value ramp), so only a `img.color =` changes with the hue — no per-frame texture rebuild.
   Pointer input is POLLED like the kit's window drag (no injected `IDragHandler`). The object
   recolours live, throttled to 12.5 Hz with a guaranteed apply on release; the focus walk runs at
-  10 Hz and pauses entirely during a drag. Nothing is sent: the change rides the player's own build
-  confirm and the server prices it normally.
+  10 Hz and pauses entirely during a drag. Nothing is sent by the picker. Confirm on the dye
+  panel only queues a local `OptionDyeColor`. The upload is `BuildStatusPanel.Save`, and only
+  while craft state is Free — see [DYE_REPLICATION.md](./DYE_REPLICATION.md). A colour that is
+  not an exact palette entry stays on the owner.
 - Toggle persisted in config (`furnitureDyePickerEnabled`). Implementation:
   `FurnitureDyeFeature.cs` (model) + `HeartopiaComplete.UguiColorPicker.cs` (window).
 
