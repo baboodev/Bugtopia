@@ -1306,6 +1306,7 @@ is not available at all (a boss run) or every spot refused in a row.
 - Safety stop after 90 s continuous run; 60 s re-enable cooldown.
 - Stationary throttling reduces multi-catch when player barely moves.
 - Pending server ACK tracking for burst catches.
+- Client-local birds (pendant long-tailed tit and any other netId `>= 4000000000`) are photographed with command `BirdNetId = 0` and the real static id. The farm still tracks the entity netId for cooldown and the capture count. A stand netId still forces command `BirdNetId = 0`, matching manual `SavePhotoData`.
 - Optional crash trace logging to file when verbose flags enabled in source.
 
 ---
@@ -1747,7 +1748,9 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
 - Toggle per category; select all / clear all.
 - **Filter** sub-tab — icon grids of known insects and birds. An empty selection shows and
   collects every species. A selection is an allow-list: Radar markers for that category, and
-  Insect Farm / Bird Farm (including Combined Farm), keep only those species. Saved in
+  Insect Farm / Bird Farm (including Combined Farm), keep only those species. A pendant prefab
+  (`p_bird_bird119_pendant`) resolves to the same species as the plain prefab, so a selected
+  long-tailed tit still gets a marker. Saved in
   `RadarConfigData` (`insectSpeciesFilter`, `birdSpeciesFilter`). Settings → Reset Defaults
   does not clear it. While a list is non-empty the status overlay shows `Birds` / `Insects`
   with `N filtered`; each row has a checkbox on Settings → Status Overlay.

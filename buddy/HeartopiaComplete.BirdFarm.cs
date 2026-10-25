@@ -1325,9 +1325,10 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    // Same gate the take-side applies (StaticId >= 10000 / bird id families).
-                    // Without it, non-bird scannables (pendant decorations, camouflage) enter the
-                    // cache only to be discarded by every take → "cached target unavailable" loop.
+                    // Bird-family static ids only (51xxx and 61xxx–63xxx). Props and camouflage
+                    // pieces whose res id is outside those ranges never enter the cache.
+                    // A pendant whose LevelEntity res id IS a bird id (long-tailed tit 63002 on
+                    // p_bird_bird119_pendant) stays. Its client-local netId is zeroed at send time.
                     if (!this.IsBirdFarmStaticIdLikelyBird(candidateStaticId))
                     {
                         notBirdCount++;
@@ -3709,6 +3710,21 @@ namespace HeartopiaMod
                 || (staticId >= 61000 && staticId < 64000);
         }
 
+        // NetId.Min in EcsClient. Client-only ids (NetId.Next, pendant birds) live in
+        // [4000000000, uint.Max]. BirdWatchingSystem.SavePhotoData sends BirdNetId 0 for those;
+        // the server accepts the photo by static id and returns BirdNotExist if the local id is sent.
+        private const uint BirdFarmLocalNetIdMin = 4000000000U;
+
+        private static uint ResolveBirdPhotoCommandNetId(uint birdNetId, uint birdStandNetId)
+        {
+            if (birdStandNetId != 0U || birdNetId >= BirdFarmLocalNetIdMin)
+            {
+                return 0U;
+            }
+
+            return birdNetId;
+        }
+
         private bool TryInvokeAuraMonoBirdPhotoProtocol(int staticId, uint birdNetId, int birdActionType, uint birdStandNetId, bool perfectPhotoEnabled, out string status)
         {
             status = "Protocol unavailable";
@@ -3729,7 +3745,7 @@ namespace HeartopiaMod
 
                 int resolvedStaticId = staticId > 0 ? staticId : unchecked((int)birdNetId);
                 int usePhoto = 1;
-                uint resolvedBirdNetId = birdStandNetId == 0U ? birdNetId : 0U;
+                uint resolvedBirdNetId = ResolveBirdPhotoCommandNetId(birdNetId, birdStandNetId);
                 IntPtr detailClass = this.TryResolveAuraMonoBirdPhotoDetailInfoClass();
 
                 unsafe

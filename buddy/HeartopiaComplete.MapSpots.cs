@@ -605,7 +605,8 @@ namespace HeartopiaMod
         }
 
         // Tail after "p_bird_bird" / "p_birdphoto_birdphoto", with spawn and display suffixes removed.
-        // "p_bird_bird905_3_dots(Clone)" -> "905_3". "p_bird_bird101" -> "101". Empty when it is not a bird prefab.
+        // "p_bird_bird905_3_dots(Clone)" -> "905_3". "p_bird_bird101" -> "101".
+        // "p_bird_bird119_pendant(Clone)" -> "119" (long-tailed tit 63002). Empty when it is not a bird prefab.
         private static string GetBirdPrefabTail(string name)
         {
             if (string.IsNullOrEmpty(name))
@@ -646,6 +647,11 @@ namespace HeartopiaMod
                 else if (tail.EndsWith("_craft", StringComparison.Ordinal))
                 {
                     tail = tail.Substring(0, tail.Length - 6);
+                    stripped = true;
+                }
+                else if (tail.EndsWith("_pendant", StringComparison.Ordinal))
+                {
+                    tail = tail.Substring(0, tail.Length - 8);
                     stripped = true;
                 }
                 else if (tail.EndsWith("_t", StringComparison.Ordinal))

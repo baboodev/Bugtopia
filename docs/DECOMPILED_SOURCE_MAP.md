@@ -517,7 +517,7 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 - **Dump:** `ProtocolService/GamePlay/Bird/BirdProtocolManager.cs`
 - **Features:** Bird photo submit, multi-catch
 - **Access:** **R**, **A**
-- **How:** static method invoke OR AuraMono `FindAuraMonoClassByFullName`
+- **How:** static method invoke OR AuraMono `FindAuraMonoClassByFullName`. Command `BirdNetId` is `0` when `BirdStandNetId != 0` or the entity netId is local (`>= 4000000000`, `NetId.IsLocal`). `BirdWatchingSystem.SavePhotoData` does the same; sending the local id makes the server return `BirdErrorCode.BirdNotExist`.
 
 #### `BirdPhotoDetailInfo`
 - **Dump:** shared module bird watching
