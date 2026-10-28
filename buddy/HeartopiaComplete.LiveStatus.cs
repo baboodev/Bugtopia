@@ -136,14 +136,14 @@ namespace HeartopiaMod
 
             // Radar → Filter counts. Hidden from the overlay by the Settings → Status Overlay
             // checkboxes (same catalog labels). The in-menu LIVE rail is not filtered by those.
-            int birdFilterCount = this.radarBirdSpeciesFilter.Count;
-            if (birdFilterCount > 0)
+            int birdFilterCount = this.CountDisplayedRadarSpeciesFilter(this.radarBirdSpeciesFilter);
+            if (this.radarBirdSpeciesFilter.Count > 0)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Birds", this.FormatSpeciesFilterStatus(birdFilterCount)));
             }
 
-            int insectFilterCount = this.radarInsectSpeciesFilter.Count;
-            if (insectFilterCount > 0)
+            int insectFilterCount = this.CountDisplayedRadarSpeciesFilter(this.radarInsectSpeciesFilter);
+            if (this.radarInsectSpeciesFilter.Count > 0)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Insects", this.FormatSpeciesFilterStatus(insectFilterCount)));
             }

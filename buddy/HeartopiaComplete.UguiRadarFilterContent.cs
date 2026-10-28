@@ -75,6 +75,11 @@ namespace HeartopiaMod
 
             HashSet<int> set = insects ? this.radarInsectSpeciesFilter : this.radarBirdSpeciesFilter;
             List<int> list = insects ? this.radarInsectSpeciesFilterList : this.radarBirdSpeciesFilterList;
+            if (set.Remove(RadarSpeciesFilterNoneId))
+            {
+                list.Remove(RadarSpeciesFilterNoneId);
+            }
+
             if (!set.Add(id))
             {
                 set.Remove(id);
@@ -540,6 +545,13 @@ namespace HeartopiaMod
             public GameObject SummaryLabel;
             public string SummaryShown;
             public GameObject ClearButton;
+            public GameObject QuickUnopenedButton;
+            public GameObject QuickBelow5Button;
+            public GameObject QuickNotMasterButton;
+            public bool QuickUnopenedShown;
+            public bool QuickBelow5Shown;
+            public bool QuickNotMasterShown;
+            public bool QuickLabelsForInsects = true;
             public GameObject EmptyLabel;
             public UguiVirtualGridHandle Grid;
             public readonly List<UguiRadarFilterCell> Cells = new List<UguiRadarFilterCell>();
@@ -590,15 +602,27 @@ namespace HeartopiaMod
             placeholder.raycastTarget = false;
             search.placeholder = placeholder;
 
+            float quickGap = 6f;
+            float quickBtnW = (w - 16f - (quickGap * 2f)) / 3f;
+            handle.QuickUnopenedButton = this.CreateUguiSecondaryButton(block.transform, "QuickUnopened",
+                this.L("Unopened"), () => this.OnUguiRadarFilterQuickClicked(0));
+            PlaceUguiTopLeft(handle.QuickUnopenedButton, 8f, 84f, quickBtnW, 28f);
+            handle.QuickBelow5Button = this.CreateUguiSecondaryButton(block.transform, "QuickBelow5",
+                this.L("Under 5 Stars"), () => this.OnUguiRadarFilterQuickClicked(1));
+            PlaceUguiTopLeft(handle.QuickBelow5Button, 8f + quickBtnW + quickGap, 84f, quickBtnW, 28f);
+            handle.QuickNotMasterButton = this.CreateUguiSecondaryButton(block.transform, "QuickNotMaster",
+                this.L("Not Catching Master"), () => this.OnUguiRadarFilterQuickClicked(2));
+            PlaceUguiTopLeft(handle.QuickNotMasterButton, 8f + (2f * (quickBtnW + quickGap)), 84f, quickBtnW, 28f);
+
             handle.SummaryShown = this.L("All species");
             handle.SummaryLabel = this.CreateUguiLabel(block.transform, "Summary", handle.SummaryShown, 12f,
                 this.UguiKitMutedColor(), false);
-            PlaceUguiTopLeft(handle.SummaryLabel, 8f, 84f, w - 116f, 22f);
+            PlaceUguiTopLeft(handle.SummaryLabel, 8f, 124f, w - 116f, 22f);
             handle.ClearButton = this.CreateUguiDangerButton(block.transform, "Clear", this.L("Clear"),
                 this.OnUguiRadarFilterClearClicked);
-            PlaceUguiTopLeft(handle.ClearButton, w - 96f, 80f, 88f, 28f);
+            PlaceUguiTopLeft(handle.ClearButton, w - 96f, 116f, 88f, 28f);
 
-            float gridY = 114f;
+            float gridY = 156f;
             float gridH = Mathf.Max(80f, h - gridY - 8f);
             handle.Grid = this.CreateUguiVirtualGrid(block.transform, "SpeciesGrid", w - 16f,
                 UguiRadarFilterColumns, UguiRadarFilterCellH, gridH);
@@ -621,7 +645,87 @@ namespace HeartopiaMod
 
             handle.Root = block;
             this.uguiRadarFilter = handle;
+            this.EnsureRadarCollectionFilterHooks();
             return block;
+        }
+
+        private void OnUguiRadarFilterQuickClicked(int which)
+        {
+            UguiRadarFilterHandle handle = this.uguiRadarFilter;
+            if (handle == null)
+            {
+                return;
+            }
+
+            if (this.radarCollectionFilterDirty || !this.radarCollectionFilterReady)
+            {
+                this.radarCollectionFilterDirty = false;
+                if (!this.TryRebuildRadarCollectionQuickSets())
+                {
+                    return;
+                }
+            }
+
+            bool insects = handle.ShowingInsects;
+            HashSet<int> ids;
+            if (which == 0)
+            {
+                ids = insects ? this.radarInsectQuickUnopened : this.radarBirdQuickUnopened;
+            }
+            else if (which == 1)
+            {
+                ids = insects ? this.radarInsectQuickBelow5 : this.radarBirdQuickBelow5;
+            }
+            else
+            {
+                ids = insects ? this.radarInsectQuickNotMaster : this.radarBirdQuickNotMaster;
+            }
+
+            this.ApplyRadarSpeciesFilter(insects, ids);
+        }
+
+        private void SetUguiRadarFilterQuickLabel(GameObject button, string text)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            Transform label = button.transform.Find("Label");
+            if (label == null)
+            {
+                return;
+            }
+
+            this.SetUguiLabelText(label.gameObject, text);
+        }
+
+        private void ApplyUguiRadarFilterQuickButton(GameObject button, ref bool shown, bool selected)
+        {
+            if (button == null || shown == selected)
+            {
+                return;
+            }
+
+            shown = selected;
+            Color accent = this.UguiKitAccent();
+            Color controlFill = this.UguiKitControlFill();
+            Image bg = button.GetComponent<Image>();
+            if (bg != null)
+            {
+                bg.color = selected
+                    ? new Color(accent.r, accent.g, accent.b, 0.18f)
+                    : new Color(controlFill.r, controlFill.g, controlFill.b, Mathf.Clamp(this.uiPanelAlpha, 0.25f, 1f));
+            }
+
+            Transform ringT = button.transform.Find("Ring");
+            Image ring = ringT != null ? ringT.GetComponent<Image>() : null;
+            if (ring != null)
+            {
+                ring.color = selected
+                    ? new Color(accent.r, accent.g, accent.b, 0.35f)
+                    : new Color(1f, 1f, 1f, 0.08f);
+            }
         }
 
         private UguiRadarFilterCell BuildUguiRadarFilterCell(UguiRadarFilterHandle handle, UguiVirtualGridSlot slot, int slotIndex)
@@ -787,26 +891,48 @@ namespace HeartopiaMod
                 return;
             }
 
-            int insectCount = this.radarInsectSpeciesFilter.Count;
-            int birdCount = this.radarBirdSpeciesFilter.Count;
-            string insectLabel = insectCount > 0
+            int insectCount = this.CountDisplayedRadarSpeciesFilter(this.radarInsectSpeciesFilter);
+            int birdCount = this.CountDisplayedRadarSpeciesFilter(this.radarBirdSpeciesFilter);
+            bool insectRestricted = this.radarInsectSpeciesFilter.Count > 0;
+            bool birdRestricted = this.radarBirdSpeciesFilter.Count > 0;
+            string insectLabel = insectRestricted
                 ? this.L("Insects") + "  " + insectCount.ToString()
                 : this.L("Insects");
-            string birdLabel = birdCount > 0
+            string birdLabel = birdRestricted
                 ? this.L("Birds") + "  " + birdCount.ToString()
                 : this.L("Birds");
             this.ApplyUguiRadarFilterSegment(handle.InsectSegment, insectLabel, handle.ShowingInsects);
             this.ApplyUguiRadarFilterSegment(handle.BirdSegment, birdLabel, !handle.ShowingInsects);
 
+            bool currentRestricted = handle.ShowingInsects ? insectRestricted : birdRestricted;
             int current = handle.ShowingInsects ? insectCount : birdCount;
-            string summary = current > 0 ? this.LF("{0} selected", current) : this.L("All species");
+            string summary = currentRestricted ? this.LF("{0} selected", current) : this.L("All species");
             if (!string.Equals(summary, handle.SummaryShown, StringComparison.Ordinal))
             {
                 handle.SummaryShown = summary;
                 this.SetUguiLabelText(handle.SummaryLabel, summary);
             }
 
-            this.SetUguiButtonInteractable(handle.ClearButton, current > 0);
+            this.SetUguiButtonInteractable(handle.ClearButton, currentRestricted);
+            if (handle.QuickLabelsForInsects != handle.ShowingInsects)
+            {
+                handle.QuickLabelsForInsects = handle.ShowingInsects;
+                string third = handle.ShowingInsects
+                    ? this.L("Not Catching Master")
+                    : this.L("Not Photo Master");
+                this.SetUguiRadarFilterQuickLabel(handle.QuickNotMasterButton, third);
+            }
+
+            HashSet<int> currentSet = handle.ShowingInsects ? this.radarInsectSpeciesFilter : this.radarBirdSpeciesFilter;
+            HashSet<int> unopened = handle.ShowingInsects ? this.radarInsectQuickUnopened : this.radarBirdQuickUnopened;
+            HashSet<int> below5 = handle.ShowingInsects ? this.radarInsectQuickBelow5 : this.radarBirdQuickBelow5;
+            HashSet<int> notMaster = handle.ShowingInsects ? this.radarInsectQuickNotMaster : this.radarBirdQuickNotMaster;
+            this.ApplyUguiRadarFilterQuickButton(handle.QuickUnopenedButton,
+                ref handle.QuickUnopenedShown, this.radarCollectionFilterReady && RadarSpeciesFilterEquals(currentSet, unopened));
+            this.ApplyUguiRadarFilterQuickButton(handle.QuickBelow5Button,
+                ref handle.QuickBelow5Shown, this.radarCollectionFilterReady && RadarSpeciesFilterEquals(currentSet, below5));
+            this.ApplyUguiRadarFilterQuickButton(handle.QuickNotMasterButton,
+                ref handle.QuickNotMasterShown, this.radarCollectionFilterReady && RadarSpeciesFilterEquals(currentSet, notMaster));
             bool empty = handle.Visible.Count == 0;
             SetUguiGoActive(handle.EmptyLabel, empty);
             SetUguiGoActive(handle.Grid != null ? handle.Grid.Root : null, !empty);
@@ -1014,6 +1140,7 @@ namespace HeartopiaMod
                     handle.WasActive = true;
                     this.radarSpeciesNamesPending = true;
                     this.radarSpeciesNameMisses = 0;
+                    this.radarCollectionFilterDirty = true;
                 }
 
                 this.EnsureRadarSpeciesCatalog();
@@ -1036,6 +1163,12 @@ namespace HeartopiaMod
                         SortRadarSpeciesCatalog(this.radarBirdCatalog);
                         this.RebuildUguiRadarFilterVisible(handle, false);
                     }
+                }
+
+                if (this.radarCollectionFilterDirty)
+                {
+                    this.radarCollectionFilterDirty = false;
+                    this.TryRebuildRadarCollectionQuickSets();
                 }
 
                 if (handle.SearchField != null)

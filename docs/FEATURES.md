@@ -1754,6 +1754,18 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
   `RadarConfigData` (`insectSpeciesFilter`, `birdSpeciesFilter`). Settings → Reset Defaults
   does not clear it. While a list is non-empty the status overlay shows `Birds` / `Insects`
   with `N filtered`; each row has a checkbox on Settings → Status Overlay.
+  Insects and Birds each have their own row of three secondary buttons under the search box:
+  **Unopened**, **Under 5 Stars**, and either **Not Catching Master** or **Not Photo Master**.
+  The bird label is the photography rank (`拍摄精通`), not the insect rank. A click replaces that
+  tab's allow-list. Clear still means show all. Search only filters the grid. Unopened is
+  pictorial state NotGet. Under 5 Stars is Got and `GetStarRate() < 5` (birds use
+  `PictorialBird.GetStarRate`, which reads `maxScore`; the bird `_starRate` field stays 0).
+  Not master is an open certification whose `GetCount()` is below the rank-4 threshold
+  (insect types 8001/8002 = 1200, 8003 = 720, 8004 = 480, 8005 = 300; bird types 7001/7002 = 2400,
+  7003 = 1440, 7004 = 1080, 7005 = 600). Species with `openCertification = 0` are excluded.
+  Hidden book ids 51305, 51406, 51503 and 63001 are excluded from the quick sets. A predicate
+  that matches nothing is stored as the sentinel id 1 in the existing list, so the allow-list
+  stays restrictive and the summary shows `0 selected`.
 - Max distance slider (25–1000 m, default 75 m).
 - Marker styles: **Default** (icon markers) or **Simple Text**.
 - Force refresh scan button.
