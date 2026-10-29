@@ -1190,6 +1190,10 @@ namespace HeartopiaMod
                     this.AddMenuNotification(this.L("Auto Pumpkin Carving") + ": " + (this.autoPumpkinEnabled ? this.L("On") : this.L("Off")),
                         this.autoPumpkinEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
                 }
+                if (this.TryGetModHotkeyDown(this.autoFurnitureRepairHotkey))
+                {
+                    this.SetFurnitureRepairEnabled(!this.autoFurnitureRepairEnabled);
+                }
                 if (this.TryGetModHotkeyDown(this.seaCleanQteHotkey))
                 {
                     this.seaCleanQteEnabled = !this.seaCleanQteEnabled;
@@ -1399,6 +1403,7 @@ namespace HeartopiaMod
             this.ProcessSnowSculptureOnUpdate();
             this.ProcessSandSculptureOnUpdate();
             this.ProcessPumpkinCarvingOnUpdate();
+            this.ProcessFurnitureAutoRepairOnUpdate();
             this.ProcessSeaCleanQteOnUpdate();
             this.ProcessCorruptionCleanseOnUpdate();
             if (this.autoFishingFarmBreaker.ShouldRun(Time.unscaledTime))

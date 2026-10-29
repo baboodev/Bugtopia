@@ -418,6 +418,10 @@ namespace HeartopiaMod
             { "Seasonal hobbies", "Seasonal hobbies" },
             { "Pumpkin Carving", "Pumpkin Carving" },
             { "Auto Pumpkin Carving", "Auto Pumpkin Carving" },
+
+            // Auto Furniture Repair (Self → Main)
+            { "Auto Furniture Repair", "Auto Furniture Repair" },
+            { "Auto fixed furniture: {0}", "Auto fixed furniture: {0}" },
             { "Helped carve a pumpkin", "Helped carve a pumpkin" },
             { "Auto-collect carved pumpkin", "Auto-collect carved pumpkin" },
             { "Reports the stage score immediately. The carving panel stays closed.", "Reports the stage score immediately. The carving panel stays closed." },
@@ -1671,6 +1675,10 @@ namespace HeartopiaMod
             { "Seasonal hobbies", "Aficiones de temporada" },
             { "Pumpkin Carving", "Tallado de calabaza" },
             { "Auto Pumpkin Carving", "Tallado de calabaza automático" },
+
+            // Auto Furniture Repair (Self → Main)
+            { "Auto Furniture Repair", "Reparación automática de muebles" },
+            { "Auto fixed furniture: {0}", "Muebles reparados automáticamente: {0}" },
             { "Helped carve a pumpkin", "Ayudaste a tallar una calabaza" },
             { "Auto-collect carved pumpkin", "Recoger la calabaza tallada" },
             { "Reports the stage score immediately. The carving panel stays closed.", "Informa la puntuación de fase al instante. El panel del minijuego no se abre." },
@@ -2957,6 +2965,10 @@ namespace HeartopiaMod
             { "Seasonal hobbies", "季节爱好" },
             { "Pumpkin Carving", "南瓜雕刻" },
             { "Auto Pumpkin Carving", "自动南瓜雕刻" },
+
+            // Auto Furniture Repair (Self → Main)
+            { "Auto Furniture Repair", "自动修理家具" },
+            { "Auto fixed furniture: {0}", "自动修复家具：{0}" },
             { "Helped carve a pumpkin", "已帮好友完成南瓜雕刻" },
             { "Auto-collect carved pumpkin", "自动收取雕刻好的南瓜" },
             { "Reports the stage score immediately. The carving panel stays closed.", "立刻上报阶段分数，游戏里的雕刻界面不会打开。" },
@@ -4231,6 +4243,10 @@ namespace HeartopiaMod
             { "Seasonal hobbies", "Passatempos da temporada" },
             { "Pumpkin Carving", "Escultura de abóbora" },
             { "Auto Pumpkin Carving", "Escultura de abóbora automática" },
+
+            // Auto Furniture Repair (Self → Main)
+            { "Auto Furniture Repair", "Reparo automático de móveis" },
+            { "Auto fixed furniture: {0}", "Móveis reparados automaticamente: {0}" },
             { "Helped carve a pumpkin", "Ajudou a esculpir uma abóbora" },
             { "Auto-collect carved pumpkin", "Recolher a abóbora esculpida" },
             { "Reports the stage score immediately. The carving panel stays closed.", "Envia a pontuação da fase na hora. O painel do minijogo não abre." },
@@ -5514,6 +5530,10 @@ namespace HeartopiaMod
             { "Seasonal hobbies", "งานอดิเรกตามฤดู" },
             { "Pumpkin Carving", "แกะสลักฟักทอง" },
             { "Auto Pumpkin Carving", "แกะสลักฟักทองอัตโนมัติ" },
+
+            // Auto Furniture Repair (Self → Main)
+            { "Auto Furniture Repair", "ซ่อมแซมเฟอร์นิเจอร์อัตโนมัติ" },
+            { "Auto fixed furniture: {0}", "ซ่อมเฟอร์นิเจอร์อัตโนมัติ: {0}" },
             { "Helped carve a pumpkin", "ช่วยแกะสลักฟักทองแล้ว" },
             { "Auto-collect carved pumpkin", "เก็บฟักทองที่แกะแล้ว" },
             { "Reports the stage score immediately. The carving panel stays closed.", "ส่งคะแนนของขั้นทันที แผงมินิเกมไม่เปิด" },
@@ -6839,6 +6859,10 @@ namespace HeartopiaMod
             { "Seasonal hobbies", "시즌 취미" },
             { "Pumpkin Carving", "호박 조각" },
             { "Auto Pumpkin Carving", "자동 호박 조각" },
+
+            // Auto Furniture Repair (Self → Main)
+            { "Auto Furniture Repair", "자동 가구 수리" },
+            { "Auto fixed furniture: {0}", "자동으로 수리한 가구: {0}" },
             { "Helped carve a pumpkin", "호박 조각 도움을 완료했습니다" },
             { "Auto-collect carved pumpkin", "조각한 호박 자동 수거" },
             { "Reports the stage score immediately. The carving panel stays closed.", "단계 점수를 즉시 보고합니다. 게임 속 조각 창은 열리지 않습니다." },

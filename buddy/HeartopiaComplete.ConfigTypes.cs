@@ -75,6 +75,9 @@ namespace HeartopiaMod
             public int keyAutoSnow;
             public int keyAutoSand;
             public int keyAutoPumpkin;
+            public int keyAutoFurnitureRepair;
+            // Auto Furniture Repair enable flag (FurnitureAutoRepairFeature.cs). Off by default.
+            public bool autoFurnitureRepairEnabled;
             public int keySeaCleanQte;
             public int keyEquipSeaCleaner;
             // 0/absent = "use default" (radius can never legitimately be 0).

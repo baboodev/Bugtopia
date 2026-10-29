@@ -135,6 +135,7 @@ namespace HeartopiaMod
             public Toggle BlockTutorialsToggle;
             public Toggle AutoLearnRecipesToggle;
             public Toggle AutoLikeOwnHomeToggle;
+            public Toggle FurnitureRepairToggle;
             public GameObject NoclipHelpLabel;  // trailing, only visible while Noclip is on
 
             public int LayoutSignature = -1;    // packed conditional-visibility state
@@ -446,6 +447,10 @@ namespace HeartopiaMod
             handle.AutoLikeOwnHomeToggle = this.CreateUguiCheckbox(scrollContent, "AutoLikeOwnHomeToggle",
                 this.L("Auto-like own home (once a day)"), this.autoLikeOwnHome,
                 new System.Action<bool>(this.OnUguiSelfAutoLikeOwnHomeToggled));
+
+            handle.FurnitureRepairToggle = this.CreateUguiCheckbox(scrollContent, "FurnitureRepairToggle",
+                this.L("Auto Furniture Repair"), this.autoFurnitureRepairEnabled,
+                new System.Action<bool>(this.OnUguiSelfFurnitureRepairToggled));
 
             // Trailing conditional help label — localized in the IMGUI drawer, kept verbatim.
             handle.NoclipHelpLabel = this.CreateUguiLabel(scrollContent, "NoclipHelp",
@@ -789,6 +794,12 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.FurnitureRepairToggle != null)
+            {
+                PlaceUguiTopLeft(handle.FurnitureRepairToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             SetUguiGoActive(handle.NoclipHelpLabel, noclip);
             if (noclip)
             {
@@ -854,6 +865,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.BlockTutorialsToggle, this.blockTutorials);
                 this.SyncUguiToggleFromField(handle.AutoLearnRecipesToggle, this.autoLearnRecipes);
                 this.SyncUguiToggleFromField(handle.AutoLikeOwnHomeToggle, this.autoLikeOwnHome);
+                this.SyncUguiToggleFromField(handle.FurnitureRepairToggle, this.autoFurnitureRepairEnabled);
 
                 if (handle.NoclipSpeedSlider != null && Mathf.Abs(handle.NoclipSpeedSlider.value - this.noclipSpeed) > 0.0005f)
                 {
@@ -1464,6 +1476,15 @@ namespace HeartopiaMod
             }
             this.autoLikeOwnHome = value;
             try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Auto Furniture Repair (FurnitureAutoRepairFeature.cs). The flag is persisted like the
+        // other Self → Main flags and in-flight pending state is cleared when switching off —
+        // see SetFurnitureRepairEnabled. The scan itself runs behind the world-ready gate; a
+        // checkbox click on the load screen just flips the flag.
+        private void OnUguiSelfFurnitureRepairToggled(bool value)
+        {
+            this.SetFurnitureRepairEnabled(value);
         }
 
         // ----------------------------------------------------------------------------------------

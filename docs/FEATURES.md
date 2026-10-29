@@ -609,6 +609,49 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
 - ⚠ Sends a real command to a live server on its own schedule, unattended.
 - Persisted; default off. Self → Main. Source: `buddy/HomeLikeFeature.cs`.
 
+### Auto Furniture Repair
+
+- Repairs your own broken furniture without standing next to it and without the repair-kit item —
+  the same send as a click on the in-game Repair button. The button shows when
+  `FurnitureBaseComponent.IsBroken` is true and the owner is the local player. `OwnerId` 0 also
+  shows the button (a zero owner is treated as Everyone); this feature does not send for it.
+- **Action:** the static `HomelandProtocolManager.Repair(uint netId)` over AuraMono — the manager
+  builds and sends the `RepairBuildItemNetworkCommand` itself, so this is byte-for-byte what the
+  button puts on the wire. No proximity, no interaction, no kit item.
+- **Scan:** while enabled, every `FurnitureBaseComponent` in the loaded world is enumerated through
+  the pinned AuraMono `GetComponents` path about every 2.5 s (5 s backoff after a failure). A broken
+  piece is sent only when `get_OwnerId` equals the local player net id
+  (`PlayerDataCenter.GetSelfNetPlayerId`). That is the same id the Repair button checks: Interaction
+  21 uses house-permission type Self, which the settings screen does not expose, so nobody else's
+  furniture can be repaired. `HomeNetId` is the house instance and is not this check. `OwnerId` 0
+  and a failed owner read are skipped, not sent. At most
+  8 repairs go out per pass; heals and refusals are still applied past that cap, and the rest wait
+  for the next pass. Each broken piece of yours gets one repair sent; it is then held in a pending set until
+  the server answers — never re-sent while waiting. A pending entry with no ack at all after 12 s
+  is dropped and the repair re-sent (covers a missing `RepairResultEvent` hook).
+- **Server ack decides success.** `RepairResultEvent` (dispatched by `HomelandSyncSystem` from the
+  server's `RepairBuildItemNetworkEvent`) carries `buildItemNetId` + `errorCode`; a non-zero code
+  (`RepairBuildItemFailed = 91`) means the server refused — that netId moves from the pending set
+  into a refused set that blocks re-sends (IsBroken stays true after a refusal, so merely dropping
+  the pending entry would let the scan send it again every 2.5 s). Only refusals of sends this
+  feature itself made are recorded: a late packet after the state was cleared (toggle off / scene
+  change) and refusals of other players' or manual repairs fall through and are ignored, so they
+  can never block auto-repair of a reused netId. The "repaired" moment is the next scan seeing
+  `IsBroken` clear on a pending netId whose `OwnerId` is still the local player. A reused netId that
+  is not ours is dropped with no toast. `SetRepaired` is the client write behind that clear and is
+  never called.
+- **State hygiene:** the pending set and the refused set are cleared on world change (netIds are
+  room-scoped) and when the toggle flips off, so a leftover entry can never suppress repair of a
+  reused id in the next town or be toasted as fixed.
+- **Toast:** "Auto fixed furniture: N" fires only when a repair actually lands (ack) and the piece's
+  `OwnerId` is still the local player, never on send; one line per healed piece. An empty component
+  scan reports "no broken furniture"; "scan unavailable" is only a failed query. Refused pieces are
+  counted in the scan status (`refused xN`) so a town where every broken piece was refused does not
+  report "no broken furniture".
+- ⚠ Sends real commands to a live server on its own schedule, unattended — your own broken furniture
+  is repaired without you doing anything while the toggle is on. Someone else's furniture is not.
+- Persisted; default off. Self → Main. Source: `buddy/FurnitureAutoRepairFeature.cs`.
+
 ### Anti-AFK
 
 - Periodically simulates mouse input to reduce idle kick.
