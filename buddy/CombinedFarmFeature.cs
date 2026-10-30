@@ -1704,17 +1704,19 @@ namespace HeartopiaMod
             return tool.IsKnown ? Mathf.RoundToInt(tool.Ratio * 20f) : -1;
         }
 
+        // Compact readout for the status overlay / settings tab: name + percent only — the
+        // d/max fraction was noise in a narrow row. The census debug log shares this exact string
+        // (see the header note), so HUD and log stay identical.
         private static string DescribeDurability(int index)
         {
             ToolDurability tool = toolDurabilities[index];
             string name = GetToolName(tool.toolId);
             if (!tool.IsKnown)
             {
-                return name + "=?(" + (tool.lastStatus ?? "unknown") + ")";
+                return name + " ?";
             }
 
-            return name + "=" + tool.durability + "/" + tool.maxDurability
-                + "(" + Mathf.RoundToInt(tool.Ratio * 100f) + "%)";
+            return name + " " + Mathf.RoundToInt(tool.Ratio * 100f) + "%";
         }
 
         private static void Log(string message)
