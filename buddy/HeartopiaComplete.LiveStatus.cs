@@ -40,6 +40,7 @@ namespace HeartopiaMod
             "Auto Ice Skating",
             "Ice Skating Seq",
             "Auto Snow",
+            "Auto Collect Snowballs",
             "Speed",
             "Noclip",
             "Bypass Overlap",
