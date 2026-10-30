@@ -1,4 +1,4 @@
-﻿# Features Reference
+# Features Reference
 
 Complete feature catalog for **Bugtopia**. Works identically under MelonLoader and BepInEx (same `HeartopiaComplete` core). Menu toggled with **Insert** by default. Labels support en, es, zh-CN, pt-BR.
 
@@ -1467,6 +1467,18 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 - **Snowballs in bag** counter — `BackPackSystem.GetUsableItemCount(5100, inSelfField:false)` via AuraMono, 1 s read throttle (refresh forced right after each gather and after the warehouse move); shows `?` pre-login (gated by `AuraMonoStaticFieldReadsAllowed`).
 - **Snowball limit** field (persisted, default **0 = all**): auto-disables with a toast after N gathered sculptures (1 ball each); the used counter resets on every enable.
 
+#### Auto collect snowballs
+
+- Toggle **Auto collect snowballs** on the same tab, **persisted** (`autoSnowCollectEnabled`) and **independent** of Auto Snow Sculpture — the collector runs with the sculptor off, and the sculptor runs with the collector off.
+- **State-read gated, never optimistic.** Each scan reads every own snow machine's ECS view data first and only then sends; a machine whose `_data` cannot be read gets nothing. Scan of `SnowMachineComponent` views (`TryAuraMonoGetComponentObjects`, pinned `List<uint>` + `FreeAuraMonoPins` in `finally`) → filter: netId < 4 000 000 000 (local-predicted views have an empty `_data`/`_furnitureBase`) → `_furnitureBase` → `get_OwnerId` == self → `TableData.GetSnowmachine(staticId) != null` (**the table row is the filter** — staticId is never hard-coded) → within the radius → nearest first, max **8** machines per scan.
+- **State read:** the boxed `_data` (`SnowMachineComponentData { state, ballCount, capacity, startTimestamp, duration }`, `state`: 0 Closed / 1 Making / 2 Idle) via `AuraMonoPinNew` + `mono_class_get_field_from_name` / `mono_field_get_offset` and `Marshal.ReadInt32` with the 2-pointer box header subtracted. `DataCenter.TryGetComponentData<T>` (a 28-byte struct out-param slot) is never used.
+- **What it sends** (AuraMono `TryAuraInvoke` on `SnowSculptureProtocolManager` statics, machine netId as the only argument — the same calls the in-game machine UI makes): `GatherSnowBall(netId)` whenever `ballCount > 0`, in **any** state (live: a harvested machine stays `Making` with `ballCount` 0 → the next ball is another harvest, never a restart); `OnSnowMachine(netId)` only when `state == Closed && ballCount == 0`. **Nothing** is sent on `Making`/`Idle` with `ballCount == 0` (a machine that is producing is left alone), and `OffSnowMachine` is neither resolved nor sent. The mod has no proximity check of its own beyond `snowMachineScanRadius`; the live harvest at 2.28 m was **inside** the vanilla 10 m interact-icon radius, so it does not show whether the server accepts the command from farther out (the plan's open item, §9.3). No animation, no panel.
+- **No bag cap.** The collector keeps harvesting and restarting closed machines however many snowballs are already in the bag. Confirmation is the machine, not the bag: on a gather the mod remembers that machine's `ballCount`; a later scan showing a lower `ballCount` adds the difference to the collected counter. If the cooldown elapsed and the count is not lower, the entry is dropped and another gather may be sent. No bag-count delta, no result-callback detour (`OnSnowMachineResult` / `GatherSnowBallResult` only receive an `ErrorCode`, never a netId).
+- **Per-machine cooldown 1.5 s** (`SnowAutoCollectSendCooldownSeconds`) on both sends; cooldown entries for machines no longer in the filtered set are pruned, and an unconfirmed gather snapshot for such a machine is released once its cooldown has elapsed (so a machine the player walked away from cannot hold a stale snapshot). Scan interval is the user slider (1–10 s, default **2**), scan radius is the user slider (10–60 m whole metres, default **30**; the live-verified gather worked at 2.28 m, the server-side interact ceiling is not confirmed past 10 m — see the plan's open item). Both are persisted and clamped on load.
+- **Live status line** `Snow machines: kept | bag current | collected this run` plus the internal status (`no machine in 30m (views=… local=… other=… table=… far=… unreadable=… first=…)`, `scan kept=… confirmed=… gather=… start=… wait=… fail=… pending=… (views=… firstFail=…)`, `no player position`, …). A `get_OwnerId` that fails to read reports `owner getter …` (counted as unreadable), while an unowned machine reports `owner 0 (unowned)` and a foreign owner reports `not owner` — a broken getter cannot look like an empty owner filter. The collected counter resets when the toggle is re-enabled; a world-epoch change clears the per-machine maps. On the tab the collector block (toggle, status, scan interval, scan radius) sits above **Auto Snow Sculpture**; the sculpture controls (bag count, snowball limit, delays, QTE, status box) start directly under that toggle.
+- **Interaction with Auto Snow Sculpture:** its "no snowballs in bag" **self-disable becomes a backoff** while the collector is on — the sculptor's next attempt moves to `max(SnowApiRetryBackoffSeconds, scan interval + 0.5 s)` instead of the sculptor switching itself off; the **Snowball limit** self-disable is unchanged. The sculptor sculpts whenever the bag has a snowball, and the collector keeps refilling it.
+- **Out of scope:** warehouse → bag transfer (the **Move snowballs to backpack** button already does it; live behavior is that a harvest lands in the **bag**, not the warehouse). Auto-collect also does not persist or imply `autoSnowEnabled`.
+
 #### Auto Click Icon
 
 - Configurable interval (default 50 ms).
@@ -1486,6 +1498,7 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 #### Debug
 
 - `MasterLogSnowSculpture` in `SnowSculptureFeature.cs` (default **false**) — `[SnowSculpture]` lines in `bugtopia.log`.
+- `MasterLogSnowAutoCollect` in `SnowSculptureFeature.cs` (default **false**, Settings → Logging row **Snow Auto Collect**) — `[SnowAutoCollect]` lines: the resolved handle list once the world-ready gate resolves (plus a one-time `resolve incomplete` line naming the missing handles), one line per accepted send (`GatherSnowBall sent netId=…`), each rejected send, and the per-scan status line. The gate itself logs `[WorldReady] snowball-autocollect …` when a resolve attempt fails or sleeps until the next world load.
 
 ### Sand Sculpting
 

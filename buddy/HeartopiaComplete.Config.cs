@@ -1,4 +1,4 @@
-﻿using HarmonyLib;
+using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -326,6 +326,7 @@ namespace HeartopiaMod
             data.MasterLogSandSculpture = MasterLogSandSculpture;
             data.MasterLogShowOffBypass = MasterLogShowOffBypass;
             data.MasterLogSnowSculpture = MasterLogSnowSculpture;
+            data.MasterLogSnowAutoCollect = MasterLogSnowAutoCollect;
             data.MasterLogSeaCleanQte = MasterLogSeaCleanQte;
             data.MasterLogCorruptionCleanse = MasterLogCorruptionCleanse;
             data.MasterLogUnderwaterRadar = MasterLogUnderwaterRadar;
@@ -362,6 +363,9 @@ namespace HeartopiaMod
             data.snowNextCycleDelaySeconds = this.snowNextCycleDelaySeconds;
             data.snowballUseLimit = this.snowballUseLimit;
             data.snowQteSuccessCount = this.snowQteSuccessCount;
+            data.autoSnowCollectEnabled = this.autoSnowCollectEnabled;
+            data.snowMachineScanSeconds = this.snowMachineScanSeconds;
+            data.snowMachineScanRadius = this.snowMachineScanRadius;
             data.fastBubbleGenEnabled = this.fastBubbleGenEnabled;
             data.musicPlayerLoop = this.musicPlayerLoop;
             data.musicPlayerNetworkMode = this.musicPlayerNetworkMode;
@@ -763,6 +767,7 @@ namespace HeartopiaMod
             MasterLogSandSculpture = data.MasterLogSandSculpture;
             MasterLogShowOffBypass = data.MasterLogShowOffBypass;
             MasterLogSnowSculpture = data.MasterLogSnowSculpture;
+            MasterLogSnowAutoCollect = data.MasterLogSnowAutoCollect;
             MasterLogSeaCleanQte = data.MasterLogSeaCleanQte;
             MasterLogCorruptionCleanse = data.MasterLogCorruptionCleanse;
             MasterLogUnderwaterRadar = data.MasterLogUnderwaterRadar;
@@ -806,6 +811,12 @@ namespace HeartopiaMod
             this.snowNextCycleDelaySeconds = Mathf.Clamp(data.snowNextCycleDelaySeconds, SnowNextCycleDelayMin, SnowNextCycleDelayMax);
             this.snowballUseLimit = Mathf.Max(0, data.snowballUseLimit);
             this.snowQteSuccessCount = Mathf.Clamp(data.snowQteSuccessCount, SnowQteSuccessMin, SnowQteSuccessMax);
+            // Auto collect snowballs: the toggle is persisted (unlike Auto Snow Sculpture), and the
+            // two knobs are clamped to the same ranges the menu sliders use. A config saved before
+            // these fields existed gets the ConfigData initializers (false / 2f / 30f).
+            this.autoSnowCollectEnabled = data.autoSnowCollectEnabled;
+            this.snowMachineScanSeconds = Mathf.Clamp(data.snowMachineScanSeconds, SnowMachineScanMin, SnowMachineScanMax);
+            this.snowMachineScanRadius = Mathf.Clamp(data.snowMachineScanRadius, SnowMachineRadiusMin, SnowMachineRadiusMax);
             this.fastBubbleGenEnabled = data.fastBubbleGenEnabled;
             this.musicPlayerLoop = data.musicPlayerLoop;
             this.musicPlayerNetworkMode = data.musicPlayerNetworkMode;
@@ -1172,6 +1183,9 @@ namespace HeartopiaMod
                         else if (line.Contains("snowNextCycleDelaySeconds")) this.snowNextCycleDelaySeconds = Mathf.Clamp(GetJsonFloat(line, "\"snowNextCycleDelaySeconds\":"), SnowNextCycleDelayMin, SnowNextCycleDelayMax);
                         else if (line.Contains("snowballUseLimit")) this.snowballUseLimit = Mathf.Max(0, GetJsonInt(line, "\"snowballUseLimit\":"));
                         else if (line.Contains("snowQteSuccessCount")) this.snowQteSuccessCount = Mathf.Clamp(GetJsonInt(line, "\"snowQteSuccessCount\":"), SnowQteSuccessMin, SnowQteSuccessMax);
+                        else if (line.Contains("autoSnowCollectEnabled")) this.autoSnowCollectEnabled = GetJsonInt(line, "\"autoSnowCollectEnabled\":") != 0;
+                        else if (line.Contains("snowMachineScanSeconds")) this.snowMachineScanSeconds = Mathf.Clamp(GetJsonFloat(line, "\"snowMachineScanSeconds\":"), SnowMachineScanMin, SnowMachineScanMax);
+                        else if (line.Contains("snowMachineScanRadius")) this.snowMachineScanRadius = Mathf.Clamp(GetJsonFloat(line, "\"snowMachineScanRadius\":"), SnowMachineRadiusMin, SnowMachineRadiusMax);
                         else if (line.Contains("bubbleSpawnAtPlayerEnabled")) this.bubbleSpawnAtPlayerEnabled = GetJsonInt(line, "\"bubbleSpawnAtPlayerEnabled\":") != 0;
                         else if (line.Contains("autoBubbleCollectEnabled")) this.autoBubbleCollectEnabled = GetJsonInt(line, "\"autoBubbleCollectEnabled\":") != 0;
                         else if (line.Contains("autoBubbleCollectRadius")) this.autoBubbleCollectRadius = Mathf.Clamp(GetJsonFloat(line, "\"autoBubbleCollectRadius\":"), 0f, 100f);

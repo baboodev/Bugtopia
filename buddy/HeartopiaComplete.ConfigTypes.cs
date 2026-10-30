@@ -1,4 +1,4 @@
-﻿using HarmonyLib;
+using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -331,6 +331,7 @@ namespace HeartopiaMod
             public bool MasterLogSandSculpture;
             public bool MasterLogShowOffBypass;
             public bool MasterLogSnowSculpture;
+            public bool MasterLogSnowAutoCollect;
             public bool MasterLogSeaCleanQte;
             public bool MasterLogCorruptionCleanse;
             public bool MasterLogUnderwaterRadar;
@@ -375,6 +376,9 @@ namespace HeartopiaMod
             public float snowNextCycleDelaySeconds = 0.5f;  // gather -> next fill pause
             public int snowballUseLimit = 0;                // sculptures per run; 0 = unlimited
             public int snowQteSuccessCount = 20;            // perfect QTE reports per sculpture (0-20)
+            public bool autoSnowCollectEnabled;             // Auto collect snowballs (not persisted by Auto Snow Sculpture)
+            public float snowMachineScanSeconds = 2f;       // collector scan interval, seconds
+            public float snowMachineScanRadius = 30f;       // collector scan radius, metres
             public bool fastBubbleGenEnabled;
             public bool musicPlayerLoop;
             public bool musicPlayerNetworkMode;

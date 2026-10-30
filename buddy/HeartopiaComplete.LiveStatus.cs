@@ -289,6 +289,14 @@ namespace HeartopiaMod
                 entries.Add(this.CreateLiveFeatureEntry("Auto Snow", "Active"));
             }
 
+            // Auto collect snowballs owns its own toggle and scans machines in the background (it is not
+            // part of a sculpt session), so it gets its own row next to Auto Snow — the same shape as
+            // Auto Collect Bubbles below.
+            if (this.autoSnowCollectEnabled)
+            {
+                entries.Add(this.CreateLiveFeatureEntry("Auto Collect Snowballs", "Active"));
+            }
+
             if (this.gameSpeed != 1.0f)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Speed", string.Format("{0:F1}x", this.gameSpeed)));

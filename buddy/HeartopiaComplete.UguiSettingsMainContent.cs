@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -212,6 +212,7 @@ namespace HeartopiaMod
                 new UguiLoggingToggleBinding(() => MasterLogSandSculpture, v => MasterLogSandSculpture = v, "Sand Sculpture"),
                 new UguiLoggingToggleBinding(() => MasterLogShowOffBypass, v => MasterLogShowOffBypass = v, "Show-Off Bypass"),
                 new UguiLoggingToggleBinding(() => MasterLogSnowSculpture, v => MasterLogSnowSculpture = v, "Snow Sculpture"),
+                new UguiLoggingToggleBinding(() => MasterLogSnowAutoCollect, v => MasterLogSnowAutoCollect = v, "Snow Auto Collect"),
                 new UguiLoggingToggleBinding(() => MasterLogSeaCleanQte, v => MasterLogSeaCleanQte = v, "Sea Clean QTE"),
                 new UguiLoggingToggleBinding(() => MasterLogCorruptionCleanse, v => MasterLogCorruptionCleanse = v, "Corruption Cleanse"),
                 new UguiLoggingToggleBinding(() => MasterLogUnderwaterRadar, v => MasterLogUnderwaterRadar = v, "Underwater Radar"),

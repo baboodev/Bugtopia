@@ -362,6 +362,7 @@ namespace HeartopiaMod
             public float PanelW;                  // full-width role (source's 520 column)
 
             public Toggle AutoToggle;             // flag + 2-color notification only
+            public Toggle CollectToggle;          // Auto collect snowballs (persisted flag)
 
             // 2026-07-25 additions (new functionality, no IMGUI source): bag counter, snowball
             // budget field, and the two pacing sliders. All fixed-position (built between the
@@ -379,6 +380,17 @@ namespace HeartopiaMod
             public Slider QteCountSlider;         // snowQteSuccessCount 0-20 (persisted)
             public GameObject QteCountLabel;
             public string QteCountShown;
+
+            // Auto collect snowballs (fixed rows, same reason as above: the relayout signature
+            // only packs the conditional rows below them, so these need no new bit).
+            public GameObject CollectStatusLabel; // "Snow machines: N | bag N | collected N" / "Collector: off" (0.5s tick)
+            public string CollectStatusShown;
+            public Slider ScanSlider;             // snowMachineScanSeconds (persisted)
+            public GameObject ScanLabel;
+            public string ScanShown;
+            public Slider RadiusSlider;           // snowMachineScanRadius (persisted)
+            public GameObject RadiusLabel;
+            public string RadiusShown;
 
             public GameObject StatusBox;          // conditional plain box (autoSnowEnabled)
             public GameObject RoundLine;          // "Round: {n}/20  (total {m})" (0.5s tick)
@@ -437,6 +449,33 @@ namespace HeartopiaMod
             return this.LF("QTE successes: {0}", this.snowQteSuccessCount);
         }
 
+        // Auto collect status. The bag number is the same 1s-throttled read the sculpture bag
+        // counter uses, so this line costs nothing extra on the 0.5s tick. The collector itself
+        // does not stop on a bag count.
+        private string BuildUguiFeaturesSnowCollectText()
+        {
+            if (!this.autoSnowCollectEnabled)
+            {
+                return this.L("Collector: off");
+            }
+
+            int bag = this.GetSnowballBagCountThrottled();
+            return this.LF("Snow machines: {0} | bag {1} | collected {2}",
+                this.snowAutoCollectMachinesSeen,
+                bag < 0 ? "?" : bag.ToString(),
+                this.snowballsCollectedThisRun);
+        }
+
+        private string BuildUguiFeaturesSnowScanIntervalText()
+        {
+            return this.LF("Scan interval: {0}s", this.snowMachineScanSeconds.ToString("F2"));
+        }
+
+        private string BuildUguiFeaturesSnowScanRadiusText()
+        {
+            return this.LF("Scan radius: {0} m", Mathf.RoundToInt(this.snowMachineScanRadius));
+        }
+
         private string BuildUguiFeaturesSnowBallsText()
         {
             return this.snowballUseLimit > 0
@@ -444,6 +483,9 @@ namespace HeartopiaMod
                 : this.LF("Balls used: {0} (no limit)", this.snowballsUsedThisRun);
         }
 
+        // Conditional rows only: the 3-line status box (autoSnowEnabled) and the move-status label. The
+        // auto-collect rows and the sculpture controls above the box are fixed-height rows built in
+        // the builder, so they need no bit here — the relayout starts its cursor at the box slot (350).
         private int ComputeUguiFeaturesSnowLayoutSignature()
         {
             return (this.autoSnowEnabled ? 1 : 0)
@@ -505,61 +547,88 @@ namespace HeartopiaMod
                 this.L("AUTO SNOW SCULPTURE"), 13f);
             PlaceUguiTopLeft(header, 8f, 8f, 360f, 30f);
 
-            // -------- Toggle (:1034-1039 — the "? " prefix is dropped; see the file header.
-            // Flag-only + notification, 360x30) --------
+            // -------- Auto collect snowballs sits above Auto Snow Sculpture. Own toggle, own
+            // persisted flag; it does not imply the sculptor and it does not stop on a bag count.
+            handle.CollectToggle = this.CreateUguiCheckbox(scrollContent, "AutoSnowCollect",
+                this.L("Auto collect snowballs"), this.autoSnowCollectEnabled,
+                new System.Action<bool>(this.OnUguiFeaturesSnowAutoCollectToggled));
+            PlaceUguiTopLeft(handle.CollectToggle.gameObject, 8f, 48f, 360f, 30f);
+
+            handle.CollectStatusShown = this.BuildUguiFeaturesSnowCollectText();
+            handle.CollectStatusLabel = this.CreateUguiLabel(scrollContent, "CollectStatus",
+                handle.CollectStatusShown, 12f, textColor, false);
+            PlaceUguiTopLeft(handle.CollectStatusLabel, 8f, 88f, handle.PanelW, 20f);
+
+            handle.ScanShown = this.BuildUguiFeaturesSnowScanIntervalText();
+            handle.ScanLabel = this.CreateUguiLabel(scrollContent, "ScanIntervalLabel",
+                handle.ScanShown, 12f, textColor, false);
+            PlaceUguiTopLeft(handle.ScanLabel, 8f, 112f, 200f, 22f);
+            handle.ScanSlider = this.CreateUguiSlider(scrollContent, "ScanIntervalSlider",
+                SnowMachineScanMin, SnowMachineScanMax, this.snowMachineScanSeconds,
+                false, new System.Action<float>(this.OnUguiFeaturesSnowScanIntervalChanged));
+            PlaceUguiTopLeft(handle.ScanSlider.gameObject, 216f, 115f, handle.PanelW - 216f, 20f);
+
+            handle.RadiusShown = this.BuildUguiFeaturesSnowScanRadiusText();
+            handle.RadiusLabel = this.CreateUguiLabel(scrollContent, "ScanRadiusLabel",
+                handle.RadiusShown, 12f, textColor, false);
+            PlaceUguiTopLeft(handle.RadiusLabel, 8f, 138f, 200f, 22f);
+            handle.RadiusSlider = this.CreateUguiSlider(scrollContent, "ScanRadiusSlider",
+                SnowMachineRadiusMin, SnowMachineRadiusMax, this.snowMachineScanRadius,
+                true, new System.Action<float>(this.OnUguiFeaturesSnowScanRadiusChanged));
+            PlaceUguiTopLeft(handle.RadiusSlider.gameObject, 216f, 141f, handle.PanelW - 216f, 20f);
+
+            // -------- Auto Snow Sculpture toggle, then its own controls (bag, limit, pacing,
+            // QTE, status box). Flag-only + notification, 360x30. The "? " prefix is dropped.
             handle.AutoToggle = this.CreateUguiCheckbox(scrollContent, "AutoSnow",
                 this.L("Auto Snow Sculpture"), this.autoSnowEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesSnowAutoToggled));
-            PlaceUguiTopLeft(handle.AutoToggle.gameObject, 8f, 48f, 360f, 30f);
+            PlaceUguiTopLeft(handle.AutoToggle.gameObject, 8f, 178f, 360f, 30f);
 
-            // -------- Bag counter (2026-07-25 addition; 0.5s tick over a 1s-throttled read) -----
             handle.BagCountShown = this.BuildUguiFeaturesSnowBagCountText();
             handle.BagCountLabel = this.CreateUguiLabel(scrollContent, "BagCount",
                 handle.BagCountShown, 12f, textColor, false);
-            PlaceUguiTopLeft(handle.BagCountLabel, 8f, 88f, handle.PanelW, 20f);
+            PlaceUguiTopLeft(handle.BagCountLabel, 8f, 218f, handle.PanelW, 20f);
 
-            // -------- Snowball budget (0 = all; IceSkating parse-clamp-writeback idiom) --------
             GameObject limitCaption = this.CreateUguiLabel(scrollContent, "LimitCaption",
                 this.L("Snowball limit (0 = all)"), 12f, textColor, false);
-            PlaceUguiTopLeft(limitCaption, 8f, 112f, 170f, 22f);
+            PlaceUguiTopLeft(limitCaption, 8f, 242f, 170f, 22f);
             handle.LimitSeen = this.snowballUseLimit.ToString();
             handle.LimitField = this.CreateUguiInputField(scrollContent, "LimitField",
                 handle.LimitSeen, 6, new System.Action<string>(this.OnUguiFeaturesSnowLimitEdited));
-            PlaceUguiTopLeft(handle.LimitField.gameObject, 186f, 112f, 80f, 22f);
+            PlaceUguiTopLeft(handle.LimitField.gameObject, 186f, 242f, 80f, 22f);
 
-            // -------- Pacing sliders (persisted; label-left + slider-right row shape) --------
             handle.StartDelayShown = this.BuildUguiFeaturesSnowStartDelayText();
             handle.StartDelayLabel = this.CreateUguiLabel(scrollContent, "StartDelayLabel",
                 handle.StartDelayShown, 12f, textColor, false);
-            PlaceUguiTopLeft(handle.StartDelayLabel, 8f, 142f, 200f, 22f);
+            PlaceUguiTopLeft(handle.StartDelayLabel, 8f, 272f, 200f, 22f);
             handle.StartDelaySlider = this.CreateUguiSlider(scrollContent, "StartDelaySlider",
                 SnowStartDelayMin, SnowStartDelayMax, this.snowStartDelaySeconds,
                 false, new System.Action<float>(this.OnUguiFeaturesSnowStartDelayChanged));
-            PlaceUguiTopLeft(handle.StartDelaySlider.gameObject, 216f, 145f, handle.PanelW - 216f, 20f);
+            PlaceUguiTopLeft(handle.StartDelaySlider.gameObject, 216f, 275f, handle.PanelW - 216f, 20f);
 
             handle.NextDelayShown = this.BuildUguiFeaturesSnowNextDelayText();
             handle.NextDelayLabel = this.CreateUguiLabel(scrollContent, "NextDelayLabel",
                 handle.NextDelayShown, 12f, textColor, false);
-            PlaceUguiTopLeft(handle.NextDelayLabel, 8f, 168f, 200f, 22f);
+            PlaceUguiTopLeft(handle.NextDelayLabel, 8f, 298f, 200f, 22f);
             handle.NextDelaySlider = this.CreateUguiSlider(scrollContent, "NextDelaySlider",
                 SnowNextCycleDelayMin, SnowNextCycleDelayMax, this.snowNextCycleDelaySeconds,
                 false, new System.Action<float>(this.OnUguiFeaturesSnowNextDelayChanged));
-            PlaceUguiTopLeft(handle.NextDelaySlider.gameObject, 216f, 171f, handle.PanelW - 216f, 20f);
+            PlaceUguiTopLeft(handle.NextDelaySlider.gameObject, 216f, 301f, handle.PanelW - 216f, 20f);
 
             handle.QteCountShown = this.BuildUguiFeaturesSnowQteCountText();
             handle.QteCountLabel = this.CreateUguiLabel(scrollContent, "QteCountLabel",
                 handle.QteCountShown, 12f, textColor, false);
-            PlaceUguiTopLeft(handle.QteCountLabel, 8f, 194f, 200f, 22f);
+            PlaceUguiTopLeft(handle.QteCountLabel, 8f, 324f, 200f, 22f);
             handle.QteCountSlider = this.CreateUguiSlider(scrollContent, "QteCountSlider",
                 SnowQteSuccessMin, SnowQteSuccessMax, this.snowQteSuccessCount,
                 true, new System.Action<float>(this.OnUguiFeaturesSnowQteCountChanged));
-            PlaceUguiTopLeft(handle.QteCountSlider.gameObject, 216f, 197f, handle.PanelW - 216f, 20f);
+            PlaceUguiTopLeft(handle.QteCountSlider.gameObject, 216f, 327f, handle.PanelW - 216f, 20f);
 
             // -------- Conditional plain status box (:1043 — DEFAULT GUI.skin.box; Sand
-            // Sculpture's plain-box convention: ControlFill @ 0.55 + neutral gray ring). Now 3
-            // lines (Balls added 2026-07-25) -> 102 high; sits below the new controls at 220. ----
+            // Sculpture's plain-box convention: ControlFill @ 0.55 + neutral gray ring). 3
+            // lines, 102 high; sits below the sculpture controls at 350. ----
             handle.StatusBox = this.CreateUguiGo("StatusBox", scrollContent);
-            PlaceUguiTopLeft(handle.StatusBox, 8f, 220f, handle.PanelW, 102f);
+            PlaceUguiTopLeft(handle.StatusBox, 8f, 350f, handle.PanelW, 102f);
             Color boxFill = this.UguiKitControlFill();
             this.AddUguiImage(handle.StatusBox, new Color(boxFill.r, boxFill.g, boxFill.b, 0.55f), true, 1f);
             this.AddUguiRingOverlay(handle.StatusBox, new Color(0.88f, 0.92f, 0.97f, 0.16f), 1f);
@@ -601,18 +670,17 @@ namespace HeartopiaMod
             return block;
         }
 
-        // Positions everything from the CURRENT autoSnowEnabled / move-status state — the UGUI
-        // analog of the IMGUI branch's num accumulation (Gui.cs:1031-1077), shifted by the
-        // 2026-07-25 fixed rows: header 8 (+40) → toggle 48 (+40) → bag counter 88 (+24) →
-        // limit row 112 (+30) → sliders 142/168/194 (+26 each) → box slot 220 (+122 shown,
-        // 102-high 3-line box / +20 hidden) → button (+38) → optional status label (+40).
-        // Reposition/SetActive only; nothing is rebuilt.
+        // Positions the conditional rows from the CURRENT autoSnowEnabled / move-status state.
+        // Fixed rows above the cursor: header 8 → collect toggle 48 → collect status 88 →
+        // scan/radius 112/138 → Auto Snow toggle 178 → bag 218 → limit 242 → pacing 272/298/324
+        // → box slot 350 (+122 shown, 102-high 3-line box / +20 hidden) → button (+38) →
+        // optional status label (+40). Reposition/SetActive only; nothing is rebuilt.
         private void RelayoutUguiShellFeaturesSnow(UguiShellFeaturesSnowHandle handle)
         {
             bool autoOn = this.autoSnowEnabled;
             bool hasMoveStatus = !string.IsNullOrEmpty(this.snowMoveSnowballsStatus);
 
-            float yCur = 220f;
+            float yCur = 350f;
             SetUguiGoActive(handle.StatusBox, autoOn);
             if (autoOn)
             {
@@ -659,6 +727,7 @@ namespace HeartopiaMod
             {
                 // Toggle re-sync (external IMGUI edits) — WithoutNotify only.
                 this.SyncUguiToggleFromField(handle.AutoToggle, this.autoSnowEnabled);
+                this.SyncUguiToggleFromField(handle.CollectToggle, this.autoSnowCollectEnabled);
 
                 // Move-status text: raw field reference, zero-alloc — per frame. Synced even
                 // while hidden (cheap, stays ready — Sand idiom).
@@ -680,6 +749,22 @@ namespace HeartopiaMod
                         this.BuildUguiFeaturesSnowBallsText());
                     this.SyncUguiSelfLabelText(handle.BagCountLabel, ref handle.BagCountShown,
                         this.BuildUguiFeaturesSnowBagCountText());
+                    this.SyncUguiSelfLabelText(handle.CollectStatusLabel, ref handle.CollectStatusShown,
+                        this.BuildUguiFeaturesSnowCollectText());
+                    this.SyncUguiSelfLabelText(handle.ScanLabel, ref handle.ScanShown,
+                        this.BuildUguiFeaturesSnowScanIntervalText());
+                    if (handle.ScanSlider != null
+                        && Mathf.Abs(handle.ScanSlider.value - this.snowMachineScanSeconds) > 0.0005f)
+                    {
+                        handle.ScanSlider.SetValueWithoutNotify(this.snowMachineScanSeconds);
+                    }
+                    this.SyncUguiSelfLabelText(handle.RadiusLabel, ref handle.RadiusShown,
+                        this.BuildUguiFeaturesSnowScanRadiusText());
+                    if (handle.RadiusSlider != null
+                        && Mathf.Abs(handle.RadiusSlider.value - this.snowMachineScanRadius) > 0.0005f)
+                    {
+                        handle.RadiusSlider.SetValueWithoutNotify(this.snowMachineScanRadius);
+                    }
                     this.SyncUguiSelfLabelText(handle.StartDelayLabel, ref handle.StartDelayShown,
                         this.BuildUguiFeaturesSnowStartDelayText());
                     this.SyncUguiSelfLabelText(handle.NextDelayLabel, ref handle.NextDelayShown,
@@ -740,6 +825,23 @@ namespace HeartopiaMod
                 this.autoSnowEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
         }
 
+        // Auto collect snowballs — the same flag + 2-color notification shape as the toggle above,
+        // plus the persist the plan asks for (autoSnowCollectEnabled IS a saved setting, unlike
+        // autoSnowEnabled). Clearing per-machine state is NOT duplicated here: the collector's own
+        // falling edge in ProcessSnowAutoCollectOnUpdate owns it, so a config-file change clears too.
+        private void OnUguiFeaturesSnowAutoCollectToggled(bool value)
+        {
+            if (value == this.autoSnowCollectEnabled)
+            {
+                return;
+            }
+            this.autoSnowCollectEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+            this.AddMenuNotification(
+                $"Auto Collect Snowballs {(this.autoSnowCollectEnabled ? "Enabled" : "Disabled")}",
+                this.autoSnowCollectEnabled ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+        }
+
         // Pacing sliders (2026-07-25): snap to the nearest 0.05 s (the Pictures delay-slider
         // granularity), equal-guard, persist via SaveKeybinds(false), refresh the value label.
         private void OnUguiFeaturesSnowStartDelayChanged(float value)
@@ -793,6 +895,44 @@ namespace HeartopiaMod
             {
                 this.SyncUguiSelfLabelText(handle.QteCountLabel, ref handle.QteCountShown,
                     this.BuildUguiFeaturesSnowQteCountText());
+            }
+        }
+
+        // Collector scan-interval slider: snap to the nearest 0.05 s like the pacing sliders, clamp
+        // to the feature's range (the tick clamps again defensively), equal-guard, persist.
+        private void OnUguiFeaturesSnowScanIntervalChanged(float value)
+        {
+            float snapped = Mathf.Clamp(Mathf.Round(value * 20f) / 20f, SnowMachineScanMin, SnowMachineScanMax);
+            if (Mathf.Abs(snapped - this.snowMachineScanSeconds) <= 0.0001f)
+            {
+                return;
+            }
+            this.snowMachineScanSeconds = snapped;
+            try { this.SaveKeybinds(false); } catch { }
+            UguiShellFeaturesSnowHandle handle = this.uguiShellFeaturesSnow;
+            if (handle != null)
+            {
+                this.SyncUguiSelfLabelText(handle.ScanLabel, ref handle.ScanShown,
+                    this.BuildUguiFeaturesSnowScanIntervalText());
+            }
+        }
+
+        // Collector scan-radius slider: whole metres only (the slider is built with wholeNumbers),
+        // clamp to the feature's range, equal-guard, persist.
+        private void OnUguiFeaturesSnowScanRadiusChanged(float value)
+        {
+            float rounded = Mathf.Clamp(Mathf.Round(value), SnowMachineRadiusMin, SnowMachineRadiusMax);
+            if (Mathf.Abs(rounded - this.snowMachineScanRadius) <= 0.0001f)
+            {
+                return;
+            }
+            this.snowMachineScanRadius = rounded;
+            try { this.SaveKeybinds(false); } catch { }
+            UguiShellFeaturesSnowHandle handle = this.uguiShellFeaturesSnow;
+            if (handle != null)
+            {
+                this.SyncUguiSelfLabelText(handle.RadiusLabel, ref handle.RadiusShown,
+                    this.BuildUguiFeaturesSnowScanRadiusText());
             }
         }
 
