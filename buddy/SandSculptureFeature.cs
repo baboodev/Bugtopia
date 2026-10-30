@@ -272,6 +272,8 @@ namespace HeartopiaMod
             this.sandPlaceAttempts = 0;
             this.sandPlaceSentAt = 0f;
             this.sandLastLoggedStatus = string.Empty;
+            this.sandLoadNotifiedStatus = string.Empty;
+            this.sandLoadBlockedGameText = string.Empty;
             if (clearBlacklist)
             {
                 this.sandBaseFailCounts.Clear();
@@ -291,9 +293,28 @@ namespace HeartopiaMod
                 this.SandLogStatus("base " + baseNetId + " failure " + fails + "/" + SandMaxBaseFailures + ": " + reason);
                 if (fails >= SandMaxBaseFailures)
                 {
-                    this.sandBaseBlacklist.Add(baseNetId);
-                    this.AddMenuNotification("Sand base " + baseNetId + " blacklisted: " + reason, new Color(1f, 0.55f, 0.55f));
+                    this.SandBlacklistBase(baseNetId, reason);
+                    return;
                 }
+            }
+
+            this.sandTargetBaseNetId = 0;
+            this.sandTargetRoughStaticId = 0;
+            this.sandQteRoundCount = 0;
+            this.sandApiState = SandApiState.FindBase;
+        }
+
+        // Blacklists the base immediately: for failures that cannot change on a retry (the field
+        // Load cannot host the output right now), another Start+Finish on the same base only
+        // spends stamina. "Reset base blacklist" undoes it.
+        private void SandBlacklistBase(uint baseNetId, string reason)
+        {
+            if (baseNetId != 0)
+            {
+                this.sandBaseBlacklist.Add(baseNetId);
+                this.sandBaseFailCounts.Remove(baseNetId);
+                this.SandLogStatus("base " + baseNetId + " blacklisted: " + reason);
+                this.AddMenuNotification("Sand base " + baseNetId + " blacklisted: " + reason, new Color(1f, 0.55f, 0.55f));
             }
 
             this.sandTargetBaseNetId = 0;
@@ -612,6 +633,29 @@ namespace HeartopiaMod
                     int productId = options[optionIndex];
                     this.SandLog("rough " + roughNetId + " options=[" + string.Join(",", options) + "] pick index=" + optionIndex
                                  + " productId=" + productId);
+
+                    // Model-fit gate: the finished piece is a Putitem too (models 600100..600113,
+                    // burden 4..10; a forced decoy fills as the spoiled 600299, burden 6) and
+                    // spawns into the field as a build. On a spent budget the server would reject
+                    // the spawned build and the sculpt would die silently mid-cycle (the old
+                    // report); ask the vanilla gate before choosing (BuildModule.CheckCanPut — the
+                    // Load bucket is resolved game-side, the mod picks no key). The verdict is
+                    // deterministic for the field's current Load, so a refusal blacklists the base
+                    // on the first strike instead of burning two more Start/Finish (stamina) on a
+                    // field that cannot host the output; "Reset base blacklist" undoes it. No
+                    // feature stop — clearing the Load makes the next cycle work. Only a genuine
+                    // capacity refusal (312) gates; 140 and the config-missing codes are
+                    // inconclusive and pass through, leaving the server to decide.
+                    int modelStaticId = (productId >= 1 && productId <= SandValidModelMaxId)
+                        ? SandItemToModelStaticId[productId]
+                        : 600299;
+                    if (!this.TryCheckSandFieldLoadAllows(modelStaticId, out string modelLoadStatus))
+                    {
+                        this.SandSetAction("model " + modelStaticId + " would not fit the field Load: " + modelLoadStatus);
+                        this.SandBlacklistBase(this.sandTargetBaseNetId, "model would not fit the field Load");
+                        this.sandApiNextActionAt = now + SandApiRetryBackoffSeconds;
+                        return;
+                    }
                     if (this.TryInvokeSandChoose(roughNetId, productId, out string chooseStatus))
                     {
                         this.TryClearSelfSandRoughData(out string clearStatus);
@@ -658,8 +702,19 @@ namespace HeartopiaMod
 
             if (now >= this.sandApiRoughDeadlineAt)
             {
-                // Finish was likely rejected (stamina / not started / stale base).
-                this.SandSetAction("rough never appeared (finish rejected? stamina?)");
+                // Finish was likely rejected (stamina / not started / stale base). A finished
+                // sculpture is a build entity too, so a field with its Load budget spent can also
+                // block it — surface the field's current burden right here instead of leaving the
+                // user to work that out by hand.
+                string loadHint = string.Empty;
+                if (this.TryGetSandFieldLoadSnapshot(out int roughFieldBurden, out int roughFieldMax))
+                {
+                    loadHint = roughFieldMax > 0
+                        ? " field load " + roughFieldBurden + "/" + roughFieldMax
+                        : " field burden " + roughFieldBurden;
+                }
+
+                this.SandSetAction("rough never appeared (finish rejected? stamina?" + loadHint + ")");
 
                 this.SandRegisterBaseFailure(this.sandTargetBaseNetId, "rough timeout");
                 this.sandApiNextActionAt = now + SandApiRetryBackoffSeconds;
@@ -985,11 +1040,17 @@ namespace HeartopiaMod
 
             if (this.sandPlaceAttempts >= SandPlaceBaseMaxAttempts)
             {
-                // Repeated non-terminal failures (send rejected / no field) — stop trying to place
-                // this session so the loop does not spin; keep scanning for a manually-placed base.
+                // Repeated non-terminal failures (send rejected / no field / game load refusal) —
+                // stop trying to place this session so the loop does not spin; keep scanning for a
+                // manually-placed base. When the game itself refused the put, name the reason
+                // ("Insufficient Load. Unable to place.") instead of a bare "Off".
                 this.sandAutoPlaceBase = false;
                 this.SandSetAction("auto-place disabled: " + placeStatus);
-                this.AddMenuNotification(this.L("Auto-place base from backpack") + ": " + this.L("Off"), new Color(1f, 0.55f, 0.55f));
+                bool gameRefused = placeStatus.StartsWith(SandLoadBlockedPrefix, StringComparison.Ordinal)
+                                   || placeStatus.StartsWith(SandPlaceBlockedPrefix, StringComparison.Ordinal);
+                this.AddMenuNotification(this.L("Auto-place base from backpack") + ": " + this.L("Off")
+                    + (gameRefused && !string.IsNullOrEmpty(this.sandLoadBlockedGameText) ? " — " + this.sandLoadBlockedGameText : string.Empty),
+                    new Color(1f, 0.55f, 0.55f));
                 this.sandApiState = SandApiState.FindBase;
                 this.sandApiNextActionAt = now + SandApiScanBackoffSeconds;
                 return;
@@ -1872,7 +1933,23 @@ namespace HeartopiaMod
                 return false;
             }
 
-            // 3) build BuildPlaceData and send
+            // 3) field Load gate — vanilla consults BuildModule.CheckCanPut before every place and
+            // surfaces its own error; the direct command below bypasses that gate, so a near-full
+            // field used to reject the place server-side with no message anywhere. Run the game's
+            // own check first and report its reason. Fail-open when the check chain is unavailable
+            // (behaviour unchanged).
+            if (this.TryCheckSandFieldLoadAllows(staticId, out string loadStatus))
+            {
+                this.SandLog("place: " + loadStatus);
+            }
+            else
+            {
+                status = loadStatus;
+                this.SandLogStatus("place: " + status);
+                return false;
+            }
+
+            // 4) build BuildPlaceData and send
             if (!this.TrySendSandBasePlace(bagItemNetId, buildRootNetId, putZoneId, localPos, angle,
                                            out string sendStatus))
             {
@@ -2307,6 +2384,248 @@ namespace HeartopiaMod
                 AuraMonoPinFree(placePin);
                 AuraMonoPinFree(tdPin);
                 AuraMonoPinFree(arrPin);
+            }
+        }
+
+        // ===== field Load (build burden) gate ================================================
+        // A placed sand base is a Putitem (staticId 600000, burden 7): it consumes the field's
+        // Load budget exactly like any other furniture, and so does a finished sculpture
+        // (600100..600113, burden 4..10) while it stands on the field. Vanilla placement runs
+        // The gate is the vanilla call itself: BuildModule.CheckCanPut(staticId, out ErrorCode,
+        // count) (BuildModule.cs:2515) — outside a homeland it reports Success, otherwise it asks
+        // CraftBank.OverLoadData, the OverLoadData the module keys per BakeUtility.GetMyHomeNetId()
+        // (NormalModeCraftBank.cs:25) — the same bucket whose 312 verdict makes the game print tip
+        // 312 "Insufficient Load. Unable to place." via TableData.GetLocalizationText. The direct
+        // BuildBatchOperationProCommand above bypasses that gate, so on a near-full field the
+        // server silently rejected the place and the loop only ever saw "no base in range". Ask
+        // the game the exact question vanilla asks: the call takes no Load key, so the mod cannot
+        // pick a wrong bucket — and the field entity's netId is NOT the Load bucket key (they are
+        // different ids; the vanilla gate resolves the right one by construction). Fail-open: a
+        // chain that cannot be resolved keeps the old send-anyway behaviour — only an explicit
+        // refusal from the game blocks the place.
+
+        private const string SandLoadBlockedPrefix = "insufficient load: ";
+        private const string SandPlaceBlockedPrefix = "place blocked: ";
+        private string sandLoadNotifiedStatus = string.Empty;  // notify each distinct refusal once
+        private string sandLoadBlockedGameText = string.Empty; // last localized refusal text (UI note)
+        // Descriptors are image-lifetime and safe to cache raw (resolved on the live object's own
+        // class — never on a name-resolved base).
+        private IntPtr sandLoadBuildModuleCheckCanPutMethod; // BuildModule.CheckCanPut(int,out ErrorCode,int) — 3 params
+        private IntPtr sandLoadBuildModuleCapacityMethod;    // BuildModule.GetCurrentCapacity() — 0 params
+        private IntPtr sandLoadBuildModuleMaxCapMethod;      // BuildModule.GetMaxCapacity() — 0 params
+
+        // true = allowed (or the check is unavailable — fail-open). false = the game explicitly
+        // refused the put; status then starts with SandLoadBlockedPrefix / SandPlaceBlockedPrefix
+        // and carries the game's own localized text. Notifies once per distinct refusal.
+        private unsafe bool TryCheckSandFieldLoadAllows(int staticId, out string status)
+        {
+            status = "load check unavailable";
+            if (staticId <= 0)
+            {
+                return true;
+            }
+            if (!AuraMonoPinningAvailable || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                return true;
+            }
+
+            try
+            {
+                if (!this.TryResolveAuraMonoModule("XDTGUI.Module.Build.BuildModule", out IntPtr buildModuleObj)
+                    || buildModuleObj == IntPtr.Zero)
+                {
+                    status = "BuildModule unavailable";
+                    this.SandLog("load: " + status);
+                    return true;
+                }
+
+                uint modulePin = AuraMonoPinNew(buildModuleObj);
+                try
+                {
+                    IntPtr moduleClass = auraMonoObjectGetClass(buildModuleObj);
+                    if (this.sandLoadBuildModuleCheckCanPutMethod == IntPtr.Zero)
+                    {
+                        this.sandLoadBuildModuleCheckCanPutMethod = this.FindAuraMonoMethodOnHierarchy(
+                            moduleClass, "CheckCanPut", 3);
+                    }
+                    if (this.sandLoadBuildModuleCheckCanPutMethod == IntPtr.Zero)
+                    {
+                        status = "BuildModule.CheckCanPut missing";
+                        this.SandLog("load: " + status);
+                        return true;
+                    }
+
+                    IntPtr exc = IntPtr.Zero;
+                    int staticIdArg = staticId;
+                    int errorOut = 0;   // out ErrorCode — 4-byte enum into our own int storage
+                                        // (mono_runtime_invoke outs are only unsafe for value
+                                        // types wider than a pointer — AGENTS §12)
+                    int countArg = 1;
+                    IntPtr* args = stackalloc IntPtr[3];
+                    args[0] = (IntPtr)(&staticIdArg);
+                    args[1] = (IntPtr)(&errorOut);
+                    args[2] = (IntPtr)(&countArg);
+                    // BuildModule.CheckCanPut is void — the out ErrorCode is the whole verdict:
+                    // OverLoadData.CheckCanAddBurden assigns it on every branch (OverLoadData.cs
+                    // :260-313) and ErrorCode.Success == 0 (ErrorCode.cs:6) only on the pass path.
+                    auraMonoRuntimeInvoke(this.sandLoadBuildModuleCheckCanPutMethod, buildModuleObj, (IntPtr)args, ref exc);
+                    if (exc != IntPtr.Zero)
+                    {
+                        status = "CheckCanPut exc";
+                        this.SandLog("load: " + status);
+                        return true;
+                    }
+
+                    // Burden for the status text only: BuildModule.GetCurrentCapacity() returns the
+                    // same OverLoadData.Burden the vanilla Load widget shows. Best-effort — its
+                    // failure never changes the verdict.
+                    int burden = 0;
+                    bool burdenOk = false;
+                    if (this.sandLoadBuildModuleCapacityMethod == IntPtr.Zero)
+                    {
+                        this.sandLoadBuildModuleCapacityMethod = this.FindAuraMonoMethodOnHierarchy(
+                            moduleClass, "GetCurrentCapacity", 0);
+                    }
+                    if (this.sandLoadBuildModuleCapacityMethod != IntPtr.Zero)
+                    {
+                        IntPtr burdenExc = IntPtr.Zero;
+                        IntPtr burdenBoxed = auraMonoRuntimeInvoke(this.sandLoadBuildModuleCapacityMethod, buildModuleObj, IntPtr.Zero, ref burdenExc);
+                        if (burdenExc == IntPtr.Zero && burdenBoxed != IntPtr.Zero)
+                        {
+                            burdenOk = this.TryUnboxMonoInt32(burdenBoxed, out burden);
+                        }
+                    }
+                    string burdenSuffix = burdenOk ? (" (field burden " + burden + ")") : string.Empty;
+
+                    if (errorOut == 0)
+                    {
+                        status = "load check OK" + burdenSuffix;
+                        return true;
+                    }
+
+                    // Three codes are NOT a Load verdict — 81000 OverloadConfigNotFound (the row is
+                    // absent from the BurdenConfig scriptable), 92874 WrongStaticId, 140
+                    // TypeCapacityError (the per-type bookkeeping cap Math.Max(limit, 300) with the
+                    // client-side type counter — Putitem.limit is 0 for the sand items — not a Load
+                    // statement): fail-open there, log only — never hard-block because a config row
+                    // is missing or a type counter is at its cap; leave the server to decide. Only
+                    // a true capacity refusal (312 CapacityError) or another real refusal code blocks.
+                    if (errorOut == 81000 || errorOut == 92874 || errorOut == 140)
+                    {
+                        status = "load check inconclusive (game error " + errorOut + ")";
+                        this.SandLog("load: " + status);
+                        return true;
+                    }
+
+                    string gameText = errorOut > 0 && this.sandAuraTableDataClass != IntPtr.Zero
+                        ? this.TryGetLocalizationTextMono(this.sandAuraTableDataClass, errorOut)
+                        : string.Empty;
+                    if (string.IsNullOrEmpty(gameText))
+                    {
+                        gameText = errorOut == 312
+                            ? "insufficient load"
+                            : ("place blocked (error " + errorOut + ")");
+                    }
+
+                    status = (errorOut == 312 ? SandLoadBlockedPrefix : SandPlaceBlockedPrefix)
+                             + gameText + burdenSuffix;
+                    this.sandLoadBlockedGameText = gameText;
+                    if (status != this.sandLoadNotifiedStatus)
+                    {
+                        this.sandLoadNotifiedStatus = status;
+                        // gameText is the game's own TipConfig string in the player's language
+                        // — no mod-side phrase to localize.
+                        this.AddMenuNotification(gameText, UguiSandSculptureWarnColor);
+                    }
+
+                    this.SandLogStatus(status);
+                    return false;
+                }
+                finally
+                {
+                    AuraMonoPinFree(modulePin);
+                }
+            }
+            catch (Exception ex)
+            {
+                status = "load check exception: " + ex.Message;
+                this.SandLog("load: " + status);
+                return true;
+            }
+        }
+
+        // Burden + cap for status hints: BuildModule.GetCurrentCapacity() and GetMaxCapacity() read
+        // the very OverLoadData / CapacityModule the vanilla Load widget shows. Best-effort — false
+        // when the module or the burden read fails; maxCapacity stays 0 when only the cap read
+        // failed (the hint then degrades to burden-only). Only called from the rough timeout, not
+        // per frame.
+        private unsafe bool TryGetSandFieldLoadSnapshot(out int burden, out int maxCapacity)
+        {
+            burden = 0;
+            maxCapacity = 0;
+            if (!AuraMonoPinningAvailable || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!this.TryResolveAuraMonoModule("XDTGUI.Module.Build.BuildModule", out IntPtr buildModuleObj)
+                    || buildModuleObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                uint modulePin = AuraMonoPinNew(buildModuleObj);
+                try
+                {
+                    IntPtr moduleClass = auraMonoObjectGetClass(buildModuleObj);
+
+                    if (this.sandLoadBuildModuleCapacityMethod == IntPtr.Zero)
+                    {
+                        this.sandLoadBuildModuleCapacityMethod = this.FindAuraMonoMethodOnHierarchy(
+                            moduleClass, "GetCurrentCapacity", 0);
+                    }
+                    if (this.sandLoadBuildModuleCapacityMethod == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    IntPtr burdenExc = IntPtr.Zero;
+                    IntPtr burdenBoxed = auraMonoRuntimeInvoke(this.sandLoadBuildModuleCapacityMethod, buildModuleObj, IntPtr.Zero, ref burdenExc);
+                    if (burdenExc != IntPtr.Zero || burdenBoxed == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+                    bool burdenOk = this.TryUnboxMonoInt32(burdenBoxed, out burden);
+
+                    if (this.sandLoadBuildModuleMaxCapMethod == IntPtr.Zero)
+                    {
+                        this.sandLoadBuildModuleMaxCapMethod = this.FindAuraMonoMethodOnHierarchy(
+                            moduleClass, "GetMaxCapacity", 0);
+                    }
+                    if (this.sandLoadBuildModuleMaxCapMethod != IntPtr.Zero)
+                    {
+                        IntPtr maxExc = IntPtr.Zero;
+                        IntPtr maxBoxed = auraMonoRuntimeInvoke(this.sandLoadBuildModuleMaxCapMethod, buildModuleObj, IntPtr.Zero, ref maxExc);
+                        if (maxExc == IntPtr.Zero && maxBoxed != IntPtr.Zero)
+                        {
+                            this.TryUnboxMonoInt32(maxBoxed, out maxCapacity);
+                        }
+                    }
+
+                    return burdenOk;
+                }
+                finally
+                {
+                    AuraMonoPinFree(modulePin);
+                }
+            }
+            catch
+            {
+                return false;
             }
         }
 
