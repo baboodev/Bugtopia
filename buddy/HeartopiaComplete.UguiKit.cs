@@ -1591,6 +1591,11 @@ namespace HeartopiaMod
             canvas.scaleFactor = win.Scale;
             canvasGo.AddComponent<UnityEngine.UI.GraphicRaycaster>();
 
+            // Clean Photos (HeartopiaComplete.PhotoSnapUi.cs): every mod window registers its canvas
+            // root here — the single chokepoint that covers all six windows, and re-covers them after
+            // a theme rebuild, which recreates the window through this same method.
+            this.RegisterPhotoSnapUiRoot(canvasGo, PhotoSnapUiRootKind.Ui);
+
             GameObject panel = this.CreateUguiGo("Panel", canvasGo.transform);
             // Backdrop composed the way DrawWindow ACTUALLY paints it (HeartopiaComplete.UiKit.cs
             // ~line 345), not just the raw uiWindow* fields: a hardcoded near-opaque slab with the

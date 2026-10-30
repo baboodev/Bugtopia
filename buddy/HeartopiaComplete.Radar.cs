@@ -1956,6 +1956,7 @@ namespace HeartopiaMod
             {
                 this.radarContainer = new GameObject("Universal_Mushroom_Radar");
                 Object.DontDestroyOnLoad(this.radarContainer);
+                this.RegisterPhotoSnapUiRoot(this.radarContainer, PhotoSnapUiRootKind.Esp); // Clean Photos
             }
             else
             {

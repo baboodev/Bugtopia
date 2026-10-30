@@ -259,6 +259,7 @@ namespace HeartopiaMod
                 }
 
                 this.uguiToastRoot = go;
+                this.RegisterPhotoSnapUiRoot(go, PhotoSnapUiRootKind.Ui); // Clean Photos
                 this.uguiToastCanvas = canvas;
                 this.uguiToastCards = cards;
                 this.uguiToastLastScale = this.GetUiScale();

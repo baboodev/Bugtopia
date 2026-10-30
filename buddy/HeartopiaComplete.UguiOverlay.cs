@@ -73,6 +73,7 @@ namespace HeartopiaMod
                 // Deliberately NO GraphicRaycaster and no CanvasScaler: no input, no scaling.
 
                 this.uguiOverlayRoot = go;
+                this.RegisterPhotoSnapUiRoot(go, PhotoSnapUiRootKind.Esp); // Clean Photos
                 this.uguiOverlayLayer = go.transform;
                 ModLogger.Msg("[UguiOverlay] canvas built (sortingOrder " + UguiOverlaySortingOrder + ")");
                 return true;

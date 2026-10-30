@@ -246,6 +246,8 @@ namespace HeartopiaMod
             public bool quietBpPayRewardPopup;
             public bool quietPetPhotoResultPopup;
             public bool quietAnimalCardPopups;
+            public bool hideModUiInPhotos = true;
+            public bool hideModEspInPhotos = true;
             public bool emoteUnlockEnabled;
             public bool paintStyleUnlockEnabled;
             public bool freePlaceRotateUnlockEnabled;

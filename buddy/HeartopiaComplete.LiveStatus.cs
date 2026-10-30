@@ -78,6 +78,7 @@ namespace HeartopiaMod
             "Persistent HUD",
             "Stranger Chat Bypass",
             "Chat Translate Unlock",
+            "Hide Mod UI/ESP In Photos",
         };
 
         private static readonly HashSet<string> StatusOverlayEntryLabelSet =
@@ -380,6 +381,12 @@ namespace HeartopiaMod
             if (this.quietAnimalCardPopups)
             {
                 entries.Add(this.CreateLiveFeatureEntry("Quiet Animal Cards", "Active"));
+            }
+
+            if (this.hideModUiInPhotos || this.hideModEspInPhotos)
+            {
+                // One line for both gates, named for both — the ESP-only case must not read as a UI line.
+                entries.Add(this.CreateLiveFeatureEntry("Hide Mod UI/ESP In Photos", "Active"));
             }
 
             if (this.activityRewardAutoClaim)

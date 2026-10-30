@@ -799,6 +799,27 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
   Note: the Debug Log toggle is **session-only** — it is never saved to config, so it always starts
   off (it prints a line per chat message).
 
+### Clean Photos — hide mod surfaces in in-game photos (Self → Privacy sub-tab)
+
+Every in-game photo flow — the menu camera (**GamePhotoMode**) and the automatic **QuickSnap** shots on
+balloon / sightseeing / coaster / skate / hide-and-seek — hides the game's own UI panels for the capture
+frame, then reads the composited backbuffer. Mod canvases are not in the game's UI layer registry, so
+they were composited into every photo. The mod hooks the same
+`CanvasSnapStateRequestedEvent{active}` the game dispatches around each capture (payload table in
+[GAME_EVENTS.md](GAME_EVENTS.md)) and mirrors its hide window — no poll, no patch.
+
+| Toggle | Default | Covers |
+|---|---|---|
+| **Hide mod UI in photos** (`hideModUiInPhotos`) | ON | The six `CreateUguiWindow` canvases (menu shell, Avatar Studio, Action Panel, Building Move Panel, Dye Picker, Quest Assistant), toast root, status-overlay root |
+| **Hide mod ESP in photos** (`hideModEspInPhotos`) | ON | `HeartopiaModOverlay` (screen-space ESP tags / crosshair) and `Universal_Mushroom_Radar` (world-space radar markers) |
+
+The hide is re-applied at the end of every `LateUpdate` while a capture is in flight — the toast and
+status-overlay drivers re-show their roots in `OnUpdate`, and `QuickSnap` captures one frame after the
+event — and each root's `activeSelf` is restored from the value saved when the hide began, so a window
+the user had closed stays closed. A 10 s watchdog and a world-epoch change force the restore if a
+capture flow is torn down before its `active=false`. Implementation `HeartopiaComplete.PhotoSnapUi.cs`;
+roots register at the mod's own window-creation chokepoints only.
+
 ### Party & Events Auto-Decline (Self → Privacy sub-tab)
 
 **Four** toggles, in two independent pairs — because the game has two parallel "join other players"
@@ -2331,6 +2352,7 @@ Sections typically include:
 | UI Theme | Accent, text, tab, window, panel colors; opacity; scale; HSV picker |
 | Localization | Language: en, es, zh-CN, pt-BR |
 | Notifications | Enable, screen position (9 positions) |
+| Behavior | Auto start/close lobby flow, ID display, Block Input |
 | Overlay | Status overlay toggle |
 | Performance | FPS bypass; **FPS Watchdog** (see below); LOD override (game default / better / performance / custom bias & max level) |
 | Misc | Restore defaults, export-related options |

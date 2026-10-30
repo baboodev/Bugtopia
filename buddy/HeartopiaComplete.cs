@@ -609,6 +609,13 @@ namespace HeartopiaMod
             {
                 this.ApplyCameraFOV();
             }
+
+            // Clean Photos (HeartopiaComplete.PhotoSnapUi.cs) — LAST line of LateUpdate: hide the
+            // mod's drawn surfaces while the game holds a snap-open capture window. Runs after
+            // ProcessUguiOverlayFrame and after every OnUpdate feature driver (they re-activate their
+            // roots there), yet LateThunk is still inside PreLateUpdate — before the canvas render
+            // subsystems compose the frame, which is the frame the photo captures.
+            this.ProcessPhotoSnapUiOnLateUpdate();
         }
 
         // Token: 0x06000005 RID: 5 RVA: 0x000024C0 File Offset: 0x000006C0

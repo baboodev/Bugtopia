@@ -192,6 +192,8 @@ namespace HeartopiaMod
             public string UploadCheatCountShown;
             public GameObject FriendVisitCountLabel;
             public string FriendVisitCountShown;
+            public Toggle PhotoSnapUiToggle;
+            public Toggle PhotoSnapEspToggle;
             public Toggle PartyDeclineToggle;
             public Toggle PartyAutoLeaveToggle;
             public Toggle ActivityDeclineToggle;
@@ -1920,58 +1922,87 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(block, x, y, w, h);
             this.AddUguiImage(block, this.UguiKitContentBg(), true, 1f);
 
+            // 2026-10-30: 3 headers + 11 toggles + 8 status labels overflow the fixed block (last
+            // label bottom 588 > contentH-44 = 526) and the shell container has no scroll of its
+            // own. Same escape Settings → Main ships with (its header note: 39 rows don't fit
+            // 520px either): scroll view spanning the whole block, panel bgs cleared so the block's
+            // ContentBg shows through (alpha-0 images still raycast), every row parented to the
+            // viewport's Content, content resized to the real height at the end of the build.
+            Transform rowsContent;
+            GameObject scroll = this.CreateUguiScrollView(block.transform, "Scroll", 10f, out rowsContent);
+            PlaceUguiTopLeft(scroll, 0f, 0f, w, h);
+            try
+            {
+                Image scrollBg = scroll.GetComponent<Image>();
+                if (scrollBg != null)
+                {
+                    scrollBg.color = Color.clear;
+                }
+                if (rowsContent != null && rowsContent.parent != null)
+                {
+                    Image viewportBg = rowsContent.parent.GetComponent<Image>();
+                    if (viewportBg != null)
+                    {
+                        viewportBg.color = Color.clear;
+                    }
+                }
+            }
+            catch { }
+
             const float pad = 16f;
-            float rowW = w - pad * 2f;
+            // Rows now live in the viewport's Content, which is w minus the inset band
+            // (4 left + 18 right = 22, the same ContentWidth arithmetic Settings → Main uses).
+            float rowW = (w - 22f) - pad * 2f;
             Color muted = this.UguiKitMutedColor();
             Color counterColor = new Color(muted.r, muted.g, muted.b, 0.9f); // IMGUI labelStyle 0.9 alpha
             float yCur = 12f;
 
             // IMGUI header: "Privacy", bold 13, header color.
-            GameObject header = this.CreateUguiHeaderLabel(block.transform, "Header", this.L("Privacy"), 13f);
+            GameObject header = this.CreateUguiHeaderLabel(rowsContent, "Header", this.L("Privacy"), 13f);
             PlaceUguiTopLeft(header, pad, yCur, rowW, 22f);
             yCur += 28f;
 
-            handle.LogsToggle = this.CreateUguiCheckbox(block.transform, "LogsToggle",
+            handle.LogsToggle = this.CreateUguiCheckbox(rowsContent, "LogsToggle",
                 this.L("Block Server Log Uploads"), this.privacyBlockLogUploads,
                 new System.Action<bool>(this.OnUguiSelfPrivacyLogsToggled));
             PlaceUguiTopLeft(handle.LogsToggle.gameObject, pad, yCur, rowW, 24f);
             yCur += 28f;
             handle.LogsCountShown = this.LF("Logs blocked: {0}", privacyBlockedLogCount);
-            handle.LogsCountLabel = this.CreateUguiLabel(block.transform, "LogsCount",
+            handle.LogsCountLabel = this.CreateUguiLabel(rowsContent, "LogsCount",
                 handle.LogsCountShown, 11f, counterColor, false);
             PlaceUguiTopLeft(handle.LogsCountLabel, pad, yCur, rowW, 18f);
             yCur += 24f;
 
-            handle.MergesToggle = this.CreateUguiCheckbox(block.transform, "MergesToggle",
+            handle.MergesToggle = this.CreateUguiCheckbox(rowsContent, "MergesToggle",
                 this.L("Block Room Merge (Enter)"), this.privacyBlockRoomMerges,
                 new System.Action<bool>(this.OnUguiSelfPrivacyMergesToggled));
             PlaceUguiTopLeft(handle.MergesToggle.gameObject, pad, yCur, rowW, 24f);
             yCur += 28f;
             handle.MergesCountShown = this.LF("Merges blocked: {0}", privacyBlockedMergeCount);
-            handle.MergesCountLabel = this.CreateUguiLabel(block.transform, "MergesCount",
+            handle.MergesCountLabel = this.CreateUguiLabel(rowsContent, "MergesCount",
                 handle.MergesCountShown, 11f, counterColor, false);
             PlaceUguiTopLeft(handle.MergesCountLabel, pad, yCur, rowW, 18f);
             yCur += 24f;
 
-            handle.SpamsToggle = this.CreateUguiCheckbox(block.transform, "SpamsToggle",
+            handle.SpamsToggle = this.CreateUguiCheckbox(rowsContent, "SpamsToggle",
                 this.L("Block Spam Reports"), this.privacyBlockSpamReports,
                 new System.Action<bool>(this.OnUguiSelfPrivacySpamsToggled));
             PlaceUguiTopLeft(handle.SpamsToggle.gameObject, pad, yCur, rowW, 24f);
             yCur += 28f;
             handle.SpamsCountShown = this.LF("Spams blocked: {0}", privacyBlockedSpamCount);
-            handle.SpamsCountLabel = this.CreateUguiLabel(block.transform, "SpamsCount",
+            handle.SpamsCountLabel = this.CreateUguiLabel(rowsContent, "SpamsCount",
                 handle.SpamsCountShown, 11f, counterColor, false);
             PlaceUguiTopLeft(handle.SpamsCountLabel, pad, yCur, rowW, 18f);
             yCur += 24f;
 
-            handle.UploadCheatToggle = this.CreateUguiCheckbox(block.transform, "UploadCheatToggle",
+            handle.UploadCheatToggle = this.CreateUguiCheckbox(rowsContent, "UploadCheatToggle",
                 this.L("Block Cheat Upload"), this.privacyBlockUploadCheat,
                 new System.Action<bool>(this.OnUguiSelfPrivacyUploadCheatToggled));
             PlaceUguiTopLeft(handle.UploadCheatToggle.gameObject, pad, yCur, rowW, 24f);
             yCur += 28f;
             handle.UploadCheatCountShown = this.LF("UploadCheat seen: {0} | blocked: {1}",
                 privacyUploadCheatSeenCount, privacyBlockedUploadCheatCount);
-            handle.UploadCheatCountLabel = this.CreateUguiLabel(block.transform, "UploadCheatCount",
+            handle.UploadCheatCountLabel = this.CreateUguiLabel(rowsContent, "UploadCheatCount",
                 handle.UploadCheatCountShown, 11f, counterColor, false);
             PlaceUguiTopLeft(handle.UploadCheatCountLabel, pad, yCur, rowW, 18f);
             yCur += 24f;
@@ -1979,16 +2010,36 @@ namespace HeartopiaMod
             // Friend-visit notify (PrivacyBlockFeature.TryInstallPrivacyFriendVisitHook): the toast
             // is client-authored by the VISITOR, so this only suppresses the popup — the visit
             // itself is still visible in the room roster / map.
-            handle.FriendVisitToggle = this.CreateUguiCheckbox(block.transform, "FriendVisitToggle",
+            handle.FriendVisitToggle = this.CreateUguiCheckbox(rowsContent, "FriendVisitToggle",
                 this.L("Block Friend Visit Notification"), this.privacyBlockFriendVisitNotify,
                 new System.Action<bool>(this.OnUguiSelfPrivacyFriendVisitToggled));
             PlaceUguiTopLeft(handle.FriendVisitToggle.gameObject, pad, yCur, rowW, 24f);
             yCur += 28f;
             handle.FriendVisitCountShown = this.LF("Visit notifies blocked: {0}", privacyBlockedFriendVisitCount);
-            handle.FriendVisitCountLabel = this.CreateUguiLabel(block.transform, "FriendVisitCount",
+            handle.FriendVisitCountLabel = this.CreateUguiLabel(rowsContent, "FriendVisitCount",
                 handle.FriendVisitCountShown, 11f, counterColor, false);
             PlaceUguiTopLeft(handle.FriendVisitCountLabel, pad, yCur, rowW, 18f);
             yCur += 26f;
+
+            // Clean Photos (HeartopiaComplete.PhotoSnapUi.cs). Two gates on one mechanism: the mod's
+            // windows/toasts/readout, and the ESP surfaces (screen tags, crosshair, radar markers) —
+            // some players want the radar framed in a photo, most do not want any mod UI in one.
+            GameObject photosHeader = this.CreateUguiHeaderLabel(rowsContent, "PhotosHeader",
+                this.L("Photos"), 13f);
+            PlaceUguiTopLeft(photosHeader, pad, yCur, rowW, 22f);
+            yCur += 28f;
+
+            handle.PhotoSnapUiToggle = this.CreateUguiCheckbox(rowsContent, "PhotoSnapUiToggle",
+                this.L("Hide mod UI in photos"), this.hideModUiInPhotos,
+                new System.Action<bool>(this.OnUguiSelfPrivacyPhotosUiToggled));
+            PlaceUguiTopLeft(handle.PhotoSnapUiToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 28f;
+
+            handle.PhotoSnapEspToggle = this.CreateUguiCheckbox(rowsContent, "PhotoSnapEspToggle",
+                this.L("Hide mod ESP in photos"), this.hideModEspInPhotos,
+                new System.Action<bool>(this.OnUguiSelfPrivacyPhotosEspToggled));
+            PlaceUguiTopLeft(handle.PhotoSnapEspToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 28f;
 
             // Party (PartyAutoDeclineFeature.cs). Sits under Privacy because both halves are
             // "keep other players from pulling me into something": the first suppresses the invite
@@ -1997,51 +2048,60 @@ namespace HeartopiaMod
             // Two PAIRS, not one: `Party` (the 5 minigame party types) and `ActivityEvent` (~606
             // scheduled world events — every fish shoal, toy-fish, ice-crystal event) are separate
             // game subsystems with separate protocols. A toggle for one does nothing for the other.
-            GameObject partyHeader = this.CreateUguiHeaderLabel(block.transform, "PartyHeader",
+            GameObject partyHeader = this.CreateUguiHeaderLabel(rowsContent, "PartyHeader",
                 this.L("Party & Events"), 13f);
             PlaceUguiTopLeft(partyHeader, pad, yCur, rowW, 22f);
             yCur += 28f;
 
-            handle.PartyDeclineToggle = this.CreateUguiCheckbox(block.transform, "PartyDeclineToggle",
+            handle.PartyDeclineToggle = this.CreateUguiCheckbox(rowsContent, "PartyDeclineToggle",
                 this.L("Auto-Decline Party Invites"), this.partyAutoDeclineInvites,
                 new System.Action<bool>(this.OnUguiSelfPartyDeclineToggled));
             PlaceUguiTopLeft(handle.PartyDeclineToggle.gameObject, pad, yCur, rowW, 24f);
             yCur += 28f;
 
-            handle.PartyAutoLeaveToggle = this.CreateUguiCheckbox(block.transform, "PartyAutoLeaveToggle",
+            handle.PartyAutoLeaveToggle = this.CreateUguiCheckbox(rowsContent, "PartyAutoLeaveToggle",
                 this.L("Auto-Leave Parties Joined By Area"), this.partyAutoLeaveParties,
                 new System.Action<bool>(this.OnUguiSelfPartyAutoLeaveToggled));
             PlaceUguiTopLeft(handle.PartyAutoLeaveToggle.gameObject, pad, yCur, rowW, 24f);
             yCur += 28f;
 
-            handle.ActivityDeclineToggle = this.CreateUguiCheckbox(block.transform, "ActivityDeclineToggle",
+            handle.ActivityDeclineToggle = this.CreateUguiCheckbox(rowsContent, "ActivityDeclineToggle",
                 this.L("Auto-Decline Event Invites"), this.activityAutoDeclineInvites,
                 new System.Action<bool>(this.OnUguiSelfActivityDeclineToggled));
             PlaceUguiTopLeft(handle.ActivityDeclineToggle.gameObject, pad, yCur, rowW, 24f);
             yCur += 28f;
 
-            handle.ActivityAutoLeaveToggle = this.CreateUguiCheckbox(block.transform, "ActivityAutoLeaveToggle",
+            handle.ActivityAutoLeaveToggle = this.CreateUguiCheckbox(rowsContent, "ActivityAutoLeaveToggle",
                 this.L("Auto-Leave Events Joined By Area"), this.activityAutoLeaveEvents,
                 new System.Action<bool>(this.OnUguiSelfActivityAutoLeaveToggled));
             PlaceUguiTopLeft(handle.ActivityAutoLeaveToggle.gameObject, pad, yCur, rowW, 24f);
             yCur += 28f;
 
             handle.PartyCountShown = this.GetActivityAutoDeclineCounters();
-            handle.PartyCountLabel = this.CreateUguiLabel(block.transform, "PartyCount",
+            handle.PartyCountLabel = this.CreateUguiLabel(rowsContent, "PartyCount",
                 handle.PartyCountShown, 11f, counterColor, false);
             PlaceUguiTopLeft(handle.PartyCountLabel, pad, yCur, rowW, 18f);
             yCur += 20f;
 
             handle.PartyStatusShown = this.GetPartyAutoDeclineStatus();
-            handle.PartyStatusLabel = this.CreateUguiLabel(block.transform, "PartyStatus",
+            handle.PartyStatusLabel = this.CreateUguiLabel(rowsContent, "PartyStatus",
                 handle.PartyStatusShown, 11f, counterColor, false);
             PlaceUguiTopLeft(handle.PartyStatusLabel, pad, yCur, rowW, 18f);
             yCur += 24f;
 
             handle.HooksStatusShown = this.GetPrivacyBlockHooksStatus();
-            handle.HooksStatusLabel = this.CreateUguiLabel(block.transform, "HooksStatus",
+            handle.HooksStatusLabel = this.CreateUguiLabel(rowsContent, "HooksStatus",
                 handle.HooksStatusShown, 11f, counterColor, false);
             PlaceUguiTopLeft(handle.HooksStatusLabel, pad, yCur, rowW, 18f);
+            yCur += 18f;
+
+            // The ScrollRect needs the REAL content height (10f at creation only kept the viewport
+            // sane during the build): the y-cursor is exactly the last label's bottom edge now.
+            RectTransform rowsRt = rowsContent.GetComponent<RectTransform>();
+            if (rowsRt != null)
+            {
+                rowsRt.sizeDelta = new Vector2(0f, yCur);
+            }
 
             handle.Root = block;
             this.uguiShellSelfPrivacy = handle;
@@ -2064,6 +2124,8 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.SpamsToggle, this.privacyBlockSpamReports);
                 this.SyncUguiToggleFromField(handle.UploadCheatToggle, this.privacyBlockUploadCheat);
                 this.SyncUguiToggleFromField(handle.FriendVisitToggle, this.privacyBlockFriendVisitNotify);
+                this.SyncUguiToggleFromField(handle.PhotoSnapUiToggle, this.hideModUiInPhotos);
+                this.SyncUguiToggleFromField(handle.PhotoSnapEspToggle, this.hideModEspInPhotos);
                 this.SyncUguiToggleFromField(handle.PartyDeclineToggle, this.partyAutoDeclineInvites);
                 this.SyncUguiToggleFromField(handle.PartyAutoLeaveToggle, this.partyAutoLeaveParties);
                 this.SyncUguiToggleFromField(handle.ActivityDeclineToggle, this.activityAutoDeclineInvites);
@@ -2154,6 +2216,45 @@ namespace HeartopiaMod
             }
             this.privacyBlockFriendVisitNotify = value;
             try { this.SaveKeybinds(false); } catch { }
+        }
+
+        // Clean Photos gates (HeartopiaComplete.PhotoSnapUi.cs), moved here from Settings → Main →
+        // Behavior. Unlike the privacy toggles above, these flip a pure presentational gate read
+        // every LateUpdate, so they keep the Settings-page toast confirmation they shipped with.
+        private void OnUguiSelfPrivacyPhotosUiToggled(bool value)
+        {
+            if (value == this.hideModUiInPhotos)
+            {
+                return;
+            }
+            this.hideModUiInPhotos = value;
+            this.SaveKeybinds(false);
+            if (this.hideModUiInPhotos)
+            {
+                this.AddMenuNotification(this.L("Mod UI hidden in photos"), new Color(0.55f, 0.88f, 1f));
+            }
+            else
+            {
+                this.AddMenuNotification(this.L("Mod UI visible in photos"), new Color(0.88f, 0.6f, 0.6f));
+            }
+        }
+
+        private void OnUguiSelfPrivacyPhotosEspToggled(bool value)
+        {
+            if (value == this.hideModEspInPhotos)
+            {
+                return;
+            }
+            this.hideModEspInPhotos = value;
+            this.SaveKeybinds(false);
+            if (this.hideModEspInPhotos)
+            {
+                this.AddMenuNotification(this.L("Mod ESP hidden in photos"), new Color(0.55f, 0.88f, 1f));
+            }
+            else
+            {
+                this.AddMenuNotification(this.L("Mod ESP visible in photos"), new Color(0.88f, 0.6f, 0.6f));
+            }
         }
 
         // Party pair (PartyAutoDeclineFeature.cs). Same shape as the privacy handlers: the fields

@@ -514,6 +514,7 @@
     <Compile Include="ClassInjectorHookTrimFeature.cs" />
     <Compile Include="PlayerLoopProbeFeature.cs" />
     <Compile Include="HeartopiaComplete.UguiOverlay.cs" />
+    <Compile Include="HeartopiaComplete.PhotoSnapUi.cs" />
     <Compile Include="ModCoroutines.cs" />
     <Compile Include="ModLogger.cs" />
     <Compile Include="FeatureLog.cs" />

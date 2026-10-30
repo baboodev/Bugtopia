@@ -1248,7 +1248,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `BluePrintInfoOpenRequestedEvent`
 - `CameraControlPressedQueryEvent`
 - `CanvasMetricsQueryEvent`
-- `CanvasSnapStateRequestedEvent`
+- `CanvasSnapStateRequestedEvent` — hooked by `HeartopiaComplete.PhotoSnapUi.cs` (Clean Photos; payload table in [GAME_EVENTS.md](GAME_EVENTS.md))
 - `DeferredAlertShowRequestedEvent`
 - `EventPhoneCallShowRequestedEvent`
 - `FocusUIStackCloseRequestedEvent`

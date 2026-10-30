@@ -216,6 +216,7 @@ namespace HeartopiaMod
                 // Placed (and populated) by RebuildUguiStatusOverlayContent.
 
                 this.uguiStatusOverlayRoot = go;
+                this.RegisterPhotoSnapUiRoot(go, PhotoSnapUiRootKind.Ui); // Clean Photos
                 this.uguiStatusOverlayCanvas = canvas;
                 this.uguiStatusOverlayPanelRt = panel.GetComponent<RectTransform>();
                 this.uguiStatusOverlaySignature = null; // force first content build
