@@ -129,14 +129,12 @@ namespace HeartopiaMod
         // Pin accessor
         // ----------------------------------------------------------------------------------------
 
-        // Mini Game Assist only relieves danger and collects finished food — cooker-type agnostic by
-        // design (IsCompatibleNetCookCooker returns true for everything there), so the pick must not
-        // narrow that mode.
+        // The pin narrows MASS COOK only — a capture made while Auto Cook Assist is on still prunes
+        // netCookTargets to the pinned menu. Assist reads the snapshot (netCookScannedTargets), which
+        // holds every kind regardless of the pin.
         private int GetNetCookPinnedCookerType()
         {
-            return (this.netCookMiniGameOnly || this.netCookPinnedCookerTypeSuppressed)
-                ? 0
-                : this.netCookPreferredCookerType;
+            return this.netCookPinnedCookerTypeSuppressed ? 0 : this.netCookPreferredCookerType;
         }
 
         // Called once per scan, right after the resolve loop: decides whether the pick can apply at
@@ -827,7 +825,7 @@ namespace HeartopiaMod
         {
             // Display/label path: the RAW pick, not the scan-suppressed one — the header must agree
             // with the highlighted row until Validate actually clears the pick.
-            int pinned = this.netCookMiniGameOnly ? 0 : this.netCookPreferredCookerType;
+            int pinned = this.netCookPreferredCookerType;
             if (pinned > 0)
             {
                 return pinned;
@@ -875,8 +873,7 @@ namespace HeartopiaMod
                 : "Auto";
         }
 
-        // The picker is dead weight with a single kind in range — and meaningless in Mini Game Only,
-        // where every type is assisted as one set.
+        // The picker is dead weight with a single kind in range.
         //
         // Exception: while a type is PINNED it stays visible even at one census entry. Hiding it
         // there strands the pin — the header is the only place the narrowing is visible and the Auto
@@ -884,102 +881,12 @@ namespace HeartopiaMod
         // that found less) would otherwise silently keep filtering with no control to undo it.
         private bool ShouldShowNetCookCookerTypePicker()
         {
-            if (this.netCookMiniGameOnly || this.netCookScannedCookerTypes.Count <= 0)
+            if (this.netCookScannedCookerTypes.Count <= 0)
             {
                 return false;
             }
 
             return this.netCookScannedCookerTypes.Count >= 2 || this.netCookPreferredCookerType > 0;
-        }
-
-        // ----------------------------------------------------------------------------------------
-        // Mini Game Assist: type-agnostic by definition
-        // ----------------------------------------------------------------------------------------
-
-        // Assist only relieves danger and collects finished food, and both interactions work on any
-        // cooker — IsCompatibleNetCookCooker says exactly that by returning true for everything while
-        // netCookMiniGameOnly is set. But that exemption only applies to a scan that RUNS in assist
-        // mode. netCookTargets is normally produced by a mass-cook capture, which prunes to one menu
-        // (majority vote, or an explicit Stove Type pick), and switching assist on afterwards
-        // inherited the narrowing: field log, 56 cookers in range — `STARTED mini-game-only
-        // cookerStaticId=370001 targets=51` ignored the 5 clay stoves, and with type 16 picked
-        // `targets=5` ignored the other 51.
-        //
-        // The scan snapshot is the fix: it holds every kind the scan resolved, before any type prune.
-        // Widen from it whenever assist takes over, applying the same distance rule capture uses so
-        // this cannot pull in stoves the capture itself would have culled.
-        private int WidenNetCookAssistTargetsToAllCookerTypes()
-        {
-            if (this.netCookScannedTargets.Count <= 0)
-            {
-                return 0;
-            }
-
-            try
-            {
-                HashSet<string> presentKeys = new HashSet<string>();
-                HashSet<uint> presentCookerNetIds = new HashSet<uint>();
-                for (int i = 0; i < this.netCookTargets.Count; i++)
-                {
-                    NetCookTargetContext target = this.netCookTargets[i];
-                    if (target == null)
-                    {
-                        continue;
-                    }
-
-                    presentKeys.Add(target.CookerNetId + ":" + target.LevelObjectNetId);
-                    presentCookerNetIds.Add(target.CookerNetId);
-                }
-
-                List<NetCookTargetContext> candidates = new List<NetCookTargetContext>(this.netCookScannedTargets.Count);
-                for (int i = 0; i < this.netCookScannedTargets.Count; i++)
-                {
-                    NetCookTargetContext scanned = this.netCookScannedTargets[i];
-                    if (scanned == null
-                        || scanned.CookerNetId == 0U
-                        || scanned.LevelObjectNetId == 0UL
-                        || presentCookerNetIds.Contains(scanned.CookerNetId)
-                        || presentKeys.Contains(scanned.CookerNetId + ":" + scanned.LevelObjectNetId))
-                    {
-                        continue;
-                    }
-
-                    candidates.Add(this.CloneNetCookTargetContext(scanned));
-                }
-
-                if (candidates.Count <= 0)
-                {
-                    return 0;
-                }
-
-                // Same exception capture makes: Permanent Stove Memory keeps the remembered set at
-                // any distance, everything else is culled to the scan radius.
-                if (!this.netCookRememberStoves)
-                {
-                    this.RemoveOutOfRangeNetCookTargets(candidates, null, null);
-                }
-
-                if (candidates.Count <= 0)
-                {
-                    return 0;
-                }
-
-                int added = candidates.Count;
-                this.netCookTargets.AddRange(candidates);
-                this.RemoveNetCookDuplicateLevelObjectTargets(this.netCookTargets);
-                this.SortNetCookTargetsByDistanceFromScanOrigin(this.netCookTargets);
-                this.TrimNetCookTargetsToClosest(this.netCookTargets, "assist stove(s)");
-                this.RegisterNetCookTargets(this.netCookTargets);
-                this.NetCookLog("Mini game assist widened to all cooker types: added " + added
-                    + " stove(s) from the scan snapshot, now " + this.netCookTargets.Count
-                    + " (snapshot=" + this.netCookScannedTargets.Count + ", pick=" + this.netCookPreferredCookerType + ").");
-                return added;
-            }
-            catch (Exception ex)
-            {
-                this.NetCookLog("Mini game assist widen failed: " + ex.Message);
-                return 0;
-            }
         }
 
         // ----------------------------------------------------------------------------------------
@@ -1036,13 +943,6 @@ namespace HeartopiaMod
                 // A mid-run retarget would leave the abandoned stoves cooking with nobody collecting,
                 // and EnsureNetCookRecipeCache is frozen while a run is active.
                 status = "Stop Mass Cook before changing the stove type.";
-                this.netCookStatus = status;
-                return false;
-            }
-
-            if (this.netCookMiniGameOnly)
-            {
-                status = "Mini Game Only assists every stove type — no type to pick.";
                 this.netCookStatus = status;
                 return false;
             }

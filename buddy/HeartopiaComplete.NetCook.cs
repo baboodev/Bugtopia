@@ -72,25 +72,6 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (this.netCookMiniGameOnly)
-            {
-                if (!this.EnsureNetCookAssistTargets(out string assistStatus))
-                {
-                    this.netCookStatus = assistStatus;
-                    this.AddMenuNotification(assistStatus, new Color(1f, 0.55f, 0.55f));
-                    return;
-                }
-
-                this.netCookEnabled = true;
-                this.netCookDrainAfterIngredientsRunOut = false;
-                this.netCookDrainReason = null;
-                float assistNow = Time.unscaledTime;
-                this.PrimeNetCookTargetsForMiniGame(assistNow);
-                this.netCookStatus = "Mini game assist running on " + this.netCookTargets.Count + " stove(s).";
-                this.NetCookLog("STARTED mini-game-only cookerStaticId=" + this.netCookCookerStaticId + " targets=" + this.netCookTargets.Count);
-                return;
-            }
-
             if (!this.EnsureNetCookTargetsForCurrentRecipe(out string targetStatus))
             {
                 this.netCookStatus = targetStatus;
@@ -290,33 +271,6 @@ namespace HeartopiaMod
             {
                 NetCookTargetContext target = this.netCookTargets[i];
                 target.NextActionAt = now + (i * targetStagger);
-                this.netCookTargets[i] = target;
-            }
-        }
-
-        private void PrimeNetCookTargetsForMiniGame(float now)
-        {
-            float targetStagger = NetCookMinTargetStaggerSeconds;
-            for (int i = 0; i < this.netCookTargets.Count; i++)
-            {
-                NetCookTargetContext target = this.netCookTargets[i];
-                target.Phase = 2;
-                target.ContinuePulses = 0;
-                target.IdleRetries = 0;
-                target.LastStatusActionAt = -999f;
-                target.LastCookCommandAt = -999f;
-                target.NextActionAt = now + (i * targetStagger);
-
-                if (this.TryGetNetCookTargetCookingStatus(target, out int cookingStatus, out int resultRecipeId, out int foodQuality, out _))
-                {
-                    target.LastStatus = cookingStatus;
-                    this.NetCookLog("Mini game prime stove " + target.CookerNetId + " status=" + this.GetNetCookCookingStatusName(cookingStatus) + " result=" + resultRecipeId + " quality=" + foodQuality);
-                }
-                else
-                {
-                    target.LastStatus = -1;
-                }
-
                 this.netCookTargets[i] = target;
             }
         }
@@ -551,6 +505,9 @@ namespace HeartopiaMod
             this.netCookPinnedCookerTypeSuppressed = false;
             this.netCookCookerTypeDropdownOpen = false;
             this.ClearNetCookCookerTypeCensus();
+            // The assist watch list feeds from the snapshot, so clearing the census empties it too;
+            // do it explicitly so the next sync starts from nothing even before the next capture.
+            this.ClearNetCookAssistWatchList();
             this.InvalidateNetCookRecipeCache();
             this.netCookStatus = status ?? "Captured stoves reset. Capture stoves again.";
             this.NetCookLog(this.netCookStatus);
@@ -623,7 +580,7 @@ namespace HeartopiaMod
             int readyTargets = 0;
             int processedTargets = 0;
             float interval = Mathf.Clamp(this.netCookInterval, 0.25f, 10f);
-            this.SortNetCookTargetsForAction(now);
+            this.SortNetCookTargetsForAction(this.netCookTargets, now);
 
             for (int i = 0; i < this.netCookTargets.Count; i++)
             {
@@ -694,6 +651,20 @@ namespace HeartopiaMod
                             continue;
                         }
 
+                        target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
+                        this.netCookTargets[i] = target;
+                        if (processedTargets >= NetCookMaxActionsPerTick)
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+
+                    if (this.netCookAutoAssist && this.ShouldYieldNetCookStoveToAssist(target))
+                    {
+                        // UrgentStatus is only meaningful to this loop's sort. Leaving it set would pin
+                        // this idle-to-us stove at priority 0 forever and starve real prepares.
+                        target.UrgentStatus = 0;
                         target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
                         this.netCookTargets[i] = target;
                         if (processedTargets >= NetCookMaxActionsPerTick)
@@ -923,17 +894,22 @@ namespace HeartopiaMod
             }
         }
 
-        private void ProcessNetCookMiniGameTargets(float now)
+        // The assist loop. Watch list is synced by ProcessNetCookLoop before the pump (an empty list
+        // returns here immediately — a sync placed after that return would never run, because the
+        // field starts empty). Never prepares, never starts, never drains: the Danger / Continue /
+        // Succeed / Failed machine only. Stoves mass cook owns are skipped so the two loops never
+        // send to the same burner for the same dish.
+        private void ProcessNetCookAutoAssistTargets(float now)
         {
-            if (this.netCookTargets.Count <= 0)
+            if (this.netCookAssistTargets.Count <= 0)
             {
                 return;
             }
 
             bool hasDueTarget = false;
-            for (int i = 0; i < this.netCookTargets.Count; i++)
+            for (int i = 0; i < this.netCookAssistTargets.Count; i++)
             {
-                NetCookTargetContext target = this.netCookTargets[i];
+                NetCookTargetContext target = this.netCookAssistTargets[i];
                 if (target != null && now >= target.NextActionAt)
                 {
                     hasDueTarget = true;
@@ -949,14 +925,30 @@ namespace HeartopiaMod
             bool attempted = false;
             int actionsTaken = 0;
             int processedTargets = 0;
-            this.SortNetCookTargetsForAction(now);
 
-            for (int i = 0; i < this.netCookTargets.Count; i++)
+            // Assist sends mutate the SHARED cooker context (TryInvokeNetCook* read
+            // netCookCookerNetId/netCookLevelObjectNetId), and the watch list is the mixed-kind
+            // snapshot: an apply-per-target flipped netCookCookerStaticId/Type every frame, which
+            // relabelled the STOVE TYPE / RECIPE headers and thrashed the recipe cache key
+            // (EnsureNetCookRecipeCache) — visible dropdown flicker plus a recipe-cache rebuild every
+            // frame. Context is therefore applied per send only, and the pre-loop context is handed
+            // back when the loop ends: the UI processors run BEFORE this loop in OnUpdate, so they
+            // only ever observe the stable capture context.
+            uint contextCookerNetId = this.netCookCookerNetId;
+            int contextCookerStaticId = this.netCookCookerStaticId;
+            int contextCookerType = this.netCookCookerType;
+            ulong contextLevelObjectNetId = this.netCookLevelObjectNetId;
+
+            this.SortNetCookTargetsForAction(this.netCookAssistTargets, now);
+
+            for (int i = 0; i < this.netCookAssistTargets.Count; i++)
             {
-                NetCookTargetContext target = this.netCookTargets[i];
+                NetCookTargetContext target = this.netCookAssistTargets[i];
                 if (target == null)
                 {
-                    this.RemoveNetCookTargetAt(i, "process-loop-null-target");
+                    // The assist list owns its own null holes — RemoveNetCookTargetAt edits
+                    // netCookTargets and the stove registry, which assist must not touch.
+                    this.netCookAssistTargets.RemoveAt(i);
                     i--;
                     continue;
                 }
@@ -968,10 +960,24 @@ namespace HeartopiaMod
 
                 attempted = true;
                 processedTargets++;
-                this.ApplyNetCookTargetContext(target);
+
+                // Mass cook owns this dish — its phase machine already relieves and collects it.
+                // A skip still counts as a processed target, so a fully-owned snapshot cannot make
+                // this frame walk the whole watch list.
+                if (this.IsNetCookMassCookOwningDish(target.LevelObjectNetId))
+                {
+                    target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
+                    this.netCookAssistTargets[i] = target;
+                    if (processedTargets >= NetCookMaxActionsPerTick)
+                    {
+                        break;
+                    }
+                    continue;
+                }
 
                 if (target.Phase == 3)
                 {
+                    this.ApplyNetCookTargetContext(target);
                     if (this.TryInvokeNetCookContinue())
                     {
                         target.Phase = 2;
@@ -984,11 +990,14 @@ namespace HeartopiaMod
                     }
                     else
                     {
-                        this.netCookStatus = "ContinueCooking mini-game assist failed on stove " + target.CookerNetId + ". Retrying...";
+                        if (!this.netCookEnabled)
+                        {
+                            this.netCookStatus = "ContinueCooking auto assist failed on stove " + target.CookerNetId + ". Retrying...";
+                        }
                         target.NextActionAt = now + 1.25f;
                     }
 
-                    this.netCookTargets[i] = target;
+                    this.netCookAssistTargets[i] = target;
                     if (processedTargets >= NetCookMaxActionsPerTick)
                     {
                         break;
@@ -1001,7 +1010,7 @@ namespace HeartopiaMod
                     if (target.LastStatus != cookingStatus)
                     {
                         target.LastStatus = cookingStatus;
-                        this.NetCookLog("Mini game stove " + target.CookerNetId + " status=" + this.GetNetCookCookingStatusName(cookingStatus) + " result=" + resultRecipeId + " quality=" + foodQuality);
+                        this.NetCookLog("Auto assist stove " + target.CookerNetId + " status=" + this.GetNetCookCookingStatusName(cookingStatus) + " result=" + resultRecipeId + " quality=" + foodQuality);
                     }
 
                     target.Phase = 2;
@@ -1013,7 +1022,7 @@ namespace HeartopiaMod
                         {
                             target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
                         }
-                        else if (this.TryInvokeNetCookInteract())
+                        else if (this.TryInvokeNetCookInteractAfterApplying(target))
                         {
                             target.Phase = 3;
                             target.LastStatusActionAt = now;
@@ -1025,7 +1034,10 @@ namespace HeartopiaMod
                         }
                         else
                         {
-                            this.netCookStatus = "InteractWithCooker mini-game assist failed on stove " + target.CookerNetId + ". Retrying...";
+                            if (!this.netCookEnabled)
+                            {
+                                this.netCookStatus = "InteractWithCooker auto assist failed on stove " + target.CookerNetId + ". Retrying...";
+                            }
                             target.NextActionAt = now + 1.25f;
                         }
                     }
@@ -1035,7 +1047,7 @@ namespace HeartopiaMod
                         {
                             target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
                         }
-                        else if (this.TryInvokeNetCookInteract())
+                        else if (this.TryInvokeNetCookInteractAfterApplying(target))
                         {
                             target.Phase = 2;
                             target.LastStatus = -1;
@@ -1048,7 +1060,10 @@ namespace HeartopiaMod
                         }
                         else
                         {
-                            this.netCookStatus = "Collect finished food failed on stove " + target.CookerNetId + ". Retrying...";
+                            if (!this.netCookEnabled)
+                            {
+                                this.netCookStatus = "Collect finished food failed on stove " + target.CookerNetId + ". Retrying...";
+                            }
                             target.NextActionAt = now + 1.25f;
                         }
                     }
@@ -1062,7 +1077,7 @@ namespace HeartopiaMod
                     if (now - target.LastStatusActionAt > 3f)
                     {
                         target.LastStatusActionAt = now;
-                        this.NetCookLog("Mini game status poll unavailable for stove " + target.CookerNetId + ": " + statusDetails);
+                        this.NetCookLog("Auto assist status poll unavailable for stove " + target.CookerNetId + ": " + statusDetails);
                         if (this.netCookStatusDiagEnabled)
                         {
                             bool burnerAlive = this.TryGetAuraMonoEntityObjectByNetId(target.CookerNetId, out IntPtr burnerObj) && burnerObj != IntPtr.Zero;
@@ -1070,7 +1085,7 @@ namespace HeartopiaMod
                             bool ownerAlive = ownerNetId != 0U && this.TryGetAuraMonoEntityObjectByNetId(ownerNetId, out IntPtr ownerObj) && ownerObj != IntPtr.Zero;
                             bool cacheHit = this.netCookStatusCache.TryGetValue(target.CookerNetId, out NetCookStatusCacheEntry cached);
                             float cacheAge = cacheHit ? Mathf.Max(0f, now - cached.UpdatedAt) : -1f;
-                            this.NetCookDiagLog("mini-game status UNAVAILABLE stove=" + target.CookerNetId
+                            this.NetCookDiagLog("auto-assist status UNAVAILABLE stove=" + target.CookerNetId
                                 + " lo=" + target.LevelObjectNetId
                                 + " phase=" + target.Phase
                                 + " detail=" + statusDetails
@@ -1081,31 +1096,39 @@ namespace HeartopiaMod
                                 + " entityRemoves=" + this.netCookStatusDiagEntityRemoveEvents);
                         }
                     }
-                    this.netCookStatus = "Waiting for active cooking on stove " + target.CookerNetId + ".";
+                    if (!this.netCookEnabled)
+                    {
+                        this.netCookStatus = "Waiting for active cooking on stove " + target.CookerNetId + ".";
+                    }
                     target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
                 }
 
-                this.netCookTargets[i] = target;
+                this.netCookAssistTargets[i] = target;
                 if (processedTargets >= NetCookMaxActionsPerTick)
                 {
                     break;
                 }
             }
 
-            if (attempted && actionsTaken > 0)
+            this.netCookCookerNetId = contextCookerNetId;
+            this.netCookCookerStaticId = contextCookerStaticId;
+            this.netCookCookerType = contextCookerType;
+            this.netCookLevelObjectNetId = contextLevelObjectNetId;
+
+            if (attempted && actionsTaken > 0 && !this.netCookEnabled)
             {
-                this.netCookStatus = "Mini game assist active: " + this.netCookTargets.Count + " stove(s), actions " + this.netCookSentCount + ".";
+                this.netCookStatus = "Auto cook assist watching " + this.netCookAssistTargets.Count + " stove(s).";
             }
         }
 
-        private void SortNetCookTargetsForAction(float now)
+        private void SortNetCookTargetsForAction(List<NetCookTargetContext> targets, float now)
         {
-            if (this.netCookTargets.Count <= 1)
+            if (targets.Count <= 1)
             {
                 return;
             }
 
-            this.netCookTargets.Sort((a, b) =>
+            targets.Sort((a, b) =>
             {
                 bool readyA = a != null && now >= a.NextActionAt;
                 bool readyB = b != null && now >= b.NextActionAt;
@@ -1926,6 +1949,7 @@ namespace HeartopiaMod
                     entry.UpdatedAt = Time.unscaledTime;
                     this.netCookStatusCache[cookNetId] = entry;
                     this.WakeNetCookTargetsForUrgentStatus(levelObjectNetId, statusValue, Time.unscaledTime);
+                    this.WakeNetCookAssistTargetsForUrgentStatus(levelObjectNetId, statusValue, Time.unscaledTime);
                     if (this.netCookStatusDiagEnabled
                         && tracked
                         && (!hadPrevious || previous.Status != statusValue))
@@ -2405,6 +2429,177 @@ namespace HeartopiaMod
             }
         }
 
+        // ----------------------------------------------------------------------------------------
+        // Auto Cook Assist — watch list, ownership, yield
+        // ----------------------------------------------------------------------------------------
+
+        // Rebuild the assist watch list from the capture snapshot (the full pre-prune scan; see
+        // SnapshotNetCookScannedTargets) falling back to the mass-cook working set when no snapshot
+        // exists. Membership syncs by LevelObjectNetId and KEEPS the existing assist object so a
+        // per-stove phase / action gate survives the capture churn — CloneNetCookTargetContext copies
+        // Phase and NextActionAt, so a clone-every-tick would reset the 1.5 s action gate.
+        private void SyncNetCookAssistWatchList()
+        {
+            List<NetCookTargetContext> source = this.netCookScannedTargets.Count > 0
+                ? this.netCookScannedTargets
+                : this.netCookTargets;
+
+            Dictionary<ulong, NetCookTargetContext> previous = new Dictionary<ulong, NetCookTargetContext>(this.netCookAssistTargets.Count);
+            for (int i = 0; i < this.netCookAssistTargets.Count; i++)
+            {
+                NetCookTargetContext existing = this.netCookAssistTargets[i];
+                if (existing != null && existing.LevelObjectNetId != 0UL && !previous.ContainsKey(existing.LevelObjectNetId))
+                {
+                    previous.Add(existing.LevelObjectNetId, existing);
+                }
+            }
+
+            this.netCookAssistTargets.Clear();
+            HashSet<ulong> seen = new HashSet<ulong>();
+            for (int i = 0; i < source.Count; i++)
+            {
+                NetCookTargetContext candidate = source[i];
+                if (candidate == null || candidate.CookerNetId == 0U || candidate.LevelObjectNetId == 0UL)
+                {
+                    continue;
+                }
+
+                if (!seen.Add(candidate.LevelObjectNetId))
+                {
+                    continue;
+                }
+
+                if (previous.TryGetValue(candidate.LevelObjectNetId, out NetCookTargetContext kept))
+                {
+                    kept.CookerNetId = candidate.CookerNetId;
+                    kept.CookerStaticId = candidate.CookerStaticId;
+                    kept.CookerType = candidate.CookerType;
+                    kept.HasWorldPosition = candidate.HasWorldPosition;
+                    kept.WorldPosition = candidate.WorldPosition;
+                    this.netCookAssistTargets.Add(kept);
+                    continue;
+                }
+
+                // Fresh assist objects start watching, never preparing: phase 2 (the mini-game machine's
+                // neutral phase), no command stamps, gate open so the first poll runs this frame.
+                NetCookTargetContext created = this.CloneNetCookTargetContext(candidate);
+                created.Phase = 2;
+                created.LastStatus = -1;
+                created.LastStatusActionAt = -999f;
+                created.LastCookCommandAt = -999f;
+                created.NextActionAt = 0f;
+                created.PrepareInFlight = false;
+                created.PrepareConfirmed = false;
+                created.UrgentStatus = 0;
+                created.DangerSeenAt = -999f;
+                created.ReliefSentAt = -999f;
+                created.TrustedCollected = false;
+                this.netCookAssistTargets.Add(created);
+            }
+        }
+
+        private void ClearNetCookAssistWatchList()
+        {
+            this.netCookAssistTargets.Clear();
+        }
+
+        // Same wake as the mass-cook urgent path, for the assist list: Danger stamps DangerSeenAt and
+        // Succeed/Failed zero NextActionAt so the SAME frame's assist pass polls the cache. Assist does
+        // not use UrgentStatus for sorting — the wake is what matters; the send is still gated by the
+        // mass-cook ownership check in ProcessNetCookAutoAssistTargets.
+        private void WakeNetCookAssistTargetsForUrgentStatus(ulong levelObjectNetId, int status, float now)
+        {
+            if (levelObjectNetId == 0UL || (status != 3 && status != 5 && status != 6))
+            {
+                return;
+            }
+
+            for (int i = 0; i < this.netCookAssistTargets.Count; i++)
+            {
+                NetCookTargetContext target = this.netCookAssistTargets[i];
+                if (target == null || target.LevelObjectNetId != levelObjectNetId)
+                {
+                    continue;
+                }
+
+                if (status == 3)
+                {
+                    target.DangerSeenAt = now;
+                }
+
+                if (target.NextActionAt > now)
+                {
+                    target.NextActionAt = now;
+                }
+            }
+        }
+
+        // True when a mass-cook target object already owns the in-flight dish on this level-object —
+        // a prepare it sent (in flight or confirmed), a phase it advanced into, or a phase-2 dish it
+        // stamped with a cook command. The assist loop skips those stoves so the two loops never both
+        // handle one dish. Only consulted while mass cook is enabled.
+        private bool IsNetCookMassCookOwningDish(ulong levelObjectNetId)
+        {
+            if (!this.netCookEnabled || levelObjectNetId == 0UL)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                NetCookTargetContext target = this.netCookTargets[i];
+                if (target == null || target.LevelObjectNetId != levelObjectNetId)
+                {
+                    continue;
+                }
+
+                if (target.PrepareInFlight || target.PrepareConfirmed)
+                {
+                    return true;
+                }
+
+                if (target.Phase == 1 || target.Phase == 3 || target.Phase == 4)
+                {
+                    return true;
+                }
+
+                // Phase 2 with a command stamp is a dish this loop started or continued.
+                // An adopted foreign dish keeps LastCookCommandAt at -999; assist-on never adopts.
+                if (target.Phase == 2 && target.LastCookCommandAt > 0f)
+                {
+                    return true;
+                }
+
+                return false;
+            }
+
+            return false;
+        }
+
+        // True when a phase-0 mass-cook stove already has someone else's dish and assist is the handler.
+        // False when the stove is Idle, or when status cannot be read (the caller then prepares, which
+        // is the existing no-status path).
+        private bool ShouldYieldNetCookStoveToAssist(NetCookTargetContext target)
+        {
+            if (target == null)
+            {
+                return false;
+            }
+
+            if (target.UrgentStatus == 3 || target.UrgentStatus == 4
+                || target.UrgentStatus == 5 || target.UrgentStatus == 6)
+            {
+                return true;
+            }
+
+            if (!this.TryGetNetCookTargetCookingStatus(target, out int cookingStatus, out _, out _, out _))
+            {
+                return false;
+            }
+
+            return cookingStatus != 0;
+        }
+
         // Installs the detour (once) and drains its ring — call this from the active cook loop AND the
         // diagnostics tick so the lo-keyed status cache is populated whenever cooking is running, not
         // only while Status Diagnostics is on. Cheap when idle (the monotonic ring drains nothing).
@@ -2460,6 +2655,7 @@ namespace HeartopiaMod
                     entry.UpdatedAt = now;
                     this.netCookStatusByLevelObject[lo] = entry;
                     this.WakeNetCookTargetsForUrgentStatus(lo, status, now);
+                    this.WakeNetCookAssistTargetsForUrgentStatus(lo, status, now);
                 }
 
                 if (this.netCookStatusDiagEnabled && logged < 24)
@@ -2800,7 +2996,7 @@ namespace HeartopiaMod
                 {
                     ModLogger.Msg("[NetCookDiag] tick active. targets=" + this.netCookTargets.Count
                         + " massCook=" + this.netCookEnabled
-                        + " miniGameOnly=" + this.netCookMiniGameOnly
+                        + " autoAssist=" + this.netCookAutoAssist
                         + " statusCache=" + this.netCookStatusCache.Count
                         + " hooks=" + this.netCookStatusDiagEventHooksRegistered);
                 }
@@ -3557,46 +3753,83 @@ namespace HeartopiaMod
             this.netCookLevelObjectNetId = target.LevelObjectNetId;
         }
 
+        // Assist interact: the protocol invoke reads the shared cooker fields, so the target must be
+        // applied first (decision: apply immediately before every assist send). Named so it cannot
+        // collide with the parameterless TryInvokeNetCookInteract used by the mass-cook loop, which
+        // already applied its own target at the top of its iteration.
+        private bool TryInvokeNetCookInteractAfterApplying(NetCookTargetContext target)
+        {
+            this.ApplyNetCookTargetContext(target);
+            return this.TryInvokeNetCookInteract();
+        }
+
+        // Shared pump for the two cooking loops. Order is mandatory: sync (rebuilds the assist watch
+        // list) → pump (wakes both lists from the detour ring) → mass cook → assist. Mass cook runs
+        // first, so in the same frame it claims an Idle stove and moves it to a phase the assist pass
+        // recognises as ownership — the two never send to the same burner for the same dish.
         private void ProcessNetCookLoop()
         {
-            if (!this.HasNetCookContext())
+            bool massCook = this.netCookEnabled;
+            bool assist = this.netCookAutoAssist;
+            if (!massCook && !assist)
+            {
+                return;
+            }
+
+            // Both loops act on a live world only: assist on is persisted to config, so without this
+            // gate the pump below would re-attempt CookingProtocolManager class resolution every frame
+            // on the login screen (EnsureNetCookOnUpdateCookerStatusDetour deliberately retries while
+            // the image is not loaded) — pre-world Mono resolution is exactly what the world-ready
+            // gate exists to prevent (AGENTS §1). IsWorldReady stays false on the login level.
+            // A world switch also pauses both loops instead of letting them send to torn-down netIds.
+            if (!this.IsWorldReady)
+            {
+                return;
+            }
+
+            // Context/recipe failures stop mass cook only — assist needs neither.
+            if (massCook && !this.HasNetCookContext())
             {
                 this.StopNetCookInternal("Missing cooker target.");
-                return;
+                massCook = false;
             }
 
-            // Install + drain the OnUpdateCookerStatus detour whenever cooking is active so the lo-keyed
-            // status cache is fed even with Status Diagnostics off — this is what makes remote QTE work.
-            this.PumpNetCookCookStatusDetour();
-
-            float diagNow = Time.unscaledTime;
-            this.ProcessNetCookStatusDiagnostics(diagNow);
-
-            if (this.netCookMiniGameOnly)
-            {
-                float miniGameNow = Time.unscaledTime;
-                if (this.netCookTargets.Count > 0)
-                {
-                    this.ProcessNetCookMiniGameTargets(miniGameNow);
-                }
-                return;
-            }
-
-            if (this.netCookRecipeId <= 0)
+            if (massCook && this.netCookRecipeId <= 0)
             {
                 this.StopNetCookInternal("No recipe selected.");
+                massCook = false;
+            }
+
+            if (!massCook && !assist)
+            {
                 return;
             }
 
-            float now = Time.unscaledTime;
-            if (this.netCookTargets.Count > 0)
+            // Before the pump, so a Danger/Succeed wake in this frame sees stoves added by a capture
+            // that landed earlier in the same frame. Sync preserves phase on LevelObjectNetId.
+            if (assist)
             {
-                this.ProcessNetCookTargets(now);
+                this.SyncNetCookAssistWatchList();
             }
 
-            if (this.netCookDrainAfterIngredientsRunOut && this.netCookTargets.Count <= 0)
+            // Install + drain the OnUpdateCookerStatus detour whenever either loop is active so the
+            // lo-keyed status cache is fed even with Status Diagnostics off — this is what makes
+            // remote QTE work. One pump feeds whichever loop is about to send.
+            this.PumpNetCookCookStatusDetour();
+            this.ProcessNetCookStatusDiagnostics(Time.unscaledTime);
+
+            if (massCook && this.netCookTargets.Count > 0)
             {
-                this.StopNetCookInternal((this.netCookDrainReason ?? "Ingredients ran out.") + " All active stoves finished.");
+                this.ProcessNetCookTargets(Time.unscaledTime);
+                if (this.netCookDrainAfterIngredientsRunOut && this.netCookTargets.Count <= 0)
+                {
+                    this.StopNetCookInternal((this.netCookDrainReason ?? "Ingredients ran out.") + " All active stoves finished.");
+                }
+            }
+
+            if (assist)
+            {
+                this.ProcessNetCookAutoAssistTargets(Time.unscaledTime);
             }
         }
 
@@ -5838,50 +6071,6 @@ namespace HeartopiaMod
             this.netCookRecipeId = visibleRecipes[0].Key;
         }
 
-        private bool EnsureNetCookAssistTargets(out string status)
-        {
-            status = "Assist targets ready.";
-            if (this.netCookTargets.Count <= 0)
-            {
-                if (!this.TryResolveNetCookContextsFromCurrentTarget(this.netCookTargets, out status) || this.netCookTargets.Count <= 0)
-                {
-                    if (this.netCookCookerNetId != 0U && this.netCookLevelObjectNetId != 0UL)
-                    {
-                        this.netCookTargets.Add(new NetCookTargetContext
-                        {
-                            CookerNetId = this.netCookCookerNetId,
-                            CookerStaticId = this.netCookCookerStaticId,
-                            CookerType = this.netCookCookerType,
-                            LevelObjectNetId = this.netCookLevelObjectNetId
-                        });
-                    }
-                }
-            }
-
-            for (int i = this.netCookTargets.Count - 1; i >= 0; i--)
-            {
-                NetCookTargetContext target = this.netCookTargets[i];
-                if (target == null || target.CookerNetId == 0U || target.LevelObjectNetId == 0UL)
-                {
-                    this.RemoveNetCookTargetAt(i, "ensure-assist-invalid-target");
-                }
-            }
-
-            // Assist is cooker-type agnostic, but this set usually comes from a mass-cook capture that
-            // pruned to a single menu — put the other kinds back (HeartopiaComplete.NetCookStoveType.cs).
-            this.WidenNetCookAssistTargetsToAllCookerTypes();
-
-            if (this.netCookTargets.Count <= 0)
-            {
-                status = "No nearby cooker targets found.";
-                return false;
-            }
-
-            this.ApplyNetCookTargetContext(this.netCookTargets[0]);
-            status = "Using " + this.netCookTargets.Count + " nearby stove(s) for mini-game assist.";
-            return true;
-        }
-
         private bool EnsureNetCookTargetsForCurrentRecipe(out string status)
         {
             status = "Cooker targets ready.";
@@ -7401,15 +7590,6 @@ namespace HeartopiaMod
 
         private bool IsCompatibleNetCookCooker(int cookerStaticId, int cookerType, int desiredCookerStaticId, int desiredCookerType)
         {
-            // Mini Game Assist only relieves danger and collects finished food — those interactions
-            // are cooker-type agnostic, so a mixed kitchen (e.g. stoves + ovens side by side) must be
-            // captured and assisted as ONE set. Type compatibility only matters for mass cook, where
-            // one recipe fits one cooker type (and the recipe filter on start prunes the set anyway).
-            if (this.netCookMiniGameOnly)
-            {
-                return true;
-            }
-
             // A Stove Type pick is by RECIPE cooker type (TableCooker.cookerType — what
             // GetAllRecipes groups its lists by), NOT by the cookware type this method normally
             // compares: two stoves can share a cookware type and still cook different menus (the
@@ -9344,7 +9524,7 @@ namespace HeartopiaMod
 
         private void RefreshNetCookMaxCookQuantity(bool force = false)
         {
-            if (this.netCookMiniGameOnly || this.netCookRecipeId <= 0)
+            if (this.netCookRecipeId <= 0)
             {
                 this.netCookMaxCookQuantity = 0;
                 return;

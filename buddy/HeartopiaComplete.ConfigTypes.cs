@@ -395,7 +395,10 @@ namespace HeartopiaMod
             public string petFeedFoodByPet;
             public float netCookInterval;
             public float netCookScanRadiusMeters;
+            // Legacy: kept only so old Config.xml/keybinds files still deserialize. The live flag is
+            // netCookAutoAssist; this key is always written back as false (see HeartopiaComplete.Config.cs).
             public bool netCookMiniGameOnly;
+            public bool netCookAutoAssist;
             public bool netCookMoveIngredients;
             public bool netCookRememberStoves;
             public bool netCookSlotManualMode;

@@ -32,6 +32,7 @@ namespace HeartopiaMod
             "Insect Farm",
             "Bird Farm",
             "Mass Cook",
+            "Auto Cook Assist",
             "Auto Sell",
             "Homeland Farm",
             "Auto Puzzle",
@@ -218,6 +219,14 @@ namespace HeartopiaMod
                     ? "Running"
                     : this.netCookStatus;
                 entries.Add(this.CreateLiveFeatureEntry("Mass Cook", massCookStatus));
+            }
+
+            if (this.netCookAutoAssist)
+            {
+                int watching = this.netCookAssistTargets.Count;
+                entries.Add(this.CreateLiveFeatureEntry(
+                    "Auto Cook Assist",
+                    watching > 0 ? ("Watching " + watching) : "On"));
             }
 
             if (this.autoSellEnabled)

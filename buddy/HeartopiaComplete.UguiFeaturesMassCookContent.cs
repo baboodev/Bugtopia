@@ -48,8 +48,9 @@ namespace HeartopiaMod
     //    "Captured stoves reset. Capture stoves again.") + the fixed amber (1,0.75,0.45) toast.
     //  - Clean Up Finished Food (:126-133): busy-gated on netCookCleanupCoroutine != null →
     //    StartNetCookCleanupSweep().
-    //  - The 5 toggles (:135-208) and their SAVE ASYMMETRY: "Mini Game Only" (cascade: closes the
-    //    recipe dropdown, one of two status strings, SAVES), "Remember Stoves" (status, SAVES),
+    //  - The 5 toggles (:135-208) and their SAVE ASYMMETRY: "Auto Cook Assist" (cascade: closes the
+    //    recipe + stove-type dropdowns, clears the assist watch list when turned off, one of two
+    //    status strings, SAVES), "Remember Stoves" (status, SAVES),
     //    "Capture Own" (status, SAVES), "Capture Radius" (status, SAVES) — but "Status
     //    Diagnostics (log)" has NO SaveKeybinds call in source (verified absent; the flag is
     //    session-only). Its cascade instead does real work, file-log-only, no toast: OFF →
@@ -59,16 +60,16 @@ namespace HeartopiaMod
     //    deliberately NOT given a save call. All toggle labels get this.L (the IMGUI twin is
     //    DrawSwitchToggle, which localizes internally — UiKitPrimitives.cs:750); everything else
     //    on this tab is raw GUI.Label/GUI.Button strings and stays UNlocalized.
-    //  - ASSIST MODE card (mini-game branch, :210-225): height is DYNAMIC in source —
+    //  - ASSIST MODE card (shown while Auto Cook Assist is on, :210-225): height is DYNAMIC in source —
     //    Mathf.Max(32f, statusStyle.CalcHeight(desc, w-24)) + 36 + 12. Ported with the Pictures
     //    round's MeasureUguiPicturesWrappedHeight (TMP GetPreferredValues, Ceil+4), fallback 32f
     //    = the source's own Max floor, retried on gated frames until the TMP component has
     //    Awoken (built-inactive caveat). Height feeds the layout signature.
-    //  - RECIPE dropdown (else branch, :227-293): a hand-rolled header (GetNetCookSelectedRecipeLabel
+    //  - RECIPE dropdown (always branch, :227-293): a hand-rolled header (GetNetCookSelectedRecipeLabel
     //    caption — LIVE per gated frame, capture can auto-select a recipe — + accent "^"/"v"
     //    arrow) toggling the SHARED netCookRecipeDropdownOpen flag. Shared on purpose (unlike
     //    Food & Repair's stock-Dropdown round, whose IMGUI open-flags had no UGUI counterpart):
-    //    here the flag IS the panel's model on both surfaces — the Mini Game Only cascade and the
+    //    here the flag IS the panel's model on both surfaces — the Auto Cook Assist cascade and the
     //    pick-cascade close both surfaces at once, and cross-surface open/close lands via the
     //    layout signature. EnsureNetCookRecipeCache() runs per gated frame in this branch (:228
     //    runs it per repaint; self-caching).
@@ -104,10 +105,9 @@ namespace HeartopiaMod
     //    the parsing AND normalizes the string back (parse-fail → 1) — the gated poll then
     //    pushes the normalized value into the field, the UGUI analog of IMGUI's next-repaint
     //    snap. Same poll doubles as the IMGUI-twin external-edit sync.
-    //  - Start/Stop (:336-350): ONE of FOUR captions by (netCookEnabled, netCookMiniGameOnly) —
-    //    "STOP MINI GAME ASSIST"/"STOP MASS COOK" on the danger twin, "START MINI GAME
-    //    ASSIST"/"START MASS COOK" on the primary twin — captions re-synced per gated frame
-    //    (miniGameOnly flips them live); pair swap by netCookEnabled. Click →
+    //  - Start/Stop: ONE of TWO captions by netCookEnabled — "STOP MASS COOK" on the danger twin,
+    //    "START MASS COOK" on the primary twin. The captions are FIXED: Auto Cook Assist is the
+    //    checkbox above and never moves these buttons; pair swap by netCookEnabled. Click →
     //    StopNetCookInternal("Disabled") when enabled, else StartNetCookInternal().
     //  - Settings card (:352-377) and the SLIDER ASYMMETRY: COOK DELAY = float [0.25,10] rounded
     //    to the NEAREST 0.01 (Mathf.Round(v*100)/100 — :363), "{0:F2}s", epsilon-saved (>0.0001),
@@ -117,17 +117,17 @@ namespace HeartopiaMod
     //    ("Scan radius set to {0:F0}m. Capture stoves again to refresh targets.") on change.
     //    Only the radius slider touches the status string — verified.
     //  - Status card (:379-402): STOVES = netCookTargets.Count and SENT = netCookSentCount, both
-    //    LIVE ints per gated frame; the status line is NOT "always netCookStatus" — a 4-way
-    //    readiness fallback (netCookMiniGameOnly × hasCapturedStoves × hasRecipe, :397-399) shows
-    //    ONLY while netCookStatus is blank/whitespace, else the live netCookStatus (:400).
+    //    LIVE ints per gated frame; the status line is NOT "always netCookStatus" — a readiness
+    //    fallback (hasCapturedStoves × hasRecipe) shows ONLY while netCookStatus is
+    //    blank/whitespace, else the live netCookStatus (:400).
     //    Reproduced as a builder evaluated per gated frame. (The label gets 34px instead of the
     //    source's 28 — TMP clips where IMGUI overflowed; two 12pt lines stay inside the card.)
     //
     // Cross-surface sync cadence: every gated frame — busy-gate interactables, pill, button-pair
-    // swaps + captions, 7 toggle re-syncs (SetIsOnWithoutNotify), recipe-branch work only while
-    // !miniGameOnly (cache ensure, header caption/arrow, search poll pair, row bind while open,
+    // swaps + captions, 7 toggle re-syncs (SetIsOnWithoutNotify), recipe-branch work EVERY frame
+    // (cache ensure, header caption/arrow, search poll pair, row bind while open,
     // max refresh + label, qty poll pair), slider re-syncs + value labels, status-card stats +
-    // text, assist-measure retry, then the layout-signature check. Everything diffs before
+    // text, assist-card measure retry while assist is on, then the layout-signature check. Everything diffs before
     // writing; per-frame sync disabled after 3 consecutive errors (LIVE rail idiom).
     // ============================================================================================
     public partial class HeartopiaComplete
@@ -181,7 +181,7 @@ namespace HeartopiaMod
             public GameObject ResetButtonDanger;  // danger twin — visible while netCookEnabled
             public GameObject CleanupButton;      // busy-gated on the cleanup coroutine
 
-            public Toggle MiniGameOnlyToggle;
+            public Toggle AutoAssistToggle;
             public Toggle RememberStovesToggle;
             public Toggle CaptureOwnToggle;
             public Toggle CaptureRadiusToggle;
@@ -199,7 +199,7 @@ namespace HeartopiaMod
             public int SlotBackCellShown = -1;   // which cell the Back tile sits in
             public int SlotAreaRowsShown = -1;   // drives the one re-place the grid needs
 
-            public GameObject AssistCard;         // mini-game branch
+            public GameObject AssistCard;         // shown while Auto Cook Assist is on
             public GameObject AssistDescLabel;
             public float AssistTextHeight = 32f;  // Max(32, measured) — source fallback floor
             public bool AssistTextMeasured;       // retry until the TMP component has Awoken
@@ -245,7 +245,7 @@ namespace HeartopiaMod
 
             public GameObject StartButton;        // primary twin — visible while !netCookEnabled
             public GameObject StopButton;         // danger twin — visible while netCookEnabled
-            public string StartShown;             // caption caches (depend on miniGameOnly)
+            public string StartShown;             // caption caches (fixed captions; diffed before writing)
             public string StopShown;
 
             public GameObject RadiusCard;         // top of the tab — scan radius
@@ -352,7 +352,7 @@ namespace HeartopiaMod
             // The Stove Type row count enters the signature because the open panel sizes to it (0
             // rows also encodes "picker hidden", so no separate visibility bit is needed).
             int stoveTypeRows = this.GetUguiFeaturesMassCookStoveTypeRowCount();
-            return (this.netCookMiniGameOnly ? 1 : 0)
+            return (this.netCookAutoAssist ? 1 : 0)
                  | (this.netCookRecipeDropdownOpen ? 2 : 0)
                  | (this.netCookCookerTypeDropdownOpen ? 4 : 0)
                  | ((stoveTypeRows & 0x3F) << 3)
@@ -411,9 +411,9 @@ namespace HeartopiaMod
         {
             bool hasCapturedStoves = this.netCookTargets.Count > 0;
             bool hasRecipe = this.netCookRecipeId > 0;
-            string readiness = this.netCookMiniGameOnly
-                ? (hasCapturedStoves ? "Ready to assist active cooking mini-games." : "Capture stoves to begin assisting.")
-                : (hasCapturedStoves ? (hasRecipe ? "Ready to cook." : "Select a recipe to continue.") : "Capture stoves to begin.");
+            string readiness = hasCapturedStoves
+                ? (hasRecipe ? "Ready to cook." : "Select a recipe to continue.")
+                : "Capture stoves to begin.";
             return string.IsNullOrWhiteSpace(this.netCookStatus) ? readiness : this.netCookStatus;
         }
 
@@ -422,8 +422,9 @@ namespace HeartopiaMod
         // ----------------------------------------------------------------------------------------
 
         // UGUI mirror of DrawMassCookTab: header + pill, capture/reset row, cleanup, 5 toggles,
-        // the two-branch conditional region (assist card vs recipe dropdown + ingredient toggles
-        // + dish limit), start/stop, settings card, status card — everything built ONCE;
+        // the conditional region (assist card shown when Auto Cook Assist is on, then the recipe
+        // dropdown + ingredient toggles + dish limit always), start/stop, settings card, status
+        // card — everything built ONCE;
         // RelayoutUguiShellFeaturesMassCook owns positions from the conditional region down and
         // the total scroll height. Handle assigned LAST (Research idiom).
         private GameObject BuildUguiShellFeaturesMassCookContent(Transform parent, float x, float y, float w, float h)
@@ -519,10 +520,10 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.CleanupButton, rowX, 158f, rowW, 36f);
 
             // -------- The five toggles (:135-208) — DrawSwitchToggle localizes, so L() here --------
-            handle.MiniGameOnlyToggle = this.CreateUguiCheckbox(scrollContent, "MiniGameOnlyToggle",
-                this.L("Mini Game Only"), this.netCookMiniGameOnly,
-                new System.Action<bool>(this.OnUguiFeaturesMassCookMiniGameOnlyToggled));
-            PlaceUguiTopLeft(handle.MiniGameOnlyToggle.gameObject, rowX, 208f, rowW, 24f);
+            handle.AutoAssistToggle = this.CreateUguiCheckbox(scrollContent, "AutoAssistToggle",
+                this.L("Auto Cook Assist"), this.netCookAutoAssist,
+                new System.Action<bool>(this.OnUguiFeaturesMassCookAutoAssistToggled));
+            PlaceUguiTopLeft(handle.AutoAssistToggle.gameObject, rowX, 208f, rowW, 24f);
             handle.RememberStovesToggle = this.CreateUguiCheckbox(scrollContent, "RememberStovesToggle",
                 this.L("Remember Stoves"), this.netCookRememberStoves,
                 new System.Action<bool>(this.OnUguiFeaturesMassCookRememberStovesToggled));
@@ -551,7 +552,7 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiFeaturesMassCookCookableOnlyToggled));
             PlaceUguiTopLeft(handle.CookableOnlyToggle.gameObject, rowX, 436f, rowW, 24f);
 
-            // -------- ASSIST MODE card (:210-225 — mini-game branch; height via relayout) --------
+            // -------- ASSIST MODE card (shown while Auto Cook Assist is on; height via relayout) --------
             string assistModeDescription = this.L("Handles cooking mini-game prompts and auto-collects finished food. It will not prepare or start cooking.");
             handle.AssistCard = this.CreateUguiGo("AssistCard", scrollContent);
             this.AddUguiImage(handle.AssistCard, this.UguiKitPanelBg(), true, 1f);
@@ -777,16 +778,16 @@ namespace HeartopiaMod
                 new System.Action<string>(this.OnUguiFeaturesMassCookQtyChanged));
 
             // -------- Start/Stop pair (:336-350 — file header) --------
-            handle.StartShown = this.netCookMiniGameOnly ? this.L("START MINI GAME ASSIST") : this.L("START MASS COOK");
+            handle.StartShown = this.L("START MASS COOK");
             handle.StartButton = this.CreateUguiPrimaryButton(scrollContent, "StartButton",
                 handle.StartShown, new System.Action(this.OnUguiFeaturesMassCookStartStopClicked));
-            handle.StopShown = this.netCookMiniGameOnly ? this.L("STOP MINI GAME ASSIST") : this.L("STOP MASS COOK");
+            handle.StopShown = this.L("STOP MASS COOK");
             handle.StopButton = this.CreateUguiDangerButton(scrollContent, "StopButton",
                 handle.StopShown, new System.Action(this.OnUguiFeaturesMassCookStartStopClicked));
 
             // -------- Cook delay card (placed by the relayout, above the recipe block) --------
-            // Unconditional on purpose: the delay paces the mini-game assist loop too, so it must
-            // stay reachable in that branch, which is why it sits above the mini/recipe split.
+            // Unconditional on purpose: the delay paces mass cook (the assist loop runs its own
+            // delays), and it must stay reachable whether the assist card is shown or not.
             handle.DelayCard = this.CreateUguiGo("DelayCard", scrollContent);
             this.AddUguiImage(handle.DelayCard, this.UguiKitPanelBg(), true, 1f);
 
@@ -867,107 +868,107 @@ namespace HeartopiaMod
             const float rowX = 8f;
             float rowW = handle.ContentWidth - 16f;
             float halfW = (rowW - 10f) * 0.5f;
-            bool mini = this.netCookMiniGameOnly;
-            bool open = !mini && this.netCookRecipeDropdownOpen;
+            bool assist = this.netCookAutoAssist;
+            bool open = this.netCookRecipeDropdownOpen;
             float yCur = UguiMassCookConditionalTopY;
 
-            bool stoveTypeVisible = this.ShouldShowNetCookCookerTypePicker(); // false while mini
+            bool stoveTypeVisible = this.ShouldShowNetCookCookerTypePicker();
             bool stoveTypeOpen = stoveTypeVisible && this.netCookCookerTypeDropdownOpen;
 
-            SetUguiGoActive(handle.AssistCard, mini);
+            // The assist card adds height above the mass-cook controls; it never replaces them.
+            SetUguiGoActive(handle.AssistCard, assist);
             SetUguiGoActive(handle.StoveTypeLabel, stoveTypeVisible);
             SetUguiGoActive(handle.StoveTypeHeader, stoveTypeVisible);
             SetUguiGoActive(handle.StoveTypePanel, stoveTypeOpen);
-            SetUguiGoActive(handle.RecipeLabel, !mini);
-            SetUguiGoActive(handle.RecipeHeader, !mini);
+            SetUguiGoActive(handle.RecipeLabel, true);
+            SetUguiGoActive(handle.RecipeHeader, true);
             SetUguiGoActive(handle.RecipePanel, open);
             if (handle.MoveIngredientsToggle != null)
             {
-                SetUguiGoActive(handle.MoveIngredientsToggle.gameObject, !mini);
+                SetUguiGoActive(handle.MoveIngredientsToggle.gameObject, true);
             }
             if (handle.UseAllIngredientsToggle != null)
             {
-                SetUguiGoActive(handle.UseAllIngredientsToggle.gameObject, !mini);
+                SetUguiGoActive(handle.UseAllIngredientsToggle.gameObject, true);
             }
             if (handle.UseUniversalIngredientToggle != null)
             {
-                SetUguiGoActive(handle.UseUniversalIngredientToggle.gameObject, !mini);
+                SetUguiGoActive(handle.UseUniversalIngredientToggle.gameObject, true);
             }
-            SetUguiGoActive(handle.DishLimitLabel, !mini);
-            SetUguiGoActive(handle.DishMaxLabel, !mini);
+            SetUguiGoActive(handle.DishLimitLabel, true);
+            SetUguiGoActive(handle.DishMaxLabel, true);
             if (handle.QtyField != null)
             {
-                SetUguiGoActive(handle.QtyField.gameObject, !mini);
+                SetUguiGoActive(handle.QtyField.gameObject, true);
             }
 
-            // Cook delay first and outside the branch — see the build note: the mini-game branch
-            // needs it as much as the cooking one.
+            // Cook delay first and outside the card show/hide — the delay paces both loops.
             PlaceUguiTopLeft(handle.DelayCard, rowX, yCur, rowW, UguiMassCookSliderCardHeight);
             yCur += UguiMassCookSliderCardHeight + 8f;
 
-            if (mini)
+            if (assist)
             {
-                // :212-224 — card 36 + textH + 12; cursor += Ceil(cardH) + 12.
+                // :212-224 — card 36 + textH + 12; cursor += Ceil(cardH) + 12. The card sits between
+                // the delay slider and the ingredient toggles — extra height, never a replacement.
+                SetUguiGoActive(handle.AssistCard, true);
                 float textH = handle.AssistTextHeight;
                 float cardH = 36f + textH + 12f;
                 PlaceUguiTopLeft(handle.AssistCard, rowX, yCur, rowW, cardH);
                 PlaceUguiTopLeft(handle.AssistDescLabel, 12f, 28f, rowW - 24f, textH);
                 yCur += Mathf.Ceil(cardH) + 12f;
             }
-            else
+
+            // Every control sits ABOVE the two dropdowns, so the recipe grid is the last thing
+            // before START and nothing the user has to reach for is hidden below a panel that can
+            // be 300+ tall. This block runs whether assist is on or off.
+            if (handle.MoveIngredientsToggle != null)
             {
-                // Every control now sits ABOVE the two dropdowns, so the recipe grid is the last
-                // thing before START and nothing the user has to reach for is hidden below a panel
-                // that can be 300+ tall.
-                if (handle.MoveIngredientsToggle != null)
-                {
-                    PlaceUguiTopLeft(handle.MoveIngredientsToggle.gameObject, rowX, yCur, halfW, 24f);
-                }
-                if (handle.UseAllIngredientsToggle != null)
-                {
-                    PlaceUguiTopLeft(handle.UseAllIngredientsToggle.gameObject, rowX + halfW + 10f, yCur, halfW, 24f);
-                }
-                yCur += 30f;
-                if (handle.UseUniversalIngredientToggle != null)
-                {
-                    PlaceUguiTopLeft(handle.UseUniversalIngredientToggle.gameObject, rowX, yCur, rowW, 24f);
-                }
-                yCur += 38f;
-                PlaceUguiTopLeft(handle.DishLimitLabel, rowX, yCur, rowW * 0.42f, 18f);
-                PlaceUguiTopLeft(handle.DishMaxLabel, rowX + rowW * 0.58f, yCur, rowW * 0.42f, 18f);
-                yCur += 20f;
-                if (handle.QtyField != null)
-                {
-                    PlaceUguiTopLeft(handle.QtyField.gameObject, rowX, yCur, rowW * 0.42f, 32f);
-                }
-                yCur += 42f;
+                PlaceUguiTopLeft(handle.MoveIngredientsToggle.gameObject, rowX, yCur, halfW, 24f);
+            }
+            if (handle.UseAllIngredientsToggle != null)
+            {
+                PlaceUguiTopLeft(handle.UseAllIngredientsToggle.gameObject, rowX + halfW + 10f, yCur, halfW, 24f);
+            }
+            yCur += 30f;
+            if (handle.UseUniversalIngredientToggle != null)
+            {
+                PlaceUguiTopLeft(handle.UseUniversalIngredientToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 38f;
+            PlaceUguiTopLeft(handle.DishLimitLabel, rowX, yCur, rowW * 0.42f, 18f);
+            PlaceUguiTopLeft(handle.DishMaxLabel, rowX + rowW * 0.58f, yCur, rowW * 0.42f, 18f);
+            yCur += 20f;
+            if (handle.QtyField != null)
+            {
+                PlaceUguiTopLeft(handle.QtyField.gameObject, rowX, yCur, rowW * 0.42f, 32f);
+            }
+            yCur += 42f;
 
-                if (stoveTypeVisible)
-                {
-                    PlaceUguiTopLeft(handle.StoveTypeLabel, rowX, yCur, rowW, 18f);
-                    yCur += 20f;
-                    PlaceUguiTopLeft(handle.StoveTypeHeader, rowX, yCur, rowW, 36f);
-                    yCur += 46f;
-                    if (stoveTypeOpen)
-                    {
-                        float stoveTypePanelH = this.GetUguiFeaturesMassCookStoveTypePanelHeight();
-                        PlaceUguiTopLeft(handle.StoveTypePanel, rowX, yCur - 6f, rowW, stoveTypePanelH);
-                        PlaceUguiTopLeft(handle.StoveTypeListScroll, 4f, 4f, rowW - 8f, stoveTypePanelH - 8f);
-                        yCur += stoveTypePanelH + 8f;
-                    }
-                }
-
-                PlaceUguiTopLeft(handle.RecipeLabel, rowX, yCur, rowW, 18f);
+            if (stoveTypeVisible)
+            {
+                PlaceUguiTopLeft(handle.StoveTypeLabel, rowX, yCur, rowW, 18f);
                 yCur += 20f;
-                PlaceUguiTopLeft(handle.RecipeHeader, rowX, yCur, rowW, 36f);
+                PlaceUguiTopLeft(handle.StoveTypeHeader, rowX, yCur, rowW, 36f);
                 yCur += 46f;
-                if (open)
+                if (stoveTypeOpen)
                 {
-                    // :246 — panel at header yMax + 4 = yCur - 6; cursor += panel + 8.
-                    float recipePanelH = this.GetUguiFeaturesMassCookRecipePanelHeight();
-                    PlaceUguiTopLeft(handle.RecipePanel, rowX, yCur - 6f, rowW, recipePanelH);
-                    yCur += recipePanelH + 8f;
+                    float stoveTypePanelH = this.GetUguiFeaturesMassCookStoveTypePanelHeight();
+                    PlaceUguiTopLeft(handle.StoveTypePanel, rowX, yCur - 6f, rowW, stoveTypePanelH);
+                    PlaceUguiTopLeft(handle.StoveTypeListScroll, 4f, 4f, rowW - 8f, stoveTypePanelH - 8f);
+                    yCur += stoveTypePanelH + 8f;
                 }
+            }
+
+            PlaceUguiTopLeft(handle.RecipeLabel, rowX, yCur, rowW, 18f);
+            yCur += 20f;
+            PlaceUguiTopLeft(handle.RecipeHeader, rowX, yCur, rowW, 36f);
+            yCur += 46f;
+            if (open)
+            {
+                // :246 — panel at header yMax + 4 = yCur - 6; cursor += panel + 8.
+                float recipePanelH = this.GetUguiFeaturesMassCookRecipePanelHeight();
+                PlaceUguiTopLeft(handle.RecipePanel, rowX, yCur - 6f, rowW, recipePanelH);
+                yCur += recipePanelH + 8f;
             }
 
             PlaceUguiTopLeft(handle.StartButton, rowX, yCur, rowW, 38f);
@@ -1025,14 +1026,15 @@ namespace HeartopiaMod
             SetUguiGoActive(handle.StopButton, on);
             SetUguiGoActive(handle.StartButton, !on);
 
-            // :336-338 — captions also depend on miniGameOnly, so both twins re-sync per call.
-            string startText = this.netCookMiniGameOnly ? this.L("START MINI GAME ASSIST") : this.L("START MASS COOK");
+            // Captions are fixed: the Start/Stop pair (and the Mass Cook hotkey) control mass cook
+            // only. Auto Cook Assist is the checkbox above and never moves these captions.
+            string startText = this.L("START MASS COOK");
             if (!string.Equals(startText, handle.StartShown, StringComparison.Ordinal))
             {
                 handle.StartShown = startText;
                 this.SetUguiButtonLabel(handle.StartButton, startText);
             }
-            string stopText = this.netCookMiniGameOnly ? this.L("STOP MINI GAME ASSIST") : this.L("STOP MASS COOK");
+            string stopText = this.L("STOP MASS COOK");
             if (!string.Equals(stopText, handle.StopShown, StringComparison.Ordinal))
             {
                 handle.StopShown = stopText;
@@ -1631,7 +1633,7 @@ namespace HeartopiaMod
                 this.SyncUguiFeaturesMassCookEnableButtons(handle);
 
                 // Toggle re-syncs (external IMGUI edits) — WithoutNotify only.
-                this.SyncUguiToggleFromField(handle.MiniGameOnlyToggle, this.netCookMiniGameOnly);
+                this.SyncUguiToggleFromField(handle.AutoAssistToggle, this.netCookAutoAssist);
                 this.SyncUguiToggleFromField(handle.RememberStovesToggle, this.netCookRememberStoves);
                 this.SyncUguiToggleFromField(handle.CaptureOwnToggle, this.netCookCaptureOwnOnly);
                 this.SyncUguiToggleFromField(handle.CaptureRadiusToggle, this.netCookCaptureRadiusOnly);
@@ -1642,24 +1644,25 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.UseAllIngredientsToggle, this.netCookUseAllIngredients);
                 this.SyncUguiToggleFromField(handle.UseUniversalIngredientToggle, this.netCookUseUniversalIngredient);
 
-                if (this.netCookMiniGameOnly)
+                // Assist-card measure retry (built-inactive TMP caveat — file header), independent of
+                // the recipe block below: with assist on the card is EXTRA height, not a branch. The
+                // description is constant, so this stops as soon as one measure succeeds, and the
+                // layout signature (assist bit + height bits) triggers the relayout.
+                if (this.netCookAutoAssist && !handle.AssistTextMeasured)
                 {
-                    // Assist-card measure retry (built-inactive TMP caveat — file header). The
-                    // description is constant, so this stops as soon as one measure succeeds.
-                    if (!handle.AssistTextMeasured)
+                    bool measured;
+                    float measuredH = this.MeasureUguiPicturesWrappedHeight(handle.AssistDescLabel,
+                        "Handles cooking mini-game prompts and auto-collects finished food. It will not prepare or start cooking.",
+                        handle.ContentWidth - 16f - 24f, 32f, out measured);
+                    if (measured)
                     {
-                        bool measured;
-                        float measuredH = this.MeasureUguiPicturesWrappedHeight(handle.AssistDescLabel,
-                            "Handles cooking mini-game prompts and auto-collects finished food. It will not prepare or start cooking.",
-                            handle.ContentWidth - 16f - 24f, 32f, out measured);
-                        if (measured)
-                        {
-                            handle.AssistTextMeasured = true;
-                            handle.AssistTextHeight = Mathf.Max(32f, measuredH);
-                        }
+                        handle.AssistTextMeasured = true;
+                        handle.AssistTextHeight = Mathf.Max(32f, measuredH);
                     }
                 }
-                else
+
+                // STOVE TYPE / RECIPE / dish-limit processing — always runs, assist on or off. The
+                // braces are a plain scope (parity of the old else branch), not a branch.
                 {
                     // STOVE TYPE picker — caption/arrow live; rows rebind only when the census
                     // version or the pick moves (a background expansion can add a type mid-open).
@@ -1856,34 +1859,41 @@ namespace HeartopiaMod
             }
         }
 
-        // :135-146 — cascade: close the recipe dropdown (SHARED flag — both surfaces), one of two
-        // status strings, SAVE. The equal-guard is the UGUI analog of IMGUI's prev-vs-new check.
-        private void OnUguiFeaturesMassCookMiniGameOnlyToggled(bool value)
+        // Auto Cook Assist toggle. Independent of mass cook: it does not start or stop anything, does
+        // not touch the Start/Stop pair, and does not add stoves to netCookTargets. Off drops the
+        // watch list so a stale phase-3 assist object cannot send ContinueCooking on the next enable;
+        // the next enable rebuilds it fresh through SyncNetCookAssistWatchList. The equal-guard is the
+        // UGUI analog of IMGUI's prev-vs-new check.
+        private void OnUguiFeaturesMassCookAutoAssistToggled(bool value)
         {
-            if (value == this.netCookMiniGameOnly)
+            if (value == this.netCookAutoAssist)
             {
                 return;
             }
-            this.netCookMiniGameOnly = value;
+
+            this.netCookAutoAssist = value;
             this.netCookRecipeDropdownOpen = false;
-            // Mini Game Assist is cooker-type agnostic — the picker is hidden there, so its panel
-            // must not survive the branch swap either.
             this.netCookCookerTypeDropdownOpen = false;
-            // Turning assist on widens the set back to every kind in range right away, so the STOVES
-            // counter tells the truth before Start rather than after it. Mass cook re-narrows to the
-            // recipe's menu on its own start path, so the widened set costs it nothing.
-            if (this.netCookMiniGameOnly && !this.netCookEnabled)
+            if (!this.netCookAutoAssist)
             {
-                this.WidenNetCookAssistTargetsToAllCookerTypes();
+                this.ClearNetCookAssistWatchList();
+                if (!this.netCookEnabled)
+                {
+                    this.netCookStatus = "Auto cook assist off.";
+                }
             }
-            this.netCookStatus = this.netCookMiniGameOnly
-                ? "Mini game only mode enabled. Capture stoves to assist active cooking."
-                : "Mini game only mode disabled. Select a recipe to mass cook.";
+            else if (!this.netCookEnabled)
+            {
+                this.netCookStatus = this.netCookTargets.Count > 0 || this.netCookScannedTargets.Count > 0
+                    ? "Auto cook assist watching captured stoves."
+                    : "Capture stoves to assist active cooking.";
+            }
+
             try { this.SaveKeybinds(false); } catch { }
             UguiShellFeaturesMassCookHandle handle = this.uguiShellFeaturesMassCook;
             if (handle != null && handle.Root != null)
             {
-                this.RefreshUguiFeaturesMassCookLayout(handle); // click-responsive branch swap
+                this.RefreshUguiFeaturesMassCookLayout(handle); // click-responsive card show/hide
             }
         }
 

@@ -382,7 +382,8 @@ namespace HeartopiaMod
             data.petFeedFoodByPet = this.SerializePetFeedFoodPrefs();
             data.netCookInterval = this.netCookInterval;
             data.netCookScanRadiusMeters = this.netCookScanRadiusMeters;
-            data.netCookMiniGameOnly = this.netCookMiniGameOnly;
+            data.netCookAutoAssist = this.netCookAutoAssist;
+            data.netCookMiniGameOnly = false; // legacy key — write false so a stale true never re-migrates
             data.netCookMoveIngredients = this.netCookMoveIngredients;
             data.netCookRememberStoves = this.netCookRememberStoves;
             data.netCookSlotManualMode = this.netCookSlotManualMode;
@@ -835,7 +836,7 @@ namespace HeartopiaMod
             this.DeserializePetFeedFoodPrefs(data.petFeedFoodByPet);
             this.netCookInterval = Mathf.Clamp(data.netCookInterval > 0f ? data.netCookInterval : 1.5f, 0.25f, 10f);
             this.netCookScanRadiusMeters = Mathf.Clamp(data.netCookScanRadiusMeters > 0f ? data.netCookScanRadiusMeters : NetCookDefaultScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
-            this.netCookMiniGameOnly = data.netCookMiniGameOnly;
+            this.netCookAutoAssist = data.netCookAutoAssist || data.netCookMiniGameOnly; // legacy key migrates in
             this.netCookMoveIngredients = data.netCookMoveIngredients;
             this.netCookRememberStoves = data.netCookRememberStoves;
             this.netCookSlotManualMode = data.netCookSlotManualMode;
@@ -1105,6 +1106,7 @@ namespace HeartopiaMod
                 if (File.Exists(path))
                 {
                     string[] lines = File.ReadAllLines(path);
+                    bool netCookAutoAssistSeen = false; // lets the new key win over the legacy netCookMiniGameOnly line
                     foreach (string line in lines)
                     {
                         if (line.Contains("keyToggleMenu")) this.keyToggleMenu = (KeyCode)GetJsonInt(line, "\"keyToggleMenu\":");
@@ -1200,7 +1202,21 @@ namespace HeartopiaMod
             else if (line.Contains("petFeedScanRadiusMeters")) this.petFeedScanRadiusMeters = Mathf.Clamp(GetJsonFloat(line, "\"petFeedScanRadiusMeters\":"), PetFeedMinScanRadiusMeters, PetFeedMaxScanRadiusMeters);
             else if (line.Contains("netCookInterval")) this.netCookInterval = GetJsonFloat(line, "\"netCookInterval\":");
             else if (line.Contains("netCookScanRadiusMeters")) this.netCookScanRadiusMeters = Mathf.Clamp(GetJsonFloat(line, "\"netCookScanRadiusMeters\":"), NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
-            else if (line.Contains("netCookMiniGameOnly")) this.netCookMiniGameOnly = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookMiniGameOnly\":") != 0;
+            else if (line.Contains("netCookAutoAssist"))
+            {
+                netCookAutoAssistSeen = true;
+                this.netCookAutoAssist = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0
+                    || GetJsonInt(line, "\"netCookAutoAssist\":") != 0;
+            }
+            else if (line.Contains("netCookMiniGameOnly"))
+            {
+                bool legacy = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0
+                    || GetJsonInt(line, "\"netCookMiniGameOnly\":") != 0;
+                if (!netCookAutoAssistSeen && legacy)
+                {
+                    this.netCookAutoAssist = true;
+                }
+            }
             else if (line.Contains("netCookMoveIngredients")) this.netCookMoveIngredients = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookMoveIngredients\":") != 0;
             else if (line.Contains("netCookRememberStoves")) this.netCookRememberStoves = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookRememberStoves\":") != 0;
             else if (line.Contains("netCookCaptureOwnOnly")) this.netCookCaptureOwnOnly = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"netCookCaptureOwnOnly\":") != 0;
