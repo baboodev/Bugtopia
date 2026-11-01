@@ -443,6 +443,60 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Shared chunk loop for the feature "move X from warehouse" buttons (snow / sand / pumpkin
+        // tabs): warehouse (EStorageType.Warehouse == 2) -> backpack, batches capped at
+        // TransferBatchMaxCount. Same fail-fast semantics as TryMoveSnowballsWarehouseToBackpack:
+        // the first failed chunk aborts and the error names how many stacks went out before it.
+        private bool TrySendWarehouseStacksToBagChunked(
+            Dictionary<uint, int> netIdToCounts,
+            out int movedStacks,
+            out int movedQty,
+            out string error)
+        {
+            movedStacks = 0;
+            movedQty = 0;
+            error = string.Empty;
+            if (netIdToCounts == null || netIdToCounts.Count == 0)
+            {
+                error = "Nothing to move";
+                return false;
+            }
+
+            List<uint> keys = new List<uint>(netIdToCounts.Keys);
+            for (int offset = 0; offset < keys.Count; offset += TransferBatchMaxCount)
+            {
+                Dictionary<uint, int> chunk = new Dictionary<uint, int>();
+                int end = Math.Min(keys.Count, offset + TransferBatchMaxCount);
+                for (int i = offset; i < end; i++)
+                {
+                    uint netId = keys[i];
+                    chunk[netId] = netIdToCounts[netId];
+                }
+
+                if (!this.TrySendTransferBatch(chunk, 2, out error))
+                {
+                    if (string.IsNullOrEmpty(error))
+                    {
+                        error = "MoveBatchBackpackItems failed";
+                    }
+                    else if (movedStacks > 0)
+                    {
+                        error += " (after " + movedStacks + " stack(s))";
+                    }
+
+                    return false;
+                }
+
+                movedStacks += chunk.Count;
+                foreach (int qty in chunk.Values)
+                {
+                    movedQty += qty;
+                }
+            }
+
+            return true;
+        }
+
         private Dictionary<uint, int> BuildTransferItemMapForSend(out string error)
         {
             error = string.Empty;

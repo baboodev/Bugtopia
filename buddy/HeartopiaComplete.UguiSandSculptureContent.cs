@@ -88,6 +88,7 @@ namespace HeartopiaMod
         private sealed class UguiShellNewFeaturesSandSculptureHandle
         {
             public GameObject Root;
+            public Transform ScrollContent;   // for the move-status content-height swap
 
             // The 4 switch toggles (all notify; three carry an extra field reset)
             public Toggle AutoSandToggle;
@@ -113,6 +114,11 @@ namespace HeartopiaMod
             public bool CollectLineVisible;
             public bool CollectBelowPlace;    // true → Collect at box-local 94, else 66
             public float BoxInnerW;           // cached for the 66/94 reposition
+
+            // Warehouse refill button status (snow MoveSnowballs idiom)
+            public GameObject MoveStatusLabel;
+            public string MoveShown;
+            public bool MoveStatusVisible;
 
             public float NextSlowSyncAt;      // 0.5s tick for the box lines (file header)
             public int ErrorCount;            // per-frame sync disabled at 3 (LIVE rail idiom)
@@ -165,6 +171,7 @@ namespace HeartopiaMod
             Transform scrollContent;
             GameObject scroll = this.CreateUguiScrollView(block.transform, "Scroll", 10f, out scrollContent);
             PlaceUguiTopLeft(scroll, 0f, 0f, w, h);
+            handle.ScrollContent = scrollContent;
             // Flat look over the block's ContentBg (Logging idiom) — alpha-0 images still
             // raycast, so wheel/drag scrolling keeps working.
             try
@@ -299,9 +306,25 @@ namespace HeartopiaMod
                 this.L("Close stuck dialog"), new System.Action(this.OnUguiSandSculptureCloseDialogClicked));
             PlaceUguiTopLeft(closeButton, 238f, 442f, 220f, 30f);
 
-            // Full cursor replay: 8 (top margin standing in for startY) + 494 (the drawer's own
-            // return: buttons-row end 474 + 20 pad; DrawNewFeaturesTab adds nothing on sub 6).
-            this.SetUguiScrollContentHeight(scrollContent, 502f);
+            // Warehouse refill — the snow MoveSnowballs idiom
+            // (UguiFeaturesPuzzleSnowContent.cs:655-663): primary button + conditional wrapped
+            // muted status label; the processor swaps the content height with the label.
+            GameObject moveButton = this.CreateUguiPrimaryButton(scrollContent, "MoveSandBases",
+                this.L("Move sand bases to backpack"), new System.Action(this.OnUguiSandSculptureMoveBasesClicked));
+            PlaceUguiTopLeft(moveButton, 8f, 480f, 280f, 32f);
+
+            handle.MoveShown = this.sandMoveBasesStatus;
+            handle.MoveStatusLabel = this.CreateUguiLabel(scrollContent, "MoveStatus",
+                handle.MoveShown, 11f, mutedColor, false);
+            this.TrySetUguiLabelWrapped(handle.MoveStatusLabel);
+            PlaceUguiTopLeft(handle.MoveStatusLabel, 8f, 520f, panelW, 36f);
+            handle.MoveStatusVisible = !string.IsNullOrEmpty(handle.MoveShown);
+            handle.MoveStatusLabel.SetActive(handle.MoveStatusVisible);
+
+            // Cursor replay: 8 (top margin) + 534 (the drawer's own return: refill-button row
+            // end 512 + 22 pad); the wrapped move-status label (520-556) adds its +44 slot
+            // when shown (snow relayout idiom).
+            this.SetUguiScrollContentHeight(scrollContent, handle.MoveStatusVisible ? 586f : 542f);
 
             handle.Root = block;
             this.uguiShellNewFeaturesSandSculpture = handle;
@@ -375,6 +398,19 @@ namespace HeartopiaMod
                         handle.CollectBelowPlace = placeVisible;
                         PlaceUguiTopLeft(handle.CollectLine, 10f, placeVisible ? 94f : 66f,
                             handle.BoxInnerW, 30f);
+                    }
+
+                    // Move-status label: text synced even while hidden (Sand idiom, raw field
+                    // ref zero-alloc); visibility + the 542/586 content-height swap ride the
+                    // cached flag.
+                    bool moveVisible = !string.IsNullOrEmpty(this.sandMoveBasesStatus);
+                    this.SyncUguiSelfLabelText(handle.MoveStatusLabel, ref handle.MoveShown,
+                        this.sandMoveBasesStatus);
+                    if (handle.MoveStatusVisible != moveVisible)
+                    {
+                        handle.MoveStatusVisible = moveVisible;
+                        handle.MoveStatusLabel.SetActive(moveVisible);
+                        this.SetUguiScrollContentHeight(handle.ScrollContent, moveVisible ? 586f : 542f);
                     }
                 }
             }
@@ -471,6 +507,25 @@ namespace HeartopiaMod
             this.SandLogStatus("manual close dialog: " + dialogStatus);
             this.AddMenuNotification(this.L("Close stuck dialog"),
                 (dialogClosed && dialogWasOpen) ? UguiSandSculptureOkColor : UguiSandSculptureWarnColor);
+        }
+
+        // Warehouse refill — mirrors OnUguiFeaturesSnowMoveSnowballsClicked
+        // (UguiFeaturesPuzzleSnowContent.cs:975-986): the SAME out-string is stored into
+        // sandMoveBasesStatus AND shown as the notification on both outcomes; green on true,
+        // red on false (failures also reach the file log, Tier-1 rule).
+        private void OnUguiSandSculptureMoveBasesClicked()
+        {
+            if (this.TryMoveSandBasesWarehouseToBackpack(out string moveStatus))
+            {
+                this.sandMoveBasesStatus = moveStatus;
+                this.AddMenuNotification(moveStatus, UguiSandSculptureOkColor);
+            }
+            else
+            {
+                this.sandMoveBasesStatus = moveStatus;
+                this.SandLogStatus("move bases failed: " + moveStatus);
+                this.AddMenuNotification(moveStatus, UguiSandSculptureOffColor);
+            }
         }
     }
 }

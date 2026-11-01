@@ -130,6 +130,9 @@ namespace HeartopiaMod
         private string sandLastScanStatus = string.Empty;
         private string sandLastRoughStatus = string.Empty;
         private string sandLastPlaceStatus = string.Empty;
+        // Out-string of the last "Move sand bases to backpack" click; shown under the button
+        // (snow MoveSnowballs idiom, UguiFeaturesPuzzleSnowContent.cs:655-663).
+        private string sandMoveBasesStatus = string.Empty;
 
         // Class/method descriptors are image-lifetime and safe to cache raw; live object
         // pointers are never cached across frames (moving sgen GC).
@@ -2166,6 +2169,140 @@ namespace HeartopiaMod
                 result = auraMonoRuntimeInvoke(this.sandPlaceGetSandbaseMethod, IntPtr.Zero, (IntPtr)a, ref exc);
             }
             return exc == IntPtr.Zero && result != IntPtr.Zero;
+        }
+
+        // ===== move sand bases: warehouse -> backpack =====================================
+        // The "Move sand bases to backpack" button on the Sand Sculpting tab (docs/plans/
+        // 2026-11-02-pumpkin-seeds-sand-base-warehouse-move.md). Mirrors
+        // SnowSculptureFeature's TryMoveSnowballsWarehouseToBackpack, with two deliberate deltas:
+        // the enumeration is PINNED (AGENTS §11 — the snow original enumerates unpinned; do not
+        // copy that) and the filter is the Sandbase table row (SandPlaceIsSandbase) instead of a
+        // hard-coded staticId, so a game update that renumbers 600000 cannot silently miss them.
+
+        private unsafe bool TryCollectWarehouseSandBaseStacks(out Dictionary<uint, int> map, out string status)
+        {
+            map = new Dictionary<uint, int>();
+            status = string.Empty;
+
+            if (!AuraMonoPinningAvailable) { status = "pinning unavailable"; return false; }
+            if (!this.EnsureSandPlaceResolved(out string placeResolve))
+            {
+                status = "place types not resolved: " + placeResolve;
+                return false;
+            }
+
+            if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem", out IntPtr backPack)
+                || backPack == IntPtr.Zero)
+            {
+                status = "BackPackSystem unavailable";
+                return false;
+            }
+
+            IntPtr getAllItem = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(backPack), "GetAllItem", 1);
+            if (getAllItem == IntPtr.Zero)
+            {
+                getAllItem = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(backPack), "GetAllItem", 0);
+            }
+            if (getAllItem == IntPtr.Zero) { status = "GetAllItem missing"; return false; }
+
+            int storageWarehouse = 2; // EStorageType.Warehouse
+            IntPtr listObj;
+            IntPtr exc = IntPtr.Zero;
+            if (AuraMonoMethodParamCountIs(getAllItem, 1))
+            {
+                IntPtr* a = stackalloc IntPtr[1]; a[0] = (IntPtr)(&storageWarehouse);
+                listObj = auraMonoRuntimeInvoke(getAllItem, backPack, (IntPtr)a, ref exc);
+            }
+            else
+            {
+                listObj = auraMonoRuntimeInvoke(getAllItem, backPack, IntPtr.Zero, ref exc);
+            }
+            if (exc != IntPtr.Zero || listObj == IntPtr.Zero) { status = "warehouse read failed"; return false; }
+
+            List<uint> pins = new List<uint>();
+            List<IntPtr> items = new List<IntPtr>();
+            int baseStacks = 0;
+            int baseQty = 0;
+            try
+            {
+                if (!this.TryEnumerateAuraMonoCollectionItems(listObj, items, pins) || items.Count == 0)
+                {
+                    status = "warehouse empty";
+                    return true; // empty is a valid scan result, not a failure (snow semantics)
+                }
+
+                for (int i = 0; i < items.Count; i++)
+                {
+                    IntPtr itemObj = items[i];
+                    if (itemObj == IntPtr.Zero
+                        || !this.TryGetDirectBackpackItemNetId(itemObj, out uint netId)
+                        || netId == 0U)
+                    {
+                        continue;
+                    }
+
+                    if (this.TryGetDirectBackpackItemIsLocked(itemObj, out bool isLocked) && isLocked)
+                    {
+                        continue;
+                    }
+
+                    if (!this.TryGetDirectBackpackItemStaticId(itemObj, out int staticId) || staticId <= 0
+                        || !this.SandPlaceIsSandbase(staticId))
+                    {
+                        continue;
+                    }
+
+                    if (!this.TryGetDirectBackpackItemCount(itemObj, out int count) || count <= 0)
+                    {
+                        count = 1;
+                    }
+
+                    map[netId] = count;
+                    baseStacks++;
+                    baseQty += count;
+                }
+            }
+            catch (Exception ex)
+            {
+                status = "warehouse scan exception: " + ex.Message;
+                this.SandLogStatus(status);
+                return false;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+
+            status = baseStacks > 0
+                ? "warehouse sand bases=" + baseStacks + " qty=" + baseQty
+                : "no sand bases in warehouse";
+            return true;
+        }
+
+        private bool TryMoveSandBasesWarehouseToBackpack(out string status)
+        {
+            status = string.Empty;
+            if (!this.TryCollectWarehouseSandBaseStacks(out Dictionary<uint, int> map, out string collectStatus))
+            {
+                status = collectStatus;
+                return false;
+            }
+
+            if (map.Count == 0)
+            {
+                status = collectStatus;
+                return false;
+            }
+
+            if (!this.TrySendWarehouseStacksToBagChunked(map, out int movedStacks, out int movedQty, out string error))
+            {
+                status = string.IsNullOrEmpty(error) ? "MoveBatchBackpackItems failed" : error;
+                return false;
+            }
+
+            status = "Moved " + movedStacks + " sand base stack(s), qty " + movedQty + " -> Bag";
+            this.SandLogStatus(status);
+            return true;
         }
 
         // Field root, put-zone, root-local position, angle.
