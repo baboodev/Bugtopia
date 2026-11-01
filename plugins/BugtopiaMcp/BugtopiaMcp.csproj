@@ -10,8 +10,11 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DebugType>portable</DebugType>
     <BugtopiaDll Condition="'$(BugtopiaDll)' == ''">$(MSBuildThisFileDirectory)..\..\buddy\bin\BepInEx\Release\bugtopia.dll</BugtopiaDll>
-    <InteropDir Condition="'$(InteropDir)' == ''">C:\Users\coder\workplace\Heartopia-Mods\BepInEx\interop</InteropDir>
-    <BepInExCore Condition="'$(BepInExCore)' == ''">C:\Users\coder\workplace\Heartopia-Mods\BepInEx\core</BepInExCore>
+    <!-- Standalone-build fallback only: the mod build and CI always pass these explicitly.
+         Default convention: the loader install sits next to this repo (..\..\..\Heartopia-Mods).
+         Override with -p:InteropDir= / -p:BepInExCore= or a gitignored Directory.Build.props. -->
+    <BepInExCore Condition="'$(BepInExCore)' == ''">$(MSBuildThisFileDirectory)..\..\..\Heartopia-Mods\BepInEx\core</BepInExCore>
+    <InteropDir Condition="'$(InteropDir)' == ''">$(MSBuildThisFileDirectory)..\..\..\Heartopia-Mods\BepInEx\interop</InteropDir>
   </PropertyGroup>
 
   <ItemGroup>

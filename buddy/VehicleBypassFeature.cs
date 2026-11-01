@@ -653,14 +653,22 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos))
+            // Self pose from the MONO entity, never from the skeleton. This bypass exists precisely for
+            // the cases where the skeleton picture is unreliable, and TryGetLocalPlayerPosition is
+            // Find on a shared object name: a latched stranger (reporter in a suburban area with other
+            // players streamed in, or seated in a vehicle) parked the summoned vehicle — and with
+            // getOn, the rider — at THEIR position, inside their house.
+            if (!this.TryGetNoclipSelfAnchorPose(out Vector3 playerPos, out Quaternion playerRot, out bool hasPlayerRot, out _))
             {
                 error = "player position unavailable";
                 return false;
             }
 
-            Transform playerTransform = GameObject.Find("p_player_skeleton(Clone)")?.transform;
-            Quaternion playerRot = playerTransform != null ? playerTransform.rotation : Quaternion.identity;
+            if (!hasPlayerRot)
+            {
+                playerRot = Quaternion.identity;
+            }
+
             Vector3 forward = playerRot * Vector3.forward;
             Vector3 vehiclePos = new Vector3(
                 playerPos.x + forward.x,

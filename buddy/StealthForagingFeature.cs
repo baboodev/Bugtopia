@@ -171,10 +171,17 @@ namespace HeartopiaMod
                 return;
             }
 
-            GameObject player = GetPlayer();
+            // Yaw ONLY from our own skeleton (verified against the self entity) or from the entity
+            // pose itself — this rotation feeds TryDrivePlayerNoclipTransformMono, so a latched
+            // stranger's yaw would steer the hover toward their body.
+            GameObject player = this.GetVerifiedLocalPlayerSkeleton();
             if (player != null)
             {
                 this.noclipFootHoldRotation = Quaternion.Euler(0f, player.transform.eulerAngles.y, 0f);
+            }
+            else if (this.TryGetNoclipSelfAnchorPose(out _, out Quaternion selfRot, out bool hasSelfRot, out _) && hasSelfRot)
+            {
+                this.noclipFootHoldRotation = Quaternion.Euler(0f, selfRot.eulerAngles.y, 0f);
             }
 
             this.noclipFootHoldPosition = position;

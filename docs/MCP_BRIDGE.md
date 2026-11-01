@@ -72,14 +72,14 @@ Unloading the plugin removes the listener; the file is removed on `Stop()`.
 
 ---
 
-## 2b. Reaching a SECOND machine (Ideapad) over SSH
+## 2b. Reaching a SECOND machine over SSH
 
 The bridge binds **loopback only**, so an SSH port-forward is the only way to reach a game running
-on another box. Setup used for `Ideapad.local`:
+on another box. The examples use `<user>@<game-pc>` for that second box:
 
 ```
-this machine                                    Ideapad.local
-────────────                                    ─────────────
+this machine                                    <game-pc>
+────────────                                    ────────
 client ──▶ 127.0.0.1:8780 ──ssh -L──────────────▶ 127.0.0.1:<bridge port>  (8770-8774)
                                                         │
                                                   BugtopiaMcp.dll
@@ -105,7 +105,8 @@ It mirrors the remote endpoint into `%LOCALAPPDATA%\BugtopiaMcpIdeapad\endpoint.
 
 > **When the client bridge is launched without `BUGTOPIA_MCP_ENDPOINT`** (Claude Code's `.mcp.json`
 > does exactly that) it reads the *default* `%LocalLow%/Bugtopia/McpBridge/endpoint.json`, which on
-> this machine is a leftover from an older local session and goes stale on every Ideapad game restart
+> this machine is a leftover from an older local session and goes stale on every second-machine
+> game restart
 > — the client then reports "stale token" forever, because the file it reads is not the mirror.
 > Recover by copying the fresh mirror into the default path (or add the env var to the bridge launch);
 > the bridge's game connection is **lazy**, so the next op call picks the replaced file up without
@@ -115,7 +116,7 @@ It mirrors the remote endpoint into `%LOCALAPPDATA%\BugtopiaMcpIdeapad\endpoint.
 
 > No backtick line continuations anywhere in that script; they broke it once already.
 
-### On the Ideapad side
+### On the second machine's side
 
 1. `bugtopia.dll` deployed to its `BepInEx\plugins\`, and `BugtopiaMcp.dll` enabled under Plugins
    (`%USERPROFILE%\AppData\LocalLow\Bugtopia\Plugins\BugtopiaMcp.dll` plus the sibling `.enabled`).
@@ -147,15 +148,19 @@ its argument schema.
 
 ### Deploying to it
 
+With the launcher, BepInEx on the second machine lives in the mod's own storage tree, NOT next to
+the game — verify where its `runtime\BepInEx\plugins` actually sits before copying:
+
 ```bash
-scp buddy/bin/BepInEx/Release/bugtopia.dll coderus@Ideapad.local:C:/Users/coderus/workplace/HH/BepInEx/plugins/bugtopia.dll
+scp buddy/bin/BepInEx/ReleaseShip/bugtopia.dll "<user>@<game-pc>:C:/Users/<user>/AppData/LocalLow/Bugtopia/runtime/BepInEx/plugins/bugtopia.dll"
 ```
 
-The DLL is **locked while the game runs**. Copy it to `bugtopia.dll.new` instead, then swap once the
+The DLL is **locked while the game runs** (`tasklist /FI "IMAGENAME eq xdt.exe" /NH` over ssh).
+Copy it to `bugtopia.dll.new` instead, then swap once the
 game closes — that keeps the transfer out of the critical path:
 
 ```bash
-ssh coderus@Ideapad.local "move /Y C:\...\plugins\bugtopia.dll.new C:\...\plugins\bugtopia.dll"
+ssh <user>@<game-pc> "move /Y C:\Users\<user>\AppData\LocalLow\Bugtopia\runtime\BepInEx\plugins\bugtopia.dll.new C:\Users\<user>\AppData\LocalLow\Bugtopia\runtime\BepInEx\plugins\bugtopia.dll"
 ```
 
 Verify with a hash on both ends rather than trusting the copy (`Get-FileHash` on the far side).
@@ -169,7 +174,7 @@ bridge and hot-reloads it into the running game (§4b).
 |---|---|
 | Handshake refused / connection closed immediately | Stale token — the game restarted. Re-read the mirrored `endpoint.json`; the poller refreshes it within 15 s |
 | Connects but every op fails | The forward points at the previous launch's port; the poller rebuilds it on the next tick |
-| Nothing on 8780 | The tunnel script is not running, or ssh could not authenticate (`-i ~/.ssh/lenovo`, `BatchMode=yes` hides the prompt) |
+| Nothing on 8780 | The tunnel script is not running, or ssh could not authenticate (`-i ~/.ssh/<key>`, `BatchMode=yes` hides the prompt) |
 | `'<id>' is not loaded` | Sandbox plugins do not survive a game restart — `plugin.load` them again |
 
 ---

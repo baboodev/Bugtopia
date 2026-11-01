@@ -11,8 +11,8 @@ namespace BugtopiaMcp
     //
     // THE FAILURE THIS EXISTS FOR. EvalCompiler takes its reference set from the game's own `env`
     // op — modAssembly / interopDir / coreDir / runtimeDir are paths as the GAME sees them. Roslyn
-    // then compiles HERE, in this process. So when the game lives on a second box (the Ideapad runs
-    // as its own user, C:\Users\coderus\…), every reported path is missing locally, AddDirectory
+    // then compiles HERE, in this process. So when the game lives on a second box (running under its
+    // own profile, C:\Users\<remote-user>\…), every reported path is missing locally, AddDirectory
     // skips a non-existent directory without complaint, and the compile ends up with zero
     // references — which does not surface as "wrong machine". It surfaces as
     //      error CS0518: Predefined type 'System.Object' is not defined or imported

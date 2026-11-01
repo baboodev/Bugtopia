@@ -888,13 +888,22 @@ namespace HeartopiaMod
             }
 
             // Post-teleport facing settle: plain transform writes for a few frames (not a patch).
+            // Same verified-skeleton object the warp captured — GetPlayer() could switch to a
+            // stranger mid-window and snap THEIR model's rotation to our target facing.
             if (this.playerRotationFramesRemaining > 0)
             {
                 this.playerRotationFramesRemaining--;
-                GameObject player = GetPlayer();
+                GameObject player = this.teleportSyncSkeleton;
                 if (player != null)
                 {
-                    player.transform.rotation = this.teleportSyncRotation;
+                    try
+                    {
+                        player.transform.rotation = this.teleportSyncRotation;
+                    }
+                    catch
+                    {
+                        this.teleportSyncSkeleton = null;
+                    }
                 }
             }
 
@@ -3291,15 +3300,33 @@ namespace HeartopiaMod
             {
                 try
                 {
-                    GameObject p = GetPlayer();
-                    if (p != null)
+                    // Anchor from the self MONO entity, never the skeleton. GetPlayer() is
+                    // GameObject.Find("p_player_skeleton(Clone)") and every remote player shares that
+                    // name, so this hop computed "2.5 m behind the player" off a STRANGER's pose: with
+                    // the cache latched on one (suburban areas, seated in a vehicle, post-respawn),
+                    // AutoMoveTransfer moved the real self to behind THEM — a warp into whoever's
+                    // skeleton was found, their house included. Same shape as the fishing fix in
+                    // 43416ff and the noclip seed fix of 2026-08-21 (memory/player-resolve-and-input-block).
+                    if (!this.TryGetNoclipSelfAnchorPose(out Vector3 cur, out Quaternion selfRot, out bool hasSelfRot, out string anchorSource))
                     {
-                        Vector3 cur = p.transform.position;
-                        Vector3 back = Vector3.zero;
-                        try { back = p.transform.forward; } catch { back = new Vector3(0f, 0f, 1f); }
+                        this.AutoEatRepairLog("[StartRepair] Skipped teleport backward: no self-entity anchor (refusing p_player_skeleton — it can be another player).");
+                    }
+                    else
+                    {
+                        Vector3 back;
+                        if (hasSelfRot)
+                        {
+                            back = selfRot * Vector3.forward;
+                        }
+                        else
+                        {
+                            GameObject verifiedSk = this.GetVerifiedLocalPlayerSkeleton();
+                            back = verifiedSk != null ? verifiedSk.transform.forward : new Vector3(0f, 0f, 1f);
+                        }
+
                         Vector3 target = cur - back.normalized * this.repairTeleportBackDistance;
                         target.y = cur.y; // preserve vertical position
-                        this.AutoEatRepairLog($"[StartRepair] Teleporting player backward from {cur} to {target}");
+                        this.AutoEatRepairLog($"[StartRepair] Teleporting player backward from {cur} to {target} (anchor {anchorSource})");
                         TeleportTo(target);
                     }
                 }
@@ -4116,6 +4143,12 @@ namespace HeartopiaMod
         // teleportFramesRemaining / playerRotationFramesRemaining count down — not a patch).
         private Vector3 teleportSyncPosition;
         private Quaternion teleportSyncRotation = Quaternion.identity;
+
+        // The skeleton that opened the settle window, captured after GetVerifiedLocalPlayerSkeleton
+        // proved it is ours. SyncTeleportPosition writes ONLY to this object — re-reading GetPlayer()
+        // each frame could land on a stranger's skeleton (Find, first active match) and pin THEIR
+        // model to our target for the rest of the window.
+        private GameObject teleportSyncSkeleton;
 
         // Token: 0x0400000F RID: 15
         private Vector3 lastKnownPosition;
