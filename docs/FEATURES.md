@@ -49,7 +49,7 @@ Tab index **1** is unused in the main tab bar (historical gap).
 | Food & Repair | Auto eat, auto repair, bag automation |
 | Auto Buy | Cooking store purchase automation |
 | Auto Sell | Inventory sell automation |
-| Mass Cook | Network cooking at stoves; remote QTE + Permanent Stove Memory |
+| Mass Cook | Network cooking at stoves; remote QTE + Permanent Stove Memory; dish-star labels + filters; Cook Until 5-Star Dish (batch-count concurrency with stove-set memory); Prefer Below-5 Ingredients |
 | Puzzle | Auto puzzle solver |
 | Pet Care | Feed all pets, auto cat play, auto dog train |
 
@@ -1652,7 +1652,8 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#auto-sell-detail).
 
 - Patrol-based mass cooking at saved cooking patrol points (position + rotation per station).
 - Scans radius for cook targets. **Auto Cook Assist** is a separate toggle: while it is on, the mod watches the captured stoves and answers cooking mini-games (danger relief and collect) without preparing or starting a dish. Start Mass Cook stays available at the same time.
-- Config: interval, scan radius, wait at spot, cooking speed.
+- Config: scan radius, wait at spot, cooking speed. (The COOK DELAY interval setting was removed
+  2026-11-01; the collect→next-prepare pacing runs on its 0.35 s floor permanently.)
 - Coroutine warmup on mod init (`NetCookCoroutineWarmupRoutine`).
 - **Ingredient model (Move Ingredients / max-quantity):** a recipe is a flat list of material slots, **one slot = one unit** (a recipe needing 3 wheat has 3 slots). A slot is either a **specific item** (ingredient id ≥ 100) or an **"any &lt;category&gt;" slot** (id &lt; 100 = a `FoodMaterialType`, e.g. "any fish" = `Fish`). Category slots carry `materialId == 0` and only set `materialType`. Requirements track `IsCategory`/`MaterialType`; `BuildNetCookDemands` aggregates per-dish counts (specific items vs categories), and warehouse move + max-quantity match category slots via `NetCookItemMatchesCategory` → `CookingSystem.CheckFoodTypeSatisfied` (cached). Cooking itself relies on the game's `AutoFill` to fill slots from the bag, so the mod only needs to move enough matching items. See [cooking ingredient details](DECOMPILED_SOURCE_MAP.md#312-cooking-net-cook--mass-cook).
 
@@ -1665,6 +1666,33 @@ Fills the material slots real ingredients could not cover with the **Universal I
 - **The top-up is applied again immediately before the send.** `PrepareCooking` transmits `_recipeDetail`'s per-slot `filledMaterialNetId`, not the caller's material list, and the AuraMono send path re-runs `InitCookingRecipeDetail` (hence `AutoFill`) right before it — which wipes any earlier top-up and would put netId `0` on the wire for that slot. Both the material build and the send therefore go through one shared slot walk, and the send bails out rather than transmitting a half-filled payload the server can only reject.
 - **Ingredients max** grows with the toggle: the universal stock is a shared shortfall budget (one unit covers one missing unit of any slot), not a per-ingredient limit. **Move Ingredients** also pulls universal stacks out of the warehouse, but only for the deficit real ingredients left behind.
 - Off by default and **session-only** — the toggle is not saved to config, so spending a paid item is always a deliberate choice for that session. 46999 also cooks at its own (low) star rating, which drags dish quality down (confirmed in-world: a dish topped up this way came back `quality=1`). Usage is force-logged (`universal ingredient filled N of M slot(s)` / `universal fill slot=i skipped: …`, throttled to 5 s) so a "Missing ingredients" drain always has a reason in the log.
+
+#### Dish stars: labels, "Cook Until 5-Star Dish", "Prefer Below-5 Ingredients"
+
+Three quality features around Mass Cook (plan `plans/2026-10-31-mass-cook-dish-stars.md`). Star semantics first, because every one of them depends on it:
+
+- **What a star on a recipe tile means:** the best star the ACCOUNT has ever achieved for that dish — the game's own Collection record (`PictorialBase`/`PictorialExtra.quality`, read the way the Radar filter reads it), with the mod's own ledger (`netCookQualityLedger`, persisted per-(recipe→star), fed by every OUR-dish collect) filling the dishes the Collection has never seen. It is a **record of what you achieved, never a prediction** of what the next cook rolls — dish quality is server-rolled pseudo-randomly and no UI may quote odds.
+- **The record drives all three surfaces, record-first** (requester decision; the exact reading — `max(Collection, ledger)` — re-confirmed at the 2026-11-01 review): the tile label, the "Only Below 5 Stars" filter, and the visibility of the 5★-mode toggle all read the Collection record wherever it speaks — a recipe the Collection calls 5★ stays 5★ no matter what the inventory holds. The ledger answers only where the Collection is silent (the recipes it never covers): there the mod's own evidence counts, and that includes a 5★ stack currently held in the inventory — such a dish reads as achieved, its row is filtered, and its 5★-mode toggle stays hidden. Consequence accepted out loud: a dish the account mastered once at 5★ shows 5★ and hides the 5★-mode toggle even when the current stock is entirely 2–4★. Dishes with no record anywhere show no label and stay in the filter.
+- **"Only Below 5 Stars"** (recipe-list filter, alongside "Only What I Can Cook"): hides recipes whose record already says 5★. Coverage caveat: 232 of 449 cooking recipes have a Collection entry on the test account; the rest become known to the mod only after this install has witnessed their collects.
+
+##### Cook Until 5-Star Dish (`netCookCookUntilFiveStarDish`, saved)
+
+Keep cooking the selected recipe until a collected dish comes out 5★, then stop taking new dishes and only attend what is already on the stoves.
+
+- Visible only while the record cannot vouch for a 5★ on the selected recipe; the saved flag never engages for a known-5★ recipe.
+- **BATCH COUNT re-labels the DISH LIMIT field while the mode is on** (same input, mode-aware caption and value; DISH LIMIT is not in effect in this mode at all). Batch count = **maximum number of stoves cooking this run's dishes at once** (0 = every captured stove); default 4. In-flight prepares count toward the cap — the first live pass proved an occupancy-only count releases a second prepare wave (5 → 10 stoves).
+- **Stove memory:** the batch claims its stove SET at start; a stove that finishes re-cooks the run's next dish on itself instead of the loop picking another idle stove. A stove outside the set is admitted only as a replacement for a member stove lost mid-run. A seat is claimed by the successful prepare send, never by an attempt.
+- **The 5★ trigger reads the backpack, not the stove.** The stove-side `FoodQuality`/`q=` value exists but no client code consumes it and it is not a quality signal. The authoritative path is the count diff on the recipe's (star → ΣCount) census right after our own collect (`CookResultEvent` TakeFood with the phase-4 gate proves the dish is OURS): the server merges collected dishes into existing same-identity stacks, so attribution is per (recipe, star), not per netId, and the settle window from Succeed to bag-visible is ~1–2 s. When a diff credits star 5 for the running recipe, `BeginNetCookDrain` ends the issuing phase.
+- A 5★ run can also end on **ingredient exhaustion** before ever rolling a 5★ — the ordinary run-out drain closes it and the status line says so. That is a legitimate outcome, not a bug: the roll is server-side random.
+
+##### Prefer Below-5 Ingredients (`netCookPreferUnderFiveIngredients`, saved; UGUI panel only)
+
+With the toggle ON the mod **never spends a 5★ ingredient automatically** (strict semantics, requester live test 2026-11-01):
+
+- Allowed slot fills, in order: a <5★ stack → the **Universal Ingredient** (only while its own toggle is on too) → nothing. If only 5★ stock fits, the cook is refused and the stacks stay untouched: "Ingredients max" counts <5★ stock only (pinned kinds exempt — the pin is the player spending them themselves), START refuses a zero-headroom recipe with an explicit reason, and the cook-time slot walk demotes or blocks per slot (`R3 demoted slot=N 5*static=… -> 2*static=…` / `R3 substituted … -> Universal Ingredient`, one "only 5-star stock fits" log per recipe).
+- Manual pins override the policy; "Use All Ingredients" outranks it across the whole chain (start refusal, "Ingredients max", warehouse move and the slot-walk block all stand down while it is on — 5★ stacks ship to the bag and are spent, exactly what the instruction asked for). Toggle OFF restores the shipped behavior byte-for-byte.
+- **Ingredient stars come from the ECS `QualityComponent` resolved by netId** (`TryResolveAutoSellMonoItemStar`, the canonical AutoSell chain), NOT from the item's `starRate` field — on this build the field reads 0 for quality stacks (live-proven 2026-11-01: an item-fields-only read made every 5★ stack look unstarred). Every NetCook star read — headroom aggregation, warehouse `starByNetId` (which drives the low-star-first move ordering), the demotion candidates, the picker's N★ labels — uses this resolver.
+- Trade-off, stated honestly: low-star ingredients **lower** the odds of the cook landing high stars, and 46999 cooks at a low star, so R2 ("cook until 5★") and this preference pull in opposite directions. They stay independent by design; the sanctioned ways to cook with only 5★ stock are the Universal Ingredient, a manual pin, or switching the preference off.
 
 #### Remote cooking (QTE at distance)
 

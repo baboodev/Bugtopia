@@ -1408,7 +1408,12 @@ namespace HeartopiaMod
             // Camera FOV will be applied in OnLateUpdate to avoid competing with game camera updates
 
             this.ApplyGameSpeed();
-            if (this.netCookEnabled || this.netCookAutoAssist)
+            // The last condition keeps the pump alive after the run itself has stopped, but only while
+            // a collect-diff job (self-expiring within its ceiling) is outstanding — a stopped mass
+            // cook must still attribute the dish it just collected. The ledger seed does NOT extend
+            // the pump: it runs on the world-ready gate callback (AGENTS §1).
+            if (this.netCookEnabled || this.netCookAutoAssist
+                || this.netCookQualityCollectJobs.Count > 0)
             {
                 this.ProcessNetCookLoop();
             }
@@ -4511,14 +4516,20 @@ namespace HeartopiaMod
         // NetCookLog, which is gated behind the user's MasterLogNetCook toggle — the skip reason is the
         // only explanation a "Missing ingredients" drain ever gets, so it must not depend on a setting.
         // Throttled so a many-stove run cannot flood the log.
-        private int netCookUniversalSlotsFilled = 0;
+        // Two writers, two counters (review 2026-11-01, finding 14a): a top-up fills a slot AutoFill
+        // left EMPTY; an R3 demotion replaces a slot AutoFill filled with 5★. Counting both into one
+        // int inflated the paid-item telemetry — split by origin, summed in the log line.
+        private int netCookUniversalSlotsFilled = 0;      // top-up fills (empty slots)
+        private int netCookUniversalDemotedSlots = 0;     // R3 replacements of a 5★ fill
         private float nextNetCookUniversalFillLogAt = 0f;
         private float nextNetCookUniversalSkipLogAt = 0f;
         private int netCookCookQuantity = 1;
         private string netCookCookQuantityInput = "1";
         private int netCookMaxCookQuantity = 0;
         private float nextNetCookMaxRefreshAt = 0f;
-        private float netCookInterval = 1.5f;
+        // netCookInterval (COOK DELAY) removed 2026-11-01: the slider only scaled the
+        // collect→next-prepare pause, whose 0.35 s floor always applied; NetCook now uses
+        // NetCookCollectRestartDelaySeconds directly. The key in an old Config.xml is simply ignored.
         private float netCookScanRadiusMeters = NetCookDefaultScanRadiusMeters;
         private int netCookRecipeId = 0;
         private int netCookCookerStaticId = 0;
@@ -4558,6 +4569,27 @@ namespace HeartopiaMod
         private bool netCookSlotManualMode = false;
         // Hide recipes the current stock cannot cover.
         private bool netCookCookableOnly = false;
+        // View-only picker filter: hide recipes whose Collection/ledger record already shows 5★
+        // (plan §3.2). GetVisibleNetCookRecipeEntries — the selection oracle for capture and the
+        // Stove Type switch — is never filtered by it, so a hidden recipe cannot steal the pick.
+        private bool netCookUnderFiveStarsOnly = false;
+        // R2 (plan §4): replenishing-batch mode "cook until a completed dish comes out 5★".
+        // Engagement is latched at run start (netCookFiveStarModeEngaged) and never engages for a
+        // recipe whose §2.3 record already shows 5★.
+        private bool netCookCookUntilFiveStarDish = false;
+        // R3 (plan §5.1): never intentionally spend a 5★ ingredient stack — the slot demotion pass
+        // (NetCookSlotPrefsFeature.TryDemoteNetCookSlotFromFiveStar) implements it on the bag side;
+        // the warehouse move honored it already (low-star-first allocation). Works in automatic AND
+        // manual mode; manual pins always override it. OFF = shipped AutoFill behavior byte-for-byte.
+        private bool netCookPreferUnderFiveIngredients = false;
+        // Concurrency cap in that mode; persisted as text, mirroring how the qty field is mirrored.
+        private string netCookBatchCountInput = "4";
+        private int netCookBatchCount = 4;
+        private bool netCookFiveStarModeEngaged;
+        // Stove memory (requester 2026-11-01): in the 5★ mode the batch is a fixed SET of stoves,
+        // claimed at run start — not a random pick from the captured field each time a slot frees.
+        // LevelObjectNetIds, keyed the same way the collect jobs key their stoves.
+        private readonly System.Collections.Generic.HashSet<ulong> netCookBatchStoveNetIds = new System.Collections.Generic.HashSet<ulong>(8);
         // -1 = the grid shows recipes. >= 0 = it shows the candidate items for that slot.
         private int netCookSlotPickerIndex = -1;
         private readonly Dictionary<int, int> netCookRecipeCookerTypes = new Dictionary<int, int>();

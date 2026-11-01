@@ -380,7 +380,7 @@ namespace HeartopiaMod
             data.petFeedScanRadiusMeters = this.petFeedScanRadiusMeters;
             data.petFeedSkipRareFood = this.petFeedSkipRareFood;
             data.petFeedFoodByPet = this.SerializePetFeedFoodPrefs();
-            data.netCookInterval = this.netCookInterval;
+            // netCookInterval not saved anymore (COOK DELAY slider removed 2026-11-01).
             data.netCookScanRadiusMeters = this.netCookScanRadiusMeters;
             data.netCookAutoAssist = this.netCookAutoAssist;
             data.netCookMiniGameOnly = false; // legacy key — write false so a stale true never re-migrates
@@ -388,7 +388,12 @@ namespace HeartopiaMod
             data.netCookRememberStoves = this.netCookRememberStoves;
             data.netCookSlotManualMode = this.netCookSlotManualMode;
             data.netCookCookableOnly = this.netCookCookableOnly;
+            data.netCookUnderFiveStarsOnly = this.netCookUnderFiveStarsOnly;
+            data.netCookCookUntilFiveStarDish = this.netCookCookUntilFiveStarDish;
+            data.netCookPreferUnderFiveIngredients = this.netCookPreferUnderFiveIngredients;
+            data.netCookBatchCountInput = string.IsNullOrWhiteSpace(this.netCookBatchCountInput) ? "4" : this.netCookBatchCountInput;
             data.netCookSlotPrefs = this.SerializeNetCookSlotPrefs();
+            data.netCookQualityLedger = this.SerializeNetCookQualityLedger();
             data.netCookCaptureOwnOnly = this.netCookCaptureOwnOnly;
             data.netCookCaptureRadiusOnly = this.netCookCaptureRadiusOnly;
             data.netCookUseAllIngredients = this.netCookUseAllIngredients;
@@ -834,14 +839,20 @@ namespace HeartopiaMod
             this.petFeedScanRadiusMeters = Mathf.Clamp(data.petFeedScanRadiusMeters > 0f ? data.petFeedScanRadiusMeters : PetFeedDefaultScanRadiusMeters, PetFeedMinScanRadiusMeters, PetFeedMaxScanRadiusMeters);
             this.petFeedSkipRareFood = data.petFeedSkipRareFood;
             this.DeserializePetFeedFoodPrefs(data.petFeedFoodByPet);
-            this.netCookInterval = Mathf.Clamp(data.netCookInterval > 0f ? data.netCookInterval : 1.5f, 0.25f, 10f);
+            // netCookInterval key is ignored on load (COOK DELAY slider removed 2026-11-01).
             this.netCookScanRadiusMeters = Mathf.Clamp(data.netCookScanRadiusMeters > 0f ? data.netCookScanRadiusMeters : NetCookDefaultScanRadiusMeters, NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
             this.netCookAutoAssist = data.netCookAutoAssist || data.netCookMiniGameOnly; // legacy key migrates in
             this.netCookMoveIngredients = data.netCookMoveIngredients;
             this.netCookRememberStoves = data.netCookRememberStoves;
             this.netCookSlotManualMode = data.netCookSlotManualMode;
             this.netCookCookableOnly = data.netCookCookableOnly;
+            this.netCookUnderFiveStarsOnly = data.netCookUnderFiveStarsOnly;
+            this.netCookCookUntilFiveStarDish = data.netCookCookUntilFiveStarDish;
+            this.netCookPreferUnderFiveIngredients = data.netCookPreferUnderFiveIngredients;
+            this.netCookBatchCountInput = data.netCookBatchCountInput;
+            this.SyncNetCookBatchCountFromInput(); // normalizes and defaults "4" for a legacy Config.xml with no key
             this.DeserializeNetCookSlotPrefs(data.netCookSlotPrefs);
+            this.DeserializeNetCookQualityLedger(data.netCookQualityLedger);
             this.netCookCaptureOwnOnly = data.netCookCaptureOwnOnly;
             this.netCookCaptureRadiusOnly = data.netCookCaptureRadiusOnly;
             this.netCookUseAllIngredients = data.netCookUseAllIngredients;
@@ -1200,7 +1211,7 @@ namespace HeartopiaMod
             else if (line.Contains("petFeedFoodByPet")) this.DeserializePetFeedFoodPrefs(GetJsonString(line, "\"petFeedFoodByPet\":"));
             else if (line.Contains("petFeedSkipRareFood")) this.petFeedSkipRareFood = line.IndexOf("true", StringComparison.OrdinalIgnoreCase) >= 0 || GetJsonInt(line, "\"petFeedSkipRareFood\":") != 0;
             else if (line.Contains("petFeedScanRadiusMeters")) this.petFeedScanRadiusMeters = Mathf.Clamp(GetJsonFloat(line, "\"petFeedScanRadiusMeters\":"), PetFeedMinScanRadiusMeters, PetFeedMaxScanRadiusMeters);
-            else if (line.Contains("netCookInterval")) this.netCookInterval = GetJsonFloat(line, "\"netCookInterval\":");
+            // legacy netCookInterval line is skipped (COOK DELAY slider removed 2026-11-01)
             else if (line.Contains("netCookScanRadiusMeters")) this.netCookScanRadiusMeters = Mathf.Clamp(GetJsonFloat(line, "\"netCookScanRadiusMeters\":"), NetCookMinScanRadiusMeters, NetCookMaxScanRadiusMeters);
             else if (line.Contains("netCookAutoAssist"))
             {

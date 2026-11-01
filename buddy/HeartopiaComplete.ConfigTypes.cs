@@ -393,7 +393,7 @@ namespace HeartopiaMod
             public float petFeedScanRadiusMeters;
             public bool petFeedSkipRareFood = true;
             public string petFeedFoodByPet;
-            public float netCookInterval;
+            // netCookInterval removed 2026-11-01 (COOK DELAY slider deleted; key ignored on load).
             public float netCookScanRadiusMeters;
             // Legacy: kept only so old Config.xml/keybinds files still deserialize. The live flag is
             // netCookAutoAssist; this key is always written back as false (see HeartopiaComplete.Config.cs).
@@ -403,7 +403,12 @@ namespace HeartopiaMod
             public bool netCookRememberStoves;
             public bool netCookSlotManualMode;
             public bool netCookCookableOnly;
+            public bool netCookUnderFiveStarsOnly;
+            public bool netCookCookUntilFiveStarDish;
+            public bool netCookPreferUnderFiveIngredients;
+            public string netCookBatchCountInput;
             public string netCookSlotPrefs;
+            public string netCookQualityLedger;
             public bool netCookCaptureOwnOnly;
             public bool netCookCaptureRadiusOnly;
             public bool netCookUseAllIngredients;

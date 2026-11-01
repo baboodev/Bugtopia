@@ -193,6 +193,28 @@ never by scanning the dictionary:
 
 Worked example with code: [TYPE_RESOLUTION.md → Resolving module instances](./TYPE_RESOLUTION.md#resolving-module-instances-managersgetmodule--worked-example-buildmodule). Consumer: `PadBuildHotkeyFeature.cs` (Pad build hotkeys).
 
+### Collection record — `PictorialSystem` (the game's own per-entry "best achieved")
+
+`XDTGameSystem.GameplaySystem.Pictorial.PictorialSystem` (Mono image **XDTGameSystem**, resolved with
+`TryResolveAuraMonoModule`, same as any gameplay module) is the account Collection: one record per
+collectible AND per cooked dish. Read shape (identical in both mod consumers, pinned across the out-arg invoke):
+
+- `TryGetPictorialData(id, out PictorialBase)` — boxed `bool` return; the out argument is a
+  reference-typed `PictorialBase` (abstract class — pin it, never unbox) read via mono field offsets. The instance class dispatch matters: birds/insects/fish hit `PictorialBird.GetStarRate` etc., whose
+  star is *derived* from `highestWeight`; **Food rows carry `quality` as a plain assignment** — the stored star
+  of the best dish ever cooked (`PictorialExtraComponent.quality` is the ECS backing; `_count` is the total
+  cook count; `EPictorialNewState` has three values, `NotGet = 0`, `Found = 1`, `Got = 2` — `0`/absent means
+  *unknown*, never "low").
+- Proven live 2026-10-31: the food star is **best-ever**, not last-cook (45581: record 5★ while its entire
+  406-unit stock is 2–4★; 45392: `_count` 7 with its six products still in the bag at 1–3★).
+- Dirty signal without polling: `UpdatePictorialEvent` / `UpdatePictorialDetailEvent` / `UpdatePictorialExtraEvent`
+  (EventCenter, one handler each, zero extra slots).
+- Consumers: `HeartopiaComplete.RadarCollectionFilter.cs` (species quick filters — the original read shape) and
+  `HeartopiaComplete.NetCookQualityLedger.cs` (Mass Cook recipe star labels — a second consumer; plan
+  `plans/2026-10-31-mass-cook-dish-stars.md` §2.1). A **different** quality truth lives on items: the stack star
+  for dishes and ingredients is the ECS `QualityComponent` resolved **by netId** (`TryGetAutoSellQualityComponentStar`),
+  not the item's `starRate` field, which reads 0 on this build (live-proven 2026-11-01).
+
 ---
 
 ## 5. `EcsService.TryGet<T>` via AuraMono (generic inflation)

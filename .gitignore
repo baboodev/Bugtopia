@@ -67,9 +67,8 @@ tools/**/obj/
 
 # Launcher release artefacts, produced by ci/publish-launcher.ps1
 release/
-tools/VehicleTuneProbe
-tools/CleanupProbe
-tools/FishRouteProbe
+# Throwaway live probes (tools/CookRecipeProbe, tools/DishStarProbe, …) — scaffolding, never shipped.
+tools/*Probe
 
 # China build (TapTap CN) copy + decompilation — local research only
 cn-version/

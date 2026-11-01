@@ -656,7 +656,12 @@ namespace HeartopiaMod
                         Count = Math.Max(0, count),
                     };
                     this.TryGetDirectBackpackItemNetId(itemObj, out c.NetId);
-                    this.TryGetDirectBackpackItemStarRate(itemObj, out c.StarRate);
+                    // QC-first like every other star read since 2026-11-01 — the picker row's N★ label
+                    // must not show 0★ for a stack the game draws as 5★.
+                    if (!this.TryResolveAutoSellMonoItemStar(c.NetId, itemObj, string.Empty, Math.Max(0, c.Count), out c.StarRate))
+                    {
+                        c.StarRate = 0;
+                    }
                     if (!this.TryResolveNetCookItemName(staticId, out c.Name))
                     {
                         c.Name = "#" + staticId.ToString(CultureInfo.InvariantCulture);
@@ -841,6 +846,290 @@ namespace HeartopiaMod
             // "Missing ingredients".
             return this.TryFillNetCookSlotWithStaticId(
                 cookingSystemObj, cookingSystemClass, slotIndex, wantStaticId, out _);
+        }
+
+        // R3 (§5.1-5.2, plan 2026-10-31; semantics STRICTED by the requester's live test 2026-11-01):
+        // demote a slot the game's own AutoFill filled with a 5★ stack — and when nothing else fits,
+        // BLOCK the cook instead of quietly spending the 5★.
+        //
+        // The requester's own words: bag holds only 5★ Glomwood Meal parts, toggle ON, and "Ingredients
+        // max: 1" was read as the mod about to spend them. The plan's permissive v1 ("keep AutoFill's
+        // pick") is replaced: toggle ON = 5★ ingredients are NEVER spent automatically. Allowed fills
+        // are, in order: a <5★ stack → the Universal Ingredient (only while its own toggle is on) →
+        // nothing. A manual pin outranks the policy — that is the "unless manually selected" half.
+        // The "Ingredients max" math mirrors this (TryComputeNetCookMaxQuantity's strict branch), so
+        // the UI already shows the recipe as not cookable before any prepare is attempted.
+        //
+        // The gap this closes on the fill side is the bag's AutoFill pricing: price follows each item's
+        // table row, not its stars — a 5★ vegetable claims an "any ingredient" category slot while a
+        // 1★ fish would fit it just as well. The warehouse side needed no new filter:
+        // AllocateNetCookMoveFromStacks sorts LOWEST star first, so 5★ stacks are only allocated when
+        // the <5★ pool cannot cover the deficit — the strict block lives in the demand math instead
+        // (the move map derives from <5★-counted demands, so 5★ stacks never enter it).
+        //
+        // FillMaterialInSlot overwrites outright; NO ClearSlot, same contract and same reasoning as
+        // TryApplyNetCookSlotPreference above.
+        internal enum NetCookFiveStarSlotOutcome
+        {
+            NoOp,     // nothing to demote (slot not 5★, star unknown, Universal stand-in, manual pin,
+                      // or a game-fixed / walk-failed slot whose fill could not be PROVEN 5★)
+            Demoted,  // slot rewritten with a <5★ stack or the Universal Ingredient
+            Blocked,  // 5★ filled (or proven 5★ with no working walk), no <5★ candidate, Universal
+                      // not allowed/available — refuse the cook (mid-run this drains, no livelock)
+        }
+
+        private readonly HashSet<int> netCookPreferUnderFiveLoggedRecipes = new HashSet<int>();
+
+        // Fail-closed partner for the star of a slot's CURRENT fill when the candidate walk could not
+        // run at all. QualityComponent-by-netId needs no GetSlotMaterials, so a failure of the walk
+        // cannot hide a 5★ fill: PROVEN 5★ → Blocked (silence would mean spending it, against the
+        // strict ask); star unknown or <5★ → NoOp (0 = "no quality" is spendable per plan §5.1 — the
+        // policy is about 5★, not about API errors).
+        private NetCookFiveStarSlotOutcome FailClosedNetCookSlotFromFiveStar(uint filledNetId, int slotIndex, int recipeId)
+        {
+            if (filledNetId == 0U || !this.TryGetAutoSellQualityComponentStar(filledNetId, out int star) || star < NetCookStarMax)
+            {
+                return NetCookFiveStarSlotOutcome.NoOp;
+            }
+
+            FeatureLog.Fail("NetCookQuality", "R3: slot " + slotIndex + " of recipe " + recipeId
+                + " holds a 5-star fill and the demotion walk could not run; the cook is blocked"
+                + " (switch the preference off, or pin the kind by hand to spend 5-star).");
+            return NetCookFiveStarSlotOutcome.Blocked;
+        }
+
+        internal unsafe NetCookFiveStarSlotOutcome TryDemoteNetCookSlotFromFiveStar(
+            IntPtr cookingSystemObj, IntPtr cookingSystemClass, IntPtr slotObj, int slotIndex, int recipeId)
+        {
+            if (cookingSystemObj == IntPtr.Zero || cookingSystemClass == IntPtr.Zero || slotObj == IntPtr.Zero
+                || auraMonoRuntimeInvoke == null)
+            {
+                return NetCookFiveStarSlotOutcome.NoOp;
+            }
+
+            // One strict rule (review 2026-11-01): "Use All Ingredients" is an explicit whole-bag
+            // instruction that sanctions spending 5-star stock, and the move map already ships those
+            // stacks to the bag under the same exemption — the walk must not then Block the fills it
+            // just authorized. Same predicate as the headroom, the move-map deficit and the start
+            // gate. Short-circuits BEFORE the canChange fail-close: a fixed-slot 5-star fill is
+            // spendable under useAll as well.
+            if (this.netCookUseAllIngredients)
+            {
+                return NetCookFiveStarSlotOutcome.NoOp;
+            }
+
+            if (!this.TryGetMonoBoolMember(slotObj, "filled", out bool filled) || !filled)
+            {
+                return NetCookFiveStarSlotOutcome.NoOp; // an empty slot belongs to the Universal top-up, not to this pass
+            }
+
+            if (!this.TryGetMonoInt32Member(slotObj, "filledMaterialStaticId", out int currentStaticId)
+                || currentStaticId <= 0)
+            {
+                return NetCookFiveStarSlotOutcome.NoOp;
+            }
+
+            this.TryGetMonoUInt32Member(slotObj, "filledMaterialNetId", out uint currentNetId);
+
+            if (currentStaticId == NetCookUniversalIngredientStaticId)
+            {
+                return NetCookFiveStarSlotOutcome.NoOp; // a Universal stand-in is not 5★ spending in the first place
+            }
+
+            // The game marks slots it will not let the player change (fixed recipe parts) — even the
+            // player's own panel cannot swap those, so no walk (the mod's or AutoFill's alternative)
+            // can demote one. The strict DEMAND math (max + move map) keeps fixed-5★-only recipes out
+            // of reach; with MIXED stock the demand math passes but price-based AutoFill can still
+            // pick a 5★ stack for the fixed part — so a proven-5★ fill here blocks the cook rather
+            // than letting the net channel consume it (2026-11-01 review, was a silent NoOp leak).
+            if (this.TryGetMonoBoolMember(slotObj, "canChange", out bool canChange) && !canChange)
+            {
+                return this.FailClosedNetCookSlotFromFiveStar(currentNetId, slotIndex, recipeId);
+            }
+
+            if (this.netCookSlotManualMode)
+            {
+                int wantStaticId = this.GetNetCookSlotPreference(recipeId, slotIndex);
+                if (wantStaticId > 0 && wantStaticId == currentStaticId)
+                {
+                    return NetCookFiveStarSlotOutcome.NoOp; // the user picked this kind — the pin wins even when it is 5★
+                }
+            }
+
+            List<uint> itemPins = null;
+            try
+            {
+                IntPtr getSlotMaterialsMethod = this.FindAuraMonoMethodOnHierarchy(cookingSystemClass, "GetSlotMaterials", 1);
+                IntPtr fillMethod = this.FindAuraMonoMethodOnHierarchy(cookingSystemClass, "FillMaterialInSlot", 3);
+                if (getSlotMaterialsMethod == IntPtr.Zero || fillMethod == IntPtr.Zero)
+                {
+                    return this.FailClosedNetCookSlotFromFiveStar(currentNetId, slotIndex, recipeId);
+                }
+
+                int slot = slotIndex;
+                IntPtr exc = IntPtr.Zero;
+                // Sized for the widest invoke below: GetSlotMaterials uses slot 0 only, but
+                // FillMaterialInSlot (3 args) writes args[0..2] — [1] here would write 16 bytes past
+                // the allocation and mono would read them (AGENTS §12 out-param slot rule; the
+                // TryFillNetCookSlotWithStaticId sibling allocates [3] for the same pair).
+                IntPtr* args = stackalloc IntPtr[3];
+                args[0] = (IntPtr)(&slot);
+                IntPtr itemListObj = auraMonoRuntimeInvoke(getSlotMaterialsMethod, cookingSystemObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || itemListObj == IntPtr.Zero)
+                {
+                    return this.FailClosedNetCookSlotFromFiveStar(currentNetId, slotIndex, recipeId);
+                }
+
+                // Pinned walk: BackpackItem is a struct — every enumerated element is a fresh mono box
+                // and the member reads below can trigger a moving sgen collection (TryFillNetCookSlotWithStaticId).
+                List<IntPtr> items = new List<IntPtr>(32);
+                itemPins = new List<uint>(32);
+                if (!this.TryEnumerateAuraMonoCollectionItems(itemListObj, items, itemPins))
+                {
+                    return this.FailClosedNetCookSlotFromFiveStar(currentNetId, slotIndex, recipeId);
+                }
+
+                // Slot fit is intrinsic to this candidate list: GetSlotMaterials is exactly what the
+                // game's own panel lists for THIS slot (specific id or category match, units already
+                // consumed by earlier filled slots subtracted) — so anything picked from it fills the
+                // slot by construction, and no separate fit check is needed.
+                int currentStar = -1;
+                uint bestNetId = 0U;
+                int bestStaticId = 0;
+                int bestStar = int.MaxValue;
+                uint universalNetId = 0U;
+
+                for (int i = 0; i < items.Count; i++)
+                {
+                    IntPtr itemObj = items[i];
+                    if (itemObj == IntPtr.Zero
+                        || !this.TryGetDirectBackpackItemStaticId(itemObj, out int staticId)
+                        || staticId <= 0
+                        || !this.TryGetDirectBackpackItemNetId(itemObj, out uint netId)
+                        || netId == 0U)
+                    {
+                        continue;
+                    }
+
+                    // A stack already drained by an earlier slot comes back with count 0 — only the
+                    // CURRENT fill may be seen at count 0 (its own unit is spent); anything else needs
+                    // a unit left to spend.
+                    this.TryGetDirectBackpackItemCount(itemObj, out int count);
+                    bool isCurrentFill = netId == currentNetId;
+                    if (!isCurrentFill && count < 1)
+                    {
+                        continue;
+                    }
+
+                    if (staticId == NetCookUniversalIngredientStaticId)
+                    {
+                        if (!isCurrentFill)
+                        {
+                            universalNetId = netId; // second-chance substitute, only if its toggle is on
+                        }
+
+                        continue;
+                    }
+
+                    // Canonical QC-first star (QualityComponent by netId, item fields only as the
+                    // fallback — the live dish proof: item-level starRate is 0 while QC carries the
+                    // real star). No star data at all = star 0 ("no quality"): spendable, and never
+                    // mistaken for 5★.
+                    if (!this.TryResolveAutoSellMonoItemStar(netId, itemObj, string.Empty, Math.Max(1, count), out int starRate))
+                    {
+                        starRate = 0;
+                    }
+
+                    if (isCurrentFill)
+                    {
+                        currentStar = starRate; // the stack AutoFill put into this slot (a fully drained
+                        // one is still listed with count 0 — same behaviour the fill walk relies on)
+                        continue;
+                    }
+
+                    if (starRate >= 5)
+                    {
+                        continue; // not a demotion target: 5★ for 5★ is no saving at all
+                    }
+
+                    if (starRate < bestStar)
+                    {
+                        bestStar = starRate;
+                        bestNetId = netId;
+                        bestStaticId = staticId;
+                    }
+                }
+
+                if (currentStar != 5)
+                {
+                    return NetCookFiveStarSlotOutcome.NoOp; // AutoFill already honored the policy (or the fill has no quality)
+                }
+
+                uint materialNetId = bestNetId;
+                int materialStaticId = bestStaticId;
+                bool viaUniversal = false;
+                if (materialNetId == 0U)
+                {
+                    // No <5★ stack fits. The strict hierarchy's second rung: the Universal Ingredient
+                    // — but only while its own toggle is on (the toggle governs automatic substitution;
+                    // stealing a Universal unit behind an OFF toggle would be its own kind of surprise).
+                    if (!this.netCookUseUniversalIngredient || universalNetId == 0U)
+                    {
+                        if (this.netCookPreferUnderFiveLoggedRecipes.Add(recipeId))
+                        {
+                            // Tier 1 (errors-to-log): a strict block must reach the file log without
+                            // MasterLogNetCook; the once-per-recipe set keeps it bounded.
+                            FeatureLog.Fail("NetCookQuality", "R3: only 5-star stock fits slot " + slotIndex + " of recipe " + recipeId
+                                + "; the cook is blocked to keep the 5-star stack (pin the kind by hand, or let"
+                                + " Universal Ingredient cover it, or switch the preference off to spend 5-star).");
+                        }
+
+                        return NetCookFiveStarSlotOutcome.Blocked;
+                    }
+
+                    materialNetId = universalNetId;
+                    materialStaticId = NetCookUniversalIngredientStaticId;
+                    viaUniversal = true;
+                    this.netCookUniversalDemotedSlots++;
+                }
+
+                exc = IntPtr.Zero;
+                args[0] = (IntPtr)(&slot);
+                args[1] = (IntPtr)(&materialNetId);
+                args[2] = (IntPtr)(&materialStaticId);
+                auraMonoRuntimeInvoke(fillMethod, cookingSystemObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    // The rewrite failed on the mono side — do NOT leave the 5★ fill as the fallback
+                    // under a strict toggle; the caller fails this prepare and the stove retries.
+                    return NetCookFiveStarSlotOutcome.Blocked;
+                }
+
+                if (viaUniversal)
+                {
+                    this.NetCookDiagLog("R3 substituted slot=" + slotIndex + " 5*static=" + currentStaticId
+                        + " -> Universal Ingredient net=" + materialNetId, true);
+                }
+                else
+                {
+                    this.NetCookDiagLog("R3 demoted slot=" + slotIndex + " 5*static=" + currentStaticId
+                        + " -> " + bestStar + "*static=" + bestStaticId + " net=" + bestNetId, true);
+                }
+
+                return NetCookFiveStarSlotOutcome.Demoted;
+            }
+            catch (Exception ex)
+            {
+                this.NetCookLog("R3 slot demotion failed: " + ex.GetType().Name + ": " + ex.Message);
+                return this.FailClosedNetCookSlotFromFiveStar(currentNetId, slotIndex, recipeId);
+            }
+            finally
+            {
+                if (itemPins != null)
+                {
+                    FreeAuraMonoPins(itemPins);
+                }
+            }
         }
 
         // Generalisation of TryFillNetCookSlotWithUniversalIngredient: same walk, any staticId.

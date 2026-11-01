@@ -62,6 +62,13 @@ namespace HeartopiaMod
                 this.netCookTargets.Clear();
             }
 
+            // §2.2: the run's best completed quality is per-run state — a new start starts a new run.
+            // The generation bumps with it: collect jobs still in flight from the previous run (or
+            // still settling after a stop) are fenced out of THIS run's counters and drain trigger
+            // (review 2026-11-01; see netCookRunGeneration in the ledger file).
+            this.netCookRunBestCompletedQuality = 0;
+            this.netCookRunGeneration++;
+
             if (!this.HasNetCookContext() && !this.TryCaptureNetCookFromCurrentTarget())
             {
                 if (string.IsNullOrWhiteSpace(this.netCookStatus))
@@ -91,6 +98,51 @@ namespace HeartopiaMod
                 this.netCookStatus = compatibilityStatus;
                 this.AddMenuNotification(compatibilityStatus, new Color(1f, 0.55f, 0.55f));
                 return;
+            }
+
+            // Latch freshness (review 2026-11-01): the Source A cache is otherwise filled only by
+            // the UGUI picker path or a completed collect job — neither is guaranteed before the
+            // first START after login (the IMGUI tab never opens the picker). With a cold cache the
+            // latch below would engage 5-star mode on a recipe the Collection already records at
+            // 5-star, the exact re-farming Q5/Q7 forbids. This is the §2.1 once-per-start moment
+            // (sub-1 ms sweep, §1.8 row 11), on a path that already does AuraMono work at the
+            // strict start gate below.
+            if (this.netCookCookUntilFiveStarDish)
+            {
+                this.MarkNetCookCollectionStarDirty();
+                this.TryRefreshNetCookCollectionStars();
+            }
+
+            // R2 (§4.1): latch the mode contract for the whole start sequence — the warehouse-move
+            // batch sizing below and the target seeding in TryCompleteNetCookStart both read it.
+            // engaged = the checkbox AND the §2.3 record not already 5★ for the selected recipe; a
+            // mid-run Source A refresh must not retroactively change a contract already running, and
+            // the 5★ completion itself drains the run through the collect diff (§4.3) regardless.
+            this.netCookFiveStarModeEngaged = this.netCookCookUntilFiveStarDish
+                && !this.NetCookRecipeFiveStarKnown(this.netCookRecipeId);
+
+            // R3 strict (requester live test 2026-11-01): with the preference ON, "Ingredients max"
+            // counts <5★ stock only (TryComputeNetCookMaxQuantity's strict branch), and a zero
+            // headroom means the recipe cannot cook without spending 5★ — refuse the start right
+            // here, before moving stacks or building the recipe detail, and say exactly why. The
+            // leak this gate closes: a recipe whose fixed (canChange=false) parts have only 5★ stock
+            // — the demotion walk cannot swap game-fixed slots, and neither can the player's own
+            // panel, so without this gate the net channel would consume the 5★ stack anyway.
+            // Under "Use All Ingredients" the preference yields — spending 5-star stock is
+            // sanctioned, the same rule as the headroom, deficit and demotion walk — so the refusal
+            // stands down too (and the max it consults counts 5-star again, see the strict branch).
+            if (this.netCookPreferUnderFiveIngredients && !this.netCookUseAllIngredients)
+            {
+                this.RefreshNetCookMaxCookQuantity(true);
+                if (this.netCookMaxCookQuantity <= 0)
+                {
+                    string strictStartStatus = "Prefer Below-5 Ingredients: no below-5-star stock for this recipe.";
+                    this.netCookStatus = strictStartStatus;
+                    this.AddMenuNotification(strictStartStatus, new Color(1f, 0.55f, 0.55f));
+                    // Tier 1 (errors-to-log): a refused start must be diagnosable without MasterLogNetCook.
+                    FeatureLog.Fail("NetCookQuality", strictStartStatus + " recipe=" + this.netCookRecipeId);
+                    return;
+                }
             }
 
             bool deferredStartAfterWarehouseMove = false;
@@ -145,8 +197,31 @@ namespace HeartopiaMod
             this.netCookCompletedDishCount = 0;
             this.netCookCommittedDishCount = 0;
             this.netCookUniversalSlotsFilled = 0;
+            this.netCookUniversalDemotedSlots = 0;
+            // netCookFiveStarModeEngaged was latched earlier in StartNetCookInternal (before the
+            // warehouse move) — the mode contract is fixed for the whole start sequence.
             float now = Time.unscaledTime;
             this.PrimeNetCookTargetsForStart(now);
+
+            // §4.2 stove memory (requester 2026-11-01): the batch claims its stove SET here, in the
+            // capture/registry order Prime just built — deterministic at start, and every freed member
+            // stove gets the run's next dish itself instead of a fresh random pick from the captured
+            // field. batchCount == 0 stays the unlimited old behavior (no set semantics).
+            this.netCookBatchStoveNetIds.Clear();
+            if (this.netCookFiveStarModeEngaged && this.netCookBatchCount > 0)
+            {
+                int claimed = 0;
+                for (int i = 0; i < this.netCookTargets.Count && claimed < this.netCookBatchCount; i++)
+                {
+                    NetCookTargetContext member = this.netCookTargets[i];
+                    if (member != null && member.LevelObjectNetId != 0UL)
+                    {
+                        this.netCookBatchStoveNetIds.Add(member.LevelObjectNetId);
+                        claimed++;
+                    }
+                }
+            }
+
             this.SeedNetCookCommittedDishCountFromActiveTargets();
             this.netCookMaterialNetIds.Clear();
             this.netCookMaterialNetIds.AddRange(previewMaterials);
@@ -320,6 +395,12 @@ namespace HeartopiaMod
 
             bool wasEnabled = this.netCookEnabled;
             this.netCookEnabled = false;
+            this.netCookFiveStarModeEngaged = false;
+            // Fence in-flight collect jobs to the generation of the run that just ended: their diff
+            // still completes and credits the ledger, but they feed no run counters and can never
+            // drain whatever run starts next (review 2026-11-01).
+            this.netCookRunGeneration++;
+            this.netCookBatchStoveNetIds.Clear();
             this.netCookDrainAfterIngredientsRunOut = false;
             this.netCookDrainReason = null;
             this.netCookStatus = reason ?? "Stopped";
@@ -386,6 +467,10 @@ namespace HeartopiaMod
                     {
                         if (this.TryInvokeNetCookInteract())
                         {
+                            // Baseline census right after a successful send: the interact is an async
+                            // web request, so the collected dish cannot be in the bag yet — its
+                            // arrival surfaces as a count delta on this snapshot (ledger file header).
+                            this.BeginNetCookQualityCollectJob(target);
                             collected++;
                             target.Phase = 0;
                             target.ContinuePulses = 0;
@@ -579,7 +664,9 @@ namespace HeartopiaMod
             bool attempted = false;
             int readyTargets = 0;
             int processedTargets = 0;
-            float interval = Mathf.Clamp(this.netCookInterval, 0.25f, 10f);
+            // COOK DELAY slider deleted 2026-11-01 (requester): its only live use was the
+            // collect→next-prepare pause below, where the 0.35 s floor always dominated at the slider's
+            // minimum AND at its old default. The loop now permanently runs that minimum.
             this.SortNetCookTargetsForAction(this.netCookTargets, now);
 
             for (int i = 0; i < this.netCookTargets.Count; i++)
@@ -627,7 +714,12 @@ namespace HeartopiaMod
 
                 if (target.Phase == 0)
                 {
-                    if (this.IsNetCookCookQuantityBudgetSpent())
+                    // While the 5★ mode is engaged the batch gate replaces the quantity budget here
+                    // (and only here); the quantity-drain sub-branches below no-op in that mode
+                    // because IsNetCookCookQuantityCommitFull refuses it (§4.2).
+                    if (this.netCookFiveStarModeEngaged
+                        ? this.IsNetCookBatchFull()
+                        : this.IsNetCookCookQuantityBudgetSpent())
                     {
                         // Confirmed dishes are what end the run; a prepare still in flight only stops
                         // us handing out more. If the server rejects it the slot comes back and this
@@ -651,6 +743,29 @@ namespace HeartopiaMod
                             continue;
                         }
 
+                        target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
+                        this.netCookTargets[i] = target;
+                        if (processedTargets >= NetCookMaxActionsPerTick)
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+
+                    // Stove memory (§4.2, requester 2026-11-01): while the 5★ mode is engaged,
+                    // prepares land only on stoves the batch claimed (prefilled in
+                    // TryCompleteNetCookStart) — a freed member stove re-cooks the run's next dish on
+                    // ITSELF, instead of the loop picking whatever idle stove came due first. An idle
+                    // non-member in the captured field just keeps its poll slot. A non-member is
+                    // admitted only while the live member count sits below the batch size — that is
+                    // the replacement path for a member stove lost mid-run (despawn, cleanup, memory
+                    // rebuild). Registration happens on the successful send, not here, so a rejected
+                    // prepare cannot permanently claim a batch seat.
+                    if (this.netCookFiveStarModeEngaged
+                        && this.netCookBatchCount > 0
+                        && !this.netCookBatchStoveNetIds.Contains(target.LevelObjectNetId)
+                        && this.CountLiveNetCookBatchMembers() >= this.netCookBatchCount)
+                    {
                         target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
                         this.netCookTargets[i] = target;
                         if (processedTargets >= NetCookMaxActionsPerTick)
@@ -712,6 +827,15 @@ namespace HeartopiaMod
                         this.NetCookDiagLog("prepare SENT stove=" + target.CookerNetId
                             + " lo=" + target.LevelObjectNetId
                             + " materials=" + this.netCookMaterialNetIds.Count);
+                        // §4.2 stove memory: the successful send claims the batch seat — a stove that
+                        // admitted a non-member (replacement path) joins the set here, and a rejected
+                        // prepare leaves no seat behind.
+                        if (this.netCookFiveStarModeEngaged
+                            && this.netCookBatchCount > 0
+                            && target.LevelObjectNetId != 0UL)
+                        {
+                            this.netCookBatchStoveNetIds.Add(target.LevelObjectNetId);
+                        }
                         target.Phase = 1;
                         target.ContinuePulses = 0;
                         target.IdleRetries = 0;
@@ -808,6 +932,10 @@ namespace HeartopiaMod
                                 this.RecordNetCookPrepareCommitted();
                             }
 
+                            // The status really is 1/2 here — record it like the status-0 branch does.
+                            // The occupancy predicate and every lastStatus= diagnostic read this field,
+                            // and leaving it at the prepare-time -1 made a confirmed dish look free.
+                            target.LastStatus = cookingStatus;
                             target.IdleRetries = 0;
                             target.LastCookCommandAt = now;
                             target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
@@ -844,11 +972,12 @@ namespace HeartopiaMod
                             this.LogNetCookDishOutcome(target, cookingStatus, resultRecipeId, foodQuality, now, "cooking");
                             if (this.TryInvokeNetCookInteract())
                             {
+                                this.BeginNetCookQualityCollectJob(target);
                                 this.ResetNetCookTargetForNextDish(target, now);
                                 target.SentCount++;
                                 this.netCookSentCount++;
                                 this.RecordNetCookCompletedDish();
-                                target.NextActionAt = now + Mathf.Max(NetCookCollectRestartDelaySeconds, interval * 0.2f);
+                                target.NextActionAt = now + NetCookCollectRestartDelaySeconds;
                                 readyTargets++;
                             }
                             else
@@ -864,13 +993,19 @@ namespace HeartopiaMod
                     }
                     else
                     {
-                        if (now - target.LastStatusActionAt > 3f)
+                        float failGate = GetNetCookStatusPollFailGateSeconds(target);
+                        if (now - target.LastStatusActionAt > failGate)
                         {
                             target.LastStatusActionAt = now;
-                            this.NetCookLog("Status poll unavailable for stove " + target.CookerNetId + ": " + statusDetails);
+                            target.StatusPollFailStreak++;
+                            if (ShouldLogNetCookStatusPollFail(target, statusDetails))
+                            {
+                                this.NetCookLog("Status poll unavailable for stove " + target.CookerNetId + ": " + statusDetails);
+                            }
+                            target.LastStatusPollFailDetails = statusDetails;
                         }
                         this.netCookStatus = "Waiting for cooking status on stove " + target.CookerNetId + ".";
-                        target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
+                        target.NextActionAt = now + Mathf.Max(this.GetNetCookStatusPollDelay(target), failGate);
                     }
                 }
 
@@ -1049,6 +1184,7 @@ namespace HeartopiaMod
                         }
                         else if (this.TryInvokeNetCookInteractAfterApplying(target))
                         {
+                            this.BeginNetCookQualityCollectJob(target);
                             target.Phase = 2;
                             target.LastStatus = -1;
                             target.LastStatusActionAt = now;
@@ -1074,10 +1210,16 @@ namespace HeartopiaMod
                 }
                 else
                 {
-                    if (now - target.LastStatusActionAt > 3f)
+                    float failGate = GetNetCookStatusPollFailGateSeconds(target);
+                    if (now - target.LastStatusActionAt > failGate)
                     {
                         target.LastStatusActionAt = now;
-                        this.NetCookLog("Auto assist status poll unavailable for stove " + target.CookerNetId + ": " + statusDetails);
+                        target.StatusPollFailStreak++;
+                        if (ShouldLogNetCookStatusPollFail(target, statusDetails))
+                        {
+                            this.NetCookLog("Auto assist status poll unavailable for stove " + target.CookerNetId + ": " + statusDetails);
+                        }
+                        target.LastStatusPollFailDetails = statusDetails;
                         if (this.netCookStatusDiagEnabled)
                         {
                             bool burnerAlive = this.TryGetAuraMonoEntityObjectByNetId(target.CookerNetId, out IntPtr burnerObj) && burnerObj != IntPtr.Zero;
@@ -1100,7 +1242,7 @@ namespace HeartopiaMod
                     {
                         this.netCookStatus = "Waiting for active cooking on stove " + target.CookerNetId + ".";
                     }
-                    target.NextActionAt = now + this.GetNetCookStatusPollDelay(target);
+                    target.NextActionAt = now + Mathf.Max(this.GetNetCookStatusPollDelay(target), failGate);
                 }
 
                 this.netCookAssistTargets[i] = target;
@@ -1153,6 +1295,38 @@ namespace HeartopiaMod
         {
             uint cookerNetId = target != null ? target.CookerNetId : 0U;
             return NetCookStatusPollDelaySeconds + (cookerNetId % 7U) * 0.03f;
+        }
+
+        // A stove with NO status source at all (streamed-out view, no lo-cache entry, no live
+        // component) does not become readable by polling it faster — widen instead of hammer:
+        // 3 s → 6 → 12 → 30 s while the failure streak lasts, collapsing instantly on the first
+        // successful read (the streak reset happens in the TryGetNetCookTargetCookingStatus wrapper).
+        // Nothing waits on the backoff: status of OUR dishes arrives through events (lo-cache fed by
+        // the OnUpdateCookerStatus detour, TrustedCollected via CookResultEvent), and those wake a
+        // target on their own schedule.
+        private static float GetNetCookStatusPollFailGateSeconds(NetCookTargetContext target)
+        {
+            if (target == null)
+            {
+                return 3f;
+            }
+
+            switch (target.StatusPollFailStreak)
+            {
+                case 0: return 3f;
+                case 1: return 6f;
+                case 2: return 12f;
+                default: return 30f;
+            }
+        }
+
+        // Tier-1 visibility: the first failure of a streak always logs; a repeat logs again only when
+        // the reason text actually changed (log-failures-once, AGENTS §9).
+        private static bool ShouldLogNetCookStatusPollFail(NetCookTargetContext target, string statusDetails)
+        {
+            return target != null
+                && (target.StatusPollFailStreak <= 1
+                    || !string.Equals(target.LastStatusPollFailDetails, statusDetails, StringComparison.Ordinal));
         }
 
         private int GetNetCookActionPriority(NetCookTargetContext target)
@@ -1230,6 +1404,13 @@ namespace HeartopiaMod
 
         private bool IsNetCookCookQuantityCommitFull()
         {
+            // No total cap exists while the 5★ mode is engaged (§4.2): the batch gate is the only
+            // issuance gate, and only a 5★ completion or ingredient exhaustion may drain the run.
+            if (this.netCookFiveStarModeEngaged)
+            {
+                return false;
+            }
+
             return this.HasNetCookCookQuantityLimit()
                 && this.netCookCommittedDishCount >= this.netCookCookQuantity;
         }
@@ -1259,6 +1440,11 @@ namespace HeartopiaMod
         // draining until the dishes are really confirmed.
         private bool IsNetCookCookQuantityBudgetSpent()
         {
+            if (this.netCookFiveStarModeEngaged)
+            {
+                return false;
+            }
+
             return this.HasNetCookCookQuantityLimit()
                 && this.netCookCommittedDishCount + this.CountNetCookInFlightPrepares() >= this.netCookCookQuantity;
         }
@@ -1281,7 +1467,10 @@ namespace HeartopiaMod
         private void SeedNetCookCommittedDishCountFromActiveTargets()
         {
             this.netCookCommittedDishCount = 0;
-            if (!this.HasNetCookCookQuantityLimit())
+            // In the 5★ mode the seed still runs with no quantity limit: stoves already cooking OUR
+            // dish must be marked PrepareConfirmed so they count as batch-active and are attended,
+            // not re-prepared over (§4.2). The seed-time quantity drain below no-ops in that mode.
+            if (!this.HasNetCookCookQuantityLimit() && !this.netCookFiveStarModeEngaged)
             {
                 return;
             }
@@ -1344,7 +1533,10 @@ namespace HeartopiaMod
                 return Math.Max(1, this.netCookMaxCookQuantity);
             }
 
-            if (!this.HasNetCookCookQuantityLimit())
+            // The 5★ mode has no total dish cap — pulling only "quantity" stacks into the bag would
+            // strangle the replenishing loop into a false "ingredients ran out" drain within a couple
+            // of cooks. Move what the stoves can actually hold, like the unlimited branch does.
+            if (!this.HasNetCookCookQuantityLimit() || this.netCookFiveStarModeEngaged)
             {
                 return Math.Max(1, this.netCookMaxCookQuantity);
             }
@@ -1354,6 +1546,18 @@ namespace HeartopiaMod
 
         private string FormatNetCookActiveStatus()
         {
+            if (this.netCookFiveStarModeEngaged)
+            {
+                // Plan §4.4: "Net mass cook: 3 cooking / batch 4, cooked 11, best 3*." — the best is
+                // netCookRunBestCompletedQuality (this run's witnessed outcomes only, §4.3-2); 0 =
+                // nothing completed yet in this run, so the segment is simply absent.
+                string best = this.netCookRunBestCompletedQuality > 0
+                    ? (", best " + this.netCookRunBestCompletedQuality + "*")
+                    : string.Empty;
+                return "Net mass cook: " + this.CountNetCookActiveOurDishes() + " cooking / batch "
+                    + this.netCookBatchCount + ", cooked " + this.netCookCompletedDishCount + best + ".";
+            }
+
             string cookedLabel = this.HasNetCookCookQuantityLimit()
                 ? ("cooked " + this.netCookCompletedDishCount + "/" + this.netCookCookQuantity)
                 : ("cooked " + this.netCookCompletedDishCount);
@@ -1558,6 +1762,9 @@ namespace HeartopiaMod
             this.LogNetCookDishOutcome(target, cookingStatus, resultRecipeId, foodQuality, now, "adopted dish");
             if (this.TryInvokeNetCookInteract())
             {
+                // Adopted-dish collect: Begin self-gates on PrepareConfirmed, so this credits only
+                // dishes the mod itself committed on this stove; adopted foreign dishes stay out.
+                this.BeginNetCookQualityCollectJob(target);
                 this.ResetNetCookTargetForNextDish(target, now);
                 target.SentCount++;
                 this.netCookSentCount++;
@@ -1652,13 +1859,19 @@ namespace HeartopiaMod
                     return true;
                 }
 
-                if (now - target.LastStatusActionAt > 3f)
+                float failGate = GetNetCookStatusPollFailGateSeconds(target);
+                if (now - target.LastStatusActionAt > failGate)
                 {
                     target.LastStatusActionAt = now;
-                    this.NetCookLog("Drain status poll unavailable for stove " + target.CookerNetId + ": " + statusDetails);
+                    target.StatusPollFailStreak++;
+                    if (ShouldLogNetCookStatusPollFail(target, statusDetails))
+                    {
+                        this.NetCookLog("Drain status poll unavailable for stove " + target.CookerNetId + ": " + statusDetails);
+                    }
+                    target.LastStatusPollFailDetails = statusDetails;
                 }
                 this.netCookStatus = "Stopping after ingredients run out: waiting for stove " + target.CookerNetId + ".";
-                target.NextActionAt = now + 0.75f;
+                target.NextActionAt = now + Mathf.Max(0.75f, failGate);
                 this.netCookTargets[targetIndex] = target;
                 return false;
             }
@@ -1735,6 +1948,7 @@ namespace HeartopiaMod
 
                 if (this.TryInvokeNetCookInteract())
                 {
+                    this.BeginNetCookQualityCollectJob(target);
                     target.Phase = 4;
                     target.LastStatusActionAt = now;
                     target.SentCount++;
@@ -1872,6 +2086,11 @@ namespace HeartopiaMod
                     target.TrustedCollected = true;
                 }
             }
+
+            // Ledger settle window: a TakeFood for a stove we sent a collect to tightens the job's
+            // due time from the blind 8 s to the confirm-relative settle. Events without a job are
+            // neighbour collects — the job gate is our own send, so this credits nothing of its own.
+            this.ConfirmNetCookQualityCollectJob(levelObjectNetId);
         }
 
         // Runs on the Unity main thread (event drain). Reads CookingComponentData scalars by offset.
@@ -3616,7 +3835,22 @@ namespace HeartopiaMod
                 && (now - target.LastCookCommandAt) < NetCookRemoteActiveCookGuardSeconds;
         }
 
+        // Every successful status read — from any poll path (main / auto-assist / drain) — collapses
+        // the failure backoff, so a stove that streams back in is polled at the normal rate from its
+        // very next tick. Failures keep the streak; the gate widening happens only across consecutive
+        // failed reads.
         private bool TryGetNetCookTargetCookingStatus(NetCookTargetContext target, out int cookingStatus, out int resultRecipeId, out int foodQuality, out string status)
+        {
+            bool statusOk = this.TryGetNetCookTargetCookingStatusCore(target, out cookingStatus, out resultRecipeId, out foodQuality, out status);
+            if (statusOk && target != null)
+            {
+                target.StatusPollFailStreak = 0;
+                target.LastStatusPollFailDetails = null;
+            }
+            return statusOk;
+        }
+
+        private bool TryGetNetCookTargetCookingStatusCore(NetCookTargetContext target, out int cookingStatus, out int resultRecipeId, out int foodQuality, out string status)
         {
             cookingStatus = -1;
             resultRecipeId = 0;
@@ -3769,6 +4003,19 @@ namespace HeartopiaMod
         // recognises as ownership — the two never send to the same burner for the same dish.
         private void ProcessNetCookLoop()
         {
+            // Ledger jobs are consumed at the very top, before the two loop guards: a collect diff
+            // must complete even when the run stopped right after the collect — netCookEnabled is
+            // already false by then and neither loop below would ever run again. Not a warm-up poll
+            // (AGENTS §1): it does nothing unless a game event armed a job, and every job
+            // self-expires within its ceiling. The ledger seed is deliberately NOT driven from here
+            // (ConsumeNetCookQualityLedgerJobs does not handle it): the seed runs on the world-ready
+            // callback plus the cache-ready inline attempt (AGENTS §1) — the seedPending term in
+            // this guard was a misleading no-op condition (review 2026-11-01).
+            if (this.IsWorldReady && this.netCookQualityCollectJobs.Count > 0)
+            {
+                this.ConsumeNetCookQualityLedgerJobs();
+            }
+
             bool massCook = this.netCookEnabled;
             bool assist = this.netCookAutoAssist;
             if (!massCook && !assist)
@@ -4758,7 +5005,10 @@ namespace HeartopiaMod
                 // Bailing out here is deliberate: a half-filled payload is always rejected, so failing
                 // BEFORE the send leaves the target to retry (or drain with a real "Missing ingredients"
                 // reason) instead of burning a prepare on a list the server cannot accept.
-                if (this.netCookUseUniversalIngredient)
+                // The R3 preference re-applies through the same walk (its demotion gate lives inside):
+                // the InitCookingRecipeDetail above just re-ran AutoFill over the slots, so without
+                // this the AuraMono channel would cook 5★ parts straight past a strict preference.
+                if (this.netCookUseUniversalIngredient || this.netCookPreferUnderFiveIngredients)
                 {
                     List<uint> wireMaterials = new List<uint>(8);
                     if (!this.TryResolveNetCookRecipeSlotMaterials(cookingSystemObj, cookingSystemClass, detailObj, wireMaterials, out string slotStatus))
@@ -5663,6 +5913,7 @@ namespace HeartopiaMod
                 }
 
                 this.NetCookLog("CookingSystem AuraMono recipe cache ready count=" + this.netCookRecipeEntries.Count + " first=[" + string.Join(", ", this.netCookRecipeEntries.Take(Math.Min(6, this.netCookRecipeEntries.Count)).Select(kv => kv.Key + ":" + kv.Value).ToArray()) + "]");
+                this.MarkNetCookLedgerSeedPending(); // §2.2-b: the recipe list exists now — seed the ledger once
                 return true;
             }
             catch (Exception ex)
@@ -7373,7 +7624,11 @@ namespace HeartopiaMod
                 LastCookCommandAt = source.LastCookCommandAt,
                 NextActionAt = source.NextActionAt,
                 HasWorldPosition = source.HasWorldPosition,
-                WorldPosition = source.WorldPosition
+                WorldPosition = source.WorldPosition,
+                // Carry the poll-failure streak over so the clone's first status failure is not logged
+                // again as a fresh one.
+                StatusPollFailStreak = source.StatusPollFailStreak,
+                LastStatusPollFailDetails = source.LastStatusPollFailDetails
             };
         }
 
@@ -9522,6 +9777,106 @@ namespace HeartopiaMod
             this.netCookCookQuantityInput = "1";
         }
 
+        // ---- R2 "Cook Until 5-Star Dish" (plan §4). ----
+        // Mode state for the UI: live evaluation while idle (checkbox AND the §2.3 record of the
+        // current selection — the checkbox is hidden for a known-5★ recipe and the mode never
+        // engages for one), latched from run start while cooking — a mid-run §2.1 Source A refresh
+        // must not retroactively change the contract of a run that started on an unknown recipe.
+        // The 5★ completion itself drains the run through the collect diff (§4.3), never this latch.
+        private bool IsNetCookFiveStarModeActive()
+        {
+            if (this.netCookEnabled)
+            {
+                return this.netCookFiveStarModeEngaged;
+            }
+
+            return this.netCookCookUntilFiveStarDish
+                && !this.NetCookRecipeFiveStarKnown(this.netCookRecipeId);
+        }
+
+        // Checkbox visibility (§4.1): hidden while the SELECTED recipe's record already shows 5★.
+        // Record-first per Q7 — inventory never re-opens it; unknown (0) shows.
+        private bool IsNetCookFiveStarToggleVisible()
+        {
+            return !this.NetCookRecipeFiveStarKnown(this.netCookRecipeId);
+        }
+
+        // Mirror shape of SyncNetCookCookQuantityFromInput: parse, negative → default, normalize the
+        // string back. 0 is legal and means unlimited concurrency (the "0 = unlimited" habit moved
+        // from the quantity cap to the batch cap).
+        private void SyncNetCookBatchCountFromInput()
+        {
+            if (!int.TryParse(this.netCookBatchCountInput, out int parsed) || parsed < 0)
+            {
+                parsed = 4;
+            }
+
+            this.netCookBatchCount = parsed;
+            this.netCookBatchCountInput = this.netCookBatchCount.ToString();
+        }
+
+        // OUR dishes cooking right now (plan §4.2): an occupied stove whose dish this run confirmed.
+        // Neighbour/adopted dishes never carry PrepareConfirmed, so they do not eat the batch. A
+        // scan, deliberately NOT committed-completed: seeded already-cooking dishes are committed at
+        // start but their completion never reaches netCookCompletedDishCount (the adopted-dish rule),
+        // and counter arithmetic would keep a permanent phantom dish that jams the batch forever.
+        private int CountNetCookActiveOurDishes()
+        {
+            int active = 0;
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                NetCookTargetContext target = this.netCookTargets[i];
+                if (target == null || !target.PrepareConfirmed)
+                {
+                    continue;
+                }
+
+                // Phase first, occupancy second. The live pass (2026-11-01) caught the occupancy
+                // alone being insufficient: a dish confirmed at status Preparing/Cooking sits in
+                // Phase 2 with PrepareInFlight already cleared, and the status 1/2 branch used to
+                // leave LastStatus at -1 — so every confirmed dish read as "not occupied" and the
+                // gate released a second wave of prepares (5 → 10 stoves observed). Any Phase >= 1
+                // with PrepareConfirmed is an in-progress OUR dish; Phase 0 confirmed cases (the
+                // start-time seed of already-cooking stoves) still land on the occupancy check.
+                // A collected/reset target is Phase 0 with LastStatus -1 and counts neither.
+                if (target.Phase >= 1 || this.IsNetCookTargetOccupiedWithDish(target))
+                {
+                    active++;
+                }
+            }
+
+            return active;
+        }
+
+        // The concurrency gate in this mode — the same lesson as the old batch-overrun bug: in-flight
+        // prepares are already spoken for and must count. batchCount == 0 = unlimited: occupy every
+        // captured stove, matching the legacy "0 = unlimited" habit.
+        private bool IsNetCookBatchFull()
+        {
+            return this.netCookBatchCount > 0
+                && this.CountNetCookActiveOurDishes() + this.CountNetCookInFlightPrepares() >= this.netCookBatchCount;
+        }
+
+        // Members still living in the target list. Entries the set keeps for stoves that left the
+        // list (permanent-memory rebuild, cleanup, despawn) are filtered out here rather than being
+        // hunted at every removal site — a dropped member lowers this count and the admission rule
+        // lets one replacement in, so a lost stove never shrinks the batch permanently.
+        private int CountLiveNetCookBatchMembers()
+        {
+            int live = 0;
+            for (int i = 0; i < this.netCookTargets.Count; i++)
+            {
+                NetCookTargetContext target = this.netCookTargets[i];
+                if (target != null && target.LevelObjectNetId != 0UL
+                    && this.netCookBatchStoveNetIds.Contains(target.LevelObjectNetId))
+                {
+                    live++;
+                }
+            }
+
+            return live;
+        }
+
         private void RefreshNetCookMaxCookQuantity(bool force = false)
         {
             if (this.netCookRecipeId <= 0)
@@ -9696,11 +10051,35 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // R3 strict (requester live test 2026-11-01, supersedes the plan's "v1 counts stock
+            // regardless of star" deferral): with the preference ON the max answers "how many dishes
+            // can this cook WITHOUT spending a 5★ stack" — 5★ stock simply does not count, except
+            // kinds the player pinned by hand (the pin is their own decision to spend them). The
+            // Universal Ingredient extension below already handles the sanctioned substitute.
+            // One strict rule (review 2026-11-01): "Use All Ingredients" is an explicit whole-bag
+            // instruction that sanctions spending 5-star stock just like a manual pin, so it exempts
+            // the strict count everywhere in the chain — headroom here, the move-map deficit, the
+            // demotion walk and the start gate. Half-exempting useAll (move map only) made the two
+            // shipped toggles contradict each other: 5-star stacks moved into the bag were then
+            // Blocked at fill time, or counted as headroom the walk refused to spend.
+            bool strictUnderFive = this.netCookPreferUnderFiveIngredients && !this.netCookUseAllIngredients;
+            HashSet<int> strictExempt = null;
+            if (strictUnderFive)
+            {
+                strictExempt = new HashSet<int>();
+                Dictionary<int, int> pinnedCounts = new Dictionary<int, int>();
+                this.CollectNetCookPinnedStaticIdCounts(recipeId, pinnedCounts);
+                foreach (int pinnedStaticId in pinnedCounts.Keys)
+                {
+                    strictExempt.Add(pinnedStaticId);
+                }
+            }
+
             Dictionary<int, int> totalsByStaticId = new Dictionary<int, int>();
-            this.AggregateNetCookIngredientCounts(NetCookBackpackStorageType, totalsByStaticId);
+            this.AggregateNetCookIngredientCounts(NetCookBackpackStorageType, totalsByStaticId, strictUnderFive, strictExempt);
             if (includeWarehouse)
             {
-                this.AggregateNetCookIngredientCounts(NetCookWarehouseStorageType, totalsByStaticId);
+                this.AggregateNetCookIngredientCounts(NetCookWarehouseStorageType, totalsByStaticId, strictUnderFive, strictExempt);
             }
 
             this.BuildNetCookDemands(requirements, out Dictionary<int, int> specificPerDish, out Dictionary<int, int> categoryPerDish);
@@ -10027,17 +10406,24 @@ namespace HeartopiaMod
             return this.TryGetMonoIntMember(slotObj, "materialType", out materialType) && materialType >= 0;
         }
 
-        private void AggregateNetCookIngredientCounts(int storageType, Dictionary<int, int> totalsByStaticId)
+        private void AggregateNetCookIngredientCounts(int storageType, Dictionary<int, int> totalsByStaticId,
+            bool strictUnderFive = false, HashSet<int> strictExemptStaticIds = null)
         {
             if (totalsByStaticId == null)
             {
                 return;
             }
 
-            this.AggregateNetCookIngredientCountsAuraMono(storageType, totalsByStaticId);
+            this.AggregateNetCookIngredientCountsAuraMono(storageType, totalsByStaticId, strictUnderFive, strictExemptStaticIds);
         }
 
-        private unsafe void AggregateNetCookIngredientCountsAuraMono(int storageType, Dictionary<int, int> totalsByStaticId)
+        // strictUnderFive (R3, requester 2026-11-01): do not count 5★ stacks toward headroom — the
+        // preference refuses to spend them, so the max that counts them lies. The Universal Ingredient
+        // is exempt (its star is not an ingredient 5★), and so are manually pinned kinds (the "unless
+        // manually selected" half: a pin is the player spending the 5★ themselves). Locked stacks stay
+        // out on their own gate.
+        private unsafe void AggregateNetCookIngredientCountsAuraMono(int storageType, Dictionary<int, int> totalsByStaticId,
+            bool strictUnderFive, HashSet<int> strictExemptStaticIds)
         {
             try
             {
@@ -10114,6 +10500,21 @@ namespace HeartopiaMod
                             count = 1;
                         }
 
+                        // Star via the canonical AutoSell chain (QualityComponent by netId first, item
+                        // fields only as fallback) — live proof 2026-11-01: the item-level starRate read
+                        // returns 0 for stacks whose real star lives on the QualityComponent (cooked
+                        // dishes proved it; quality fish/crops carry it the same way), so an
+                        // item-fields-only read let every 5★ stack slip through the strict filter and
+                        // "Ingredients max" kept quoting 1.
+                        if (strictUnderFive && staticId != NetCookUniversalIngredientStaticId
+                            && (strictExemptStaticIds == null || !strictExemptStaticIds.Contains(staticId))
+                            && this.TryGetDirectBackpackItemNetId(itemObj, out uint stackNetId)
+                            && this.TryResolveAutoSellMonoItemStar(stackNetId, itemObj, string.Empty, Math.Max(1, count), out int starRate)
+                            && starRate >= 5)
+                        {
+                            continue; // R3 strict headroom: a 5★ stack is not spendable stock
+                        }
+
                         if (totalsByStaticId.TryGetValue(staticId, out int existing))
                         {
                             totalsByStaticId[staticId] = existing + count;
@@ -10144,7 +10545,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryBuildNetCookWarehouseMoveMap(requirements, cookQuantity, out Dictionary<uint, int> moveMap, out string buildStatus))
+            if (!this.TryBuildNetCookWarehouseMoveMap(requirements, cookQuantity, useAll, out Dictionary<uint, int> moveMap, out string buildStatus))
             {
                 status = buildStatus;
                 return false;
@@ -10191,7 +10592,7 @@ namespace HeartopiaMod
             return true;
         }
 
-        private unsafe bool TryBuildNetCookWarehouseMoveMap(List<NetCookIngredientRequirement> requirements, int cookQuantity, out Dictionary<uint, int> moveMap, out string status)
+        private unsafe bool TryBuildNetCookWarehouseMoveMap(List<NetCookIngredientRequirement> requirements, int cookQuantity, bool useAll, out Dictionary<uint, int> moveMap, out string status)
         {
             moveMap = new Dictionary<uint, int>();
             status = string.Empty;
@@ -10236,8 +10637,25 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Deficit math must use the SAME strict rule as the headroom (review 2026-11-01): while
+            // the preference is ON and useAll has not lifted it, 5-star bag stacks are not spendable
+            // headroom. The old non-strict total let them buy headroom the slot walk would never
+            // spend: bag 4x1*+8x5*, warehouse 20x1*, qty 5 -> deficit zeroed, no <5* restock ever
+            // moved, and the run starved into a "Missing ingredients" drain with eligible stock
+            // sitting in the warehouse. Same predicate, same pinned-kind exemption as the max math.
             Dictionary<int, int> bagTotalsByStaticId = new Dictionary<int, int>();
-            this.AggregateNetCookIngredientCounts(NetCookBackpackStorageType, bagTotalsByStaticId);
+            bool strictUnderFiveMove = this.netCookPreferUnderFiveIngredients && !useAll;
+            HashSet<int> strictExemptMove = null;
+            if (strictUnderFiveMove)
+            {
+                strictExemptMove = new HashSet<int>();
+                foreach (int pinnedStaticId in pinnedPerDish.Keys)
+                {
+                    strictExemptMove.Add(pinnedStaticId);
+                }
+            }
+            this.AggregateNetCookIngredientCounts(NetCookBackpackStorageType, bagTotalsByStaticId,
+                strictUnderFiveMove, strictExemptMove);
 
             // Remaining count still available per warehouse stack, so a single stack is not allocated twice
             // across multiple demands (matters once category demands draw from shared item pools).
@@ -10247,6 +10665,56 @@ namespace HeartopiaMod
                 for (int i = 0; i < kvp.Value.Count; i++)
                 {
                     remainingByNetId[kvp.Value[i].Key] = kvp.Value[i].Value;
+                }
+            }
+
+            // R3 strict (requester 2026-11-01): 5★ warehouse stacks never enter the move map while the
+            // preference is on — shipping a 5★ to the bag is the same spending the preference forbids.
+            // Manual pins keep their stacks (the pin is the player's own decision); "Use All
+            // Ingredients" is an explicit whole-bag instruction and outranks the preference too. With
+            // the toggle OFF this filter does not exist and the move is byte-for-byte the shipped one.
+            // Runs AFTER the per-stack remaining map so a dropped stack leaves no allocation seat; the
+            // demands themselves already count bag headroom <5★-only via the same preference elsewhere,
+            // so a 5★-only recipe gets its units listed as unmet (Universal budget) instead of moved.
+            if (this.netCookPreferUnderFiveIngredients && !useAll)
+            {
+                foreach (KeyValuePair<int, List<KeyValuePair<uint, int>>> stacksKvp in stacksByStaticId)
+                {
+                    if (stacksKvp.Key == NetCookUniversalIngredientStaticId)
+                    {
+                        continue;
+                    }
+
+                    pinnedPerDish.TryGetValue(stacksKvp.Key, out int pinnedSlots);
+                    if (pinnedSlots > 0)
+                    {
+                        continue;
+                    }
+
+                    List<KeyValuePair<uint, int>> fiveStarStacks = null;
+                    for (int i = 0; i < stacksKvp.Value.Count; i++)
+                    {
+                        if (starByNetId.TryGetValue(stacksKvp.Value[i].Key, out int stackStar) && stackStar >= 5)
+                        {
+                            if (fiveStarStacks == null)
+                            {
+                                fiveStarStacks = new List<KeyValuePair<uint, int>>(1);
+                            }
+
+                            fiveStarStacks.Add(stacksKvp.Value[i]);
+                        }
+                    }
+
+                    if (fiveStarStacks == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (KeyValuePair<uint, int> dropped in fiveStarStacks)
+                    {
+                        stacksKvp.Value.Remove(dropped);
+                        remainingByNetId.Remove(dropped.Key);
+                    }
                 }
             }
 
@@ -10531,7 +10999,11 @@ namespace HeartopiaMod
                     }
 
                     stacks.Add(new KeyValuePair<uint, int>(netId, count));
-                    if (starByNetId != null && this.TryGetDirectBackpackItemStarRate(itemObj, out int starRate))
+                    // Canonical QC-first star (see the aggregate filter for why): the low-star-first
+                    // move ordering and the R3 5★ filter both feed on this map, so an item-fields-only
+                    // read here would sort every QC-backed stack as star 0 and spend 5★ first.
+                    if (starByNetId != null
+                        && this.TryResolveAutoSellMonoItemStar(netId, itemObj, string.Empty, count, out int starRate))
                     {
                         starByNetId[netId] = starRate;
                     }
@@ -10744,6 +11216,27 @@ namespace HeartopiaMod
                         this.TryApplyNetCookSlotPreference(cookingSystemObj, cookingSystemClass, slotObj, i, this.netCookRecipeId);
                     }
 
+                    // R3 (§5.2): demote a slot AutoFill filled with a 5★ stack BEFORE the Universal
+                    // top-up — AutoFill picks by price across kinds, so a 5★ item can land in a
+                    // category slot a 1★ item would fit. Manual pins override inside the demotion
+                    // ("unless manually selected"), and an unmet policy keeps AutoFill's pick.
+                    // Re-runs with every send-path re-init, exactly like the top-up above.
+                    if (this.netCookPreferUnderFiveIngredients)
+                    {
+                        // STRICT semantics (requester live test 2026-11-01): a 5★ fill nothing else can
+                        // replace fails the whole slot walk — the prepare is never sent, the 5★ stack
+                        // stays where it is. The walk runs on the start-time detail build (both send
+                        // channels cook from that detail) and on the AuraMono send re-init, so the
+                        // block reaches every cook attempt.
+                        if (this.TryDemoteNetCookSlotFromFiveStar(cookingSystemObj, cookingSystemClass, slotObj, i, this.netCookRecipeId)
+                            == NetCookFiveStarSlotOutcome.Blocked)
+                        {
+                            status = "Prefer Below-5 Ingredients: only 5-star stock fits slot " + i
+                                + "; 5-star ingredients are kept.";
+                            return false;
+                        }
+                    }
+
                     bool hasFilledFlag = this.TryGetMonoBoolMember(slotObj, "filled", out bool filled);
                     if (hasFilledFlag && !filled && this.IsNetCookUniversalIngredientFillAllowed())
                     {
@@ -10786,7 +11279,9 @@ namespace HeartopiaMod
                         this.nextNetCookUniversalFillLogAt = Time.unscaledTime + NetCookUniversalLogThrottleSeconds;
                         this.NetCookDiagLog("universal ingredient filled " + universalFilled + " of "
                             + slotItems.Count + " slot(s); " + this.netCookUniversalSlotsFilled
-                            + " slot fill(s) this run", true);
+                            + " top-up + " + this.netCookUniversalDemotedSlots + " demotion replace = "
+                            + (this.netCookUniversalSlotsFilled + this.netCookUniversalDemotedSlots)
+                            + " universal fill(s) this run", true);
                     }
                 }
 
@@ -10972,6 +11467,14 @@ namespace HeartopiaMod
             // collect Idle goes through ComponentRemoved<CookingStatusComponent>, NOT OnUpdateCookerStatus,
             // so the lo-cache never sees it). Lets drain remove the stove remotely. Reset on re-prepare.
             public bool TrustedCollected;
+            // Backoff telemetry shared by the three "no status source" poll branches (main / auto-assist
+            // / drain): how many gate expiries have passed without a single successful status read, and
+            // the failure-reason text logged last. A flat 3 s throttle per target produced 42 126
+            // identical lines in one live assist session (measured 2026-11-01) and flushed the log ring.
+            // Drives GetNetCookStatusPollFailGateSeconds + ShouldLogNetCookStatusPollFail; reset on every
+            // successful status read by the TryGetNetCookTargetCookingStatus wrapper.
+            public int StatusPollFailStreak;
+            public string LastStatusPollFailDetails;
         }
 
         private sealed class NetCookRegisteredWorldCooker

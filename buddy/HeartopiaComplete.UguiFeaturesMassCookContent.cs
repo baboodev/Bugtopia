@@ -60,11 +60,9 @@ namespace HeartopiaMod
     //    deliberately NOT given a save call. All toggle labels get this.L (the IMGUI twin is
     //    DrawSwitchToggle, which localizes internally — UiKitPrimitives.cs:750); everything else
     //    on this tab is raw GUI.Label/GUI.Button strings and stays UNlocalized.
-    //  - ASSIST MODE card (shown while Auto Cook Assist is on, :210-225): height is DYNAMIC in source —
-    //    Mathf.Max(32f, statusStyle.CalcHeight(desc, w-24)) + 36 + 12. Ported with the Pictures
-    //    round's MeasureUguiPicturesWrappedHeight (TMP GetPreferredValues, Ceil+4), fallback 32f
-    //    = the source's own Max floor, retried on gated frames until the TMP component has
-    //    Awoken (built-inactive caveat). Height feeds the layout signature.
+    //  - ASSIST MODE card (source :210-225): REMOVED 2026-11-01 in full at the requester's ask —
+    //    Auto Cook Assist now has no panel surface beyond its checkbox, so nothing is built, no
+    //    card height feeds the layout signature, and the assist bit left the signature too.
     //  - RECIPE dropdown (always branch, :227-293): a hand-rolled header (GetNetCookSelectedRecipeLabel
     //    caption — LIVE per gated frame, capture can auto-select a recipe — + accent "^"/"v"
     //    arrow) toggling the SHARED netCookRecipeDropdownOpen flag. Shared on purpose (unlike
@@ -152,6 +150,11 @@ namespace HeartopiaMod
             // so a header occupying its own slot would desync every index below it.
             public GameObject Badge;
             public bool BadgeShown;
+            // Best achieved stars for the bound recipe ("4*"), top-left corner — the RECENT badge owns
+            // top-right, the icon is centered, the name is the bottom-wrapped band (plan §3.1).
+            // null/empty StarsShown = hidden; unknown (0) is a real state, not "1★".
+            public GameObject StarLabel;
+            public string StarsShown;
         }
 
         // STOVE TYPE picker row (see HeartopiaComplete.NetCookStoveType.cs). Same pooled-row shape as
@@ -188,6 +191,8 @@ namespace HeartopiaMod
             public Toggle StatusDiagToggle;
             public Toggle ManualIngredientsToggle;
             public Toggle CookableOnlyToggle;
+            public Toggle UnderFiveToggle;      // "Only Below 5 Stars" — half pair with CookableOnly (:436 row)
+            public Toggle PreferUnderFiveToggle; // R3 "Prefer Below-5 Ingredients" — half pair with Pick Ingredients (:398 row, plan §5.1)
             public readonly List<GameObject> SlotTiles = new List<GameObject>();
             public readonly List<Image> SlotTileFills = new List<Image>();
             public readonly List<Image> SlotTileIcons = new List<Image>();
@@ -198,11 +203,6 @@ namespace HeartopiaMod
             public GameObject SlotBackButton;
             public int SlotBackCellShown = -1;   // which cell the Back tile sits in
             public int SlotAreaRowsShown = -1;   // drives the one re-place the grid needs
-
-            public GameObject AssistCard;         // shown while Auto Cook Assist is on
-            public GameObject AssistDescLabel;
-            public float AssistTextHeight = 32f;  // Max(32, measured) — source fallback floor
-            public bool AssistTextMeasured;       // retry until the TMP component has Awoken
 
             // STOVE TYPE picker — only built/shown when the capture census saw 2+ recipe cooker
             // types in range (mixed kitchen); hidden entirely otherwise, so the single-type layout
@@ -233,11 +233,15 @@ namespace HeartopiaMod
             public Transform RecipeListContent;
             public readonly List<UguiMassCookRecipeRowHandle> RecipeRows = new List<UguiMassCookRecipeRowHandle>();
             public GameObject RecipeEmptyLabel;   // "No recipes match your search."
+            public string RecipeEmptyShown;       // the empty-grid caption is chosen per state (§6.1)
+            public string RecipeLabelShown;       // "RECIPE" — or "RECIPE · shown/total" while the star filter is on
 
             public Toggle MoveIngredientsToggle;
             public Toggle UseAllIngredientsToggle;
             public Toggle UseUniversalIngredientToggle;
-            public GameObject DishLimitLabel;     // static caption
+            public Toggle CookUntilFiveToggle;    // "Cook Until 5-Star Dish" — half pair with Universal; hidden for a known-5★ selected recipe (§4.1)
+            public GameObject DishLimitLabel;     // caption swaps by mode: DISH LIMIT ↔ BATCH COUNT, same rect (§4.1)
+            public string DishLimitShown;         // caption diff cache for the swap
             public GameObject DishMaxLabel;       // "Ingredients max: ..." — live
             public string DishMaxShown;
             public InputField QtyField;
@@ -249,10 +253,8 @@ namespace HeartopiaMod
             public string StopShown;
 
             public GameObject RadiusCard;         // top of the tab — scan radius
-            public GameObject DelayCard;          // above the recipe block — cook delay
-            public GameObject DelayValueLabel;
-            public string DelayShown;
-            public Slider DelaySlider;
+            // DelayCard / DelayValueLabel / DelayShown / DelaySlider removed 2026-11-01 (COOK DELAY
+            // slider deleted; the loop keeps its minimum pacing as a constant).
             public GameObject RadiusValueLabel;
             public string RadiusShown;
             public Slider RadiusSlider;
@@ -342,9 +344,10 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
-        // Live layout signature — branch, dropdown-open, measured assist-card height (all three
-        // drive real layout). Visible-row COUNT is deliberately absent: the open panel is a fixed
-        // 260 and the rows scroll inside it.
+        // Live layout signature — dropdown-open states and the panel row counts (all drive real
+        // layout). Visible-row COUNT is deliberately absent: the open panel is a fixed
+        // 260 and the rows scroll inside it. The assist bit and the measured assist-card height
+        // left with the ASSIST MODE card (2026-11-01); the bit values stay otherwise unrenumbered.
         // ----------------------------------------------------------------------------------------
 
         private int ComputeUguiFeaturesMassCookLayoutSignature(UguiShellFeaturesMassCookHandle handle)
@@ -352,15 +355,17 @@ namespace HeartopiaMod
             // The Stove Type row count enters the signature because the open panel sizes to it (0
             // rows also encodes "picker hidden", so no separate visibility bit is needed).
             int stoveTypeRows = this.GetUguiFeaturesMassCookStoveTypeRowCount();
-            return (this.netCookAutoAssist ? 1 : 0)
-                 | (this.netCookRecipeDropdownOpen ? 2 : 0)
+            return (this.netCookRecipeDropdownOpen ? 2 : 0)
                  | (this.netCookCookerTypeDropdownOpen ? 4 : 0)
                  | ((stoveTypeRows & 0x3F) << 3)
-                 | (Mathf.CeilToInt(handle.AssistTextHeight) << 9)
                  // Same reasoning as the stove rows: the recipe panel grows by the slot area, so
                  // the area's row count is a layout input. Read straight off the last slot read —
                  // never refresh from here, that would fire AuraMono from the signature path.
-                 | ((this.GetUguiMassCookSlotAreaRowCount() & 0x7) << 20);
+                 | ((this.GetUguiMassCookSlotAreaRowCount() & 0x7) << 20)
+                 // R2 (§4.1): hiding the "Cook Until 5-Star Dish" checkbox re-expands the Universal
+                 // Ingredient toggle to full width — a real pair↔full swap, so the visibility is a
+                 // layout input. GetNetCookRecipeBestQuality is a cache read, never a measurement.
+                 | (this.IsNetCookFiveStarToggleVisible() ? 0 : (1 << 23));
         }
 
         // Cells the slot area shows: one per material slot, plus Back while the picker is open.
@@ -422,8 +427,8 @@ namespace HeartopiaMod
         // ----------------------------------------------------------------------------------------
 
         // UGUI mirror of DrawMassCookTab: header + pill, capture/reset row, cleanup, 5 toggles,
-        // the conditional region (assist card shown when Auto Cook Assist is on, then the recipe
-        // dropdown + ingredient toggles + dish limit always), start/stop, settings card, status
+        // the conditional region (recipe dropdown + ingredient toggles + dish limit always — the
+        // assist card that used to head it was removed 2026-11-01), start/stop, settings card, status
         // card — everything built ONCE;
         // RelayoutUguiShellFeaturesMassCook owns positions from the conditional region down and
         // the total scroll height. Handle assigned LAST (Research idiom).
@@ -542,37 +547,32 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.StatusDiagToggle.gameObject, rowX, 360f, rowW, 24f);
 
             // Manual ingredients: off keeps the shipped behaviour (the game's AutoFill decides).
+            // R3 (§5.1): the row becomes the half pair — the ingredient policy lives next to the
+            // picker it modifies, and it works in BOTH modes. Fixed row, so the conditional-region
+            // cursor below it does not move.
             handle.ManualIngredientsToggle = this.CreateUguiCheckbox(scrollContent, "ManualIngredientsToggle",
                 this.L("Pick Ingredients"), this.netCookSlotManualMode,
                 new System.Action<bool>(this.OnUguiFeaturesMassCookManualIngredientsToggled));
-            PlaceUguiTopLeft(handle.ManualIngredientsToggle.gameObject, rowX, 398f, rowW, 24f);
+            PlaceUguiTopLeft(handle.ManualIngredientsToggle.gameObject, rowX, 398f, halfW, 24f);
+            handle.PreferUnderFiveToggle = this.CreateUguiCheckbox(scrollContent, "PreferUnderFiveToggle",
+                this.L("Prefer Below-5 Ingredients"), this.netCookPreferUnderFiveIngredients,
+                new System.Action<bool>(this.OnUguiFeaturesMassCookPreferUnderFiveToggled));
+            PlaceUguiTopLeft(handle.PreferUnderFiveToggle.gameObject, rowX + halfW + 10f, 398f, halfW, 24f);
 
             handle.CookableOnlyToggle = this.CreateUguiCheckbox(scrollContent, "CookableOnlyToggle",
                 this.L("Only What I Can Cook"), this.netCookCookableOnly,
                 new System.Action<bool>(this.OnUguiFeaturesMassCookCookableOnlyToggled));
-            PlaceUguiTopLeft(handle.CookableOnlyToggle.gameObject, rowX, 436f, rowW, 24f);
+            // Half pair on the row that already existed (§6.1): Y cursor unchanged at 436, the fixed
+            // stack above the conditional region does not move; the Capture/Reset row shows the shape.
+            PlaceUguiTopLeft(handle.CookableOnlyToggle.gameObject, rowX, 436f, halfW, 24f);
 
-            // -------- ASSIST MODE card (shown while Auto Cook Assist is on; height via relayout) --------
-            string assistModeDescription = this.L("Handles cooking mini-game prompts and auto-collects finished food. It will not prepare or start cooking.");
-            handle.AssistCard = this.CreateUguiGo("AssistCard", scrollContent);
-            this.AddUguiImage(handle.AssistCard, this.UguiKitPanelBg(), true, 1f);
-            GameObject assistTitle = this.CreateUguiLabel(handle.AssistCard.transform, "AssistTitle",
-                this.L("ASSIST MODE"), 11f, mutedTextColor, false);
-            this.TrySetUguiLabelBold(assistTitle);
-            PlaceUguiTopLeft(assistTitle, 12f, 8f, rowW - 24f, 18f);
-            handle.AssistDescLabel = this.CreateUguiLabel(handle.AssistCard.transform, "AssistDesc",
-                assistModeDescription, 12f, textColor, false);
-            this.TrySetUguiLabelWrapped(handle.AssistDescLabel);
-            PlaceUguiTopLeft(handle.AssistDescLabel, 12f, 28f, rowW - 24f, 32f);
-            // Source: Max(32, CalcHeight(desc, w-24)) (:214). Try now; the processor retries
-            // while !ok (built-inactive TMP caveat — Pictures precedent).
-            {
-                bool measured;
-                float measuredH = this.MeasureUguiPicturesWrappedHeight(handle.AssistDescLabel,
-                    assistModeDescription, rowW - 24f, 32f, out measured);
-                handle.AssistTextHeight = Mathf.Max(32f, measuredH);
-                handle.AssistTextMeasured = measured;
-            }
+            handle.UnderFiveToggle = this.CreateUguiCheckbox(scrollContent, "UnderFiveToggle",
+                this.L("Only Below 5 Stars"), this.netCookUnderFiveStarsOnly,
+                new System.Action<bool>(this.OnUguiFeaturesMassCookUnderFiveToggled));
+            PlaceUguiTopLeft(handle.UnderFiveToggle.gameObject, rowX + halfW + 10f, 436f, halfW, 24f);
+
+            // (ASSIST MODE card removed 2026-11-01 at the requester's ask — nothing is built for
+            // Auto Cook Assist beyond its checkbox; see the file header.)
 
             // -------- STOVE TYPE label + dropdown header + panel (mixed-kitchen picker) --------
             // Same hand-rolled dropdown shape as RECIPE below (header box + accent arrow + a panel
@@ -762,9 +762,15 @@ namespace HeartopiaMod
             handle.UseUniversalIngredientToggle = this.CreateUguiCheckbox(scrollContent, "UseUniversalIngredientToggle",
                 this.L("Use Universal Ingredient"), this.netCookUseUniversalIngredient,
                 new System.Action<bool>(this.OnUguiFeaturesMassCookUseUniversalIngredientToggled));
+            // R2 checkbox (plan §4.1): half pair with Universal Ingredient; the relayout hides it for a
+            // selected recipe whose §2.3 record already shows 5★ and re-expands Universal to full width.
+            handle.CookUntilFiveToggle = this.CreateUguiCheckbox(scrollContent, "CookUntilFiveToggle",
+                this.L("Cook Until 5-Star Dish"), this.netCookCookUntilFiveStarDish,
+                new System.Action<bool>(this.OnUguiFeaturesMassCookCookUntilFiveToggled));
 
+            handle.DishLimitShown = this.L("DISH LIMIT (0 = unlimited)");
             handle.DishLimitLabel = this.CreateUguiLabel(scrollContent, "DishLimitLabel",
-                this.L("DISH LIMIT (0 = unlimited)"), 11f, mutedTextColor, false);
+                handle.DishLimitShown, 11f, mutedTextColor, false);
             this.TrySetUguiLabelBold(handle.DishLimitLabel);
             handle.DishMaxShown = this.netCookMaxCookQuantity > 0
                 ? ("Ingredients max: " + this.netCookMaxCookQuantity)
@@ -785,24 +791,12 @@ namespace HeartopiaMod
             handle.StopButton = this.CreateUguiDangerButton(scrollContent, "StopButton",
                 handle.StopShown, new System.Action(this.OnUguiFeaturesMassCookStartStopClicked));
 
-            // -------- Cook delay card (placed by the relayout, above the recipe block) --------
-            // Unconditional on purpose: the delay paces mass cook (the assist loop runs its own
-            // delays), and it must stay reachable whether the assist card is shown or not.
-            handle.DelayCard = this.CreateUguiGo("DelayCard", scrollContent);
-            this.AddUguiImage(handle.DelayCard, this.UguiKitPanelBg(), true, 1f);
-
-            GameObject delayLabel = this.CreateUguiLabel(handle.DelayCard.transform, "DelayLabel",
-                this.L("COOK DELAY"), 11f, mutedTextColor, false);
-            this.TrySetUguiLabelBold(delayLabel);
-            PlaceUguiTopLeft(delayLabel, 12f, 10f, sliderCardW * 0.55f, 18f);
-            handle.DelayShown = string.Format("{0:F2}s", this.netCookInterval);
-            handle.DelayValueLabel = this.CreateUguiLabel(handle.DelayCard.transform, "DelayValue",
-                handle.DelayShown, 12f, Color.white, false);
-            PlaceUguiTopLeft(handle.DelayValueLabel, 12f + sliderCardW * 0.55f, 10f, sliderCardW * 0.45f, 18f);
-            handle.DelaySlider = this.CreateUguiSlider(handle.DelayCard.transform, "DelaySlider",
-                0.25f, 10f, this.netCookInterval, false,
-                new System.Action<float>(this.OnUguiFeaturesMassCookDelayChanged));
-            PlaceUguiTopLeft(handle.DelaySlider.gameObject, 12f, 30f, sliderCardW, 20f);
+            // The COOK DELAY card was REMOVED 2026-11-01 (requester): the slider's only live effect
+            // was scaling the collect→next-prepare pause as max(0.35s, 0.2 × delay), so at its minimum
+            // (and at the old default 1.5) the 0.35 s floor always applied — the loop now runs on that
+            // minimum permanently (NetCookCollectRestartDelaySeconds). The slot it owned in the relayout
+            // cursor is freed (the assist card removed the same day frees its slack too).
+            // "COOK DELAY" localization keys stay in LocalizationManager (game strings / older builds).
 
             // -------- Status card (:379-402 — 118 tall; children card-local) --------
             handle.StatusCard = this.CreateUguiGo("StatusCard", scrollContent);
@@ -868,15 +862,12 @@ namespace HeartopiaMod
             const float rowX = 8f;
             float rowW = handle.ContentWidth - 16f;
             float halfW = (rowW - 10f) * 0.5f;
-            bool assist = this.netCookAutoAssist;
             bool open = this.netCookRecipeDropdownOpen;
             float yCur = UguiMassCookConditionalTopY;
 
             bool stoveTypeVisible = this.ShouldShowNetCookCookerTypePicker();
             bool stoveTypeOpen = stoveTypeVisible && this.netCookCookerTypeDropdownOpen;
 
-            // The assist card adds height above the mass-cook controls; it never replaces them.
-            SetUguiGoActive(handle.AssistCard, assist);
             SetUguiGoActive(handle.StoveTypeLabel, stoveTypeVisible);
             SetUguiGoActive(handle.StoveTypeHeader, stoveTypeVisible);
             SetUguiGoActive(handle.StoveTypePanel, stoveTypeOpen);
@@ -902,25 +893,13 @@ namespace HeartopiaMod
                 SetUguiGoActive(handle.QtyField.gameObject, true);
             }
 
-            // Cook delay first and outside the card show/hide — the delay paces both loops.
-            PlaceUguiTopLeft(handle.DelayCard, rowX, yCur, rowW, UguiMassCookSliderCardHeight);
-            yCur += UguiMassCookSliderCardHeight + 8f;
-
-            if (assist)
-            {
-                // :212-224 — card 36 + textH + 12; cursor += Ceil(cardH) + 12. The card sits between
-                // the delay slider and the ingredient toggles — extra height, never a replacement.
-                SetUguiGoActive(handle.AssistCard, true);
-                float textH = handle.AssistTextHeight;
-                float cardH = 36f + textH + 12f;
-                PlaceUguiTopLeft(handle.AssistCard, rowX, yCur, rowW, cardH);
-                PlaceUguiTopLeft(handle.AssistDescLabel, 12f, 28f, rowW - 24f, textH);
-                yCur += Mathf.Ceil(cardH) + 12f;
-            }
+            // (Cook delay card and the ASSIST MODE card removed 2026-11-01 — the cursor starts at
+            // the ingredient-toggle block directly; see the builder comment for why the pacing
+            // survives without the slider.)
 
             // Every control sits ABOVE the two dropdowns, so the recipe grid is the last thing
             // before START and nothing the user has to reach for is hidden below a panel that can
-            // be 300+ tall. This block runs whether assist is on or off.
+            // be 300+ tall.
             if (handle.MoveIngredientsToggle != null)
             {
                 PlaceUguiTopLeft(handle.MoveIngredientsToggle.gameObject, rowX, yCur, halfW, 24f);
@@ -930,9 +909,27 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.UseAllIngredientsToggle.gameObject, rowX + halfW + 10f, yCur, halfW, 24f);
             }
             yCur += 30f;
+            bool cookUntilVisible = this.IsNetCookFiveStarToggleVisible();
+            if (handle.CookUntilFiveToggle != null)
+            {
+                SetUguiGoActive(handle.CookUntilFiveToggle.gameObject, cookUntilVisible);
+            }
             if (handle.UseUniversalIngredientToggle != null)
             {
-                PlaceUguiTopLeft(handle.UseUniversalIngredientToggle.gameObject, rowX, yCur, rowW, 24f);
+                if (cookUntilVisible)
+                {
+                    // Half pair on the row Universal Ingredient already owned (kit halfW pattern, same
+                    // as Move/UseAll); row step 38 unchanged, so nothing below this row moves (§4.1).
+                    PlaceUguiTopLeft(handle.UseUniversalIngredientToggle.gameObject, rowX, yCur, halfW, 24f);
+                    if (handle.CookUntilFiveToggle != null)
+                    {
+                        PlaceUguiTopLeft(handle.CookUntilFiveToggle.gameObject, rowX + halfW + 10f, yCur, halfW, 24f);
+                    }
+                }
+                else
+                {
+                    PlaceUguiTopLeft(handle.UseUniversalIngredientToggle.gameObject, rowX, yCur, rowW, 24f);
+                }
             }
             yCur += 38f;
             PlaceUguiTopLeft(handle.DishLimitLabel, rowX, yCur, rowW * 0.42f, 18f);
@@ -1097,6 +1094,16 @@ namespace HeartopiaMod
                 UguiMassCookRecipeBadgeWidth, 14f);
             SetUguiGoActive(row.Badge, false);
             row.BadgeShown = false;
+
+            // Best-achieved star "N*" at the top-left corner — opposite the RECENT badge. Text is
+            // plain ASCII ("4*", not "★"): the TMP kit font has no Geometric-Shapes glyphs
+            // (ugui-kit-gotchas) and slot candidates already use the N* suffix. Hidden by default;
+            // the row sync shows it only when §2.3 actually knows a star.
+            row.StarLabel = this.CreateUguiLabel(root.transform, "Star", string.Empty, 8f,
+                this.UguiKitTextColor(), true);
+            this.TrySetUguiLabelBold(row.StarLabel);
+            PlaceUguiTopLeft(row.StarLabel, 2f, 1f, 34f, 14f);
+            SetUguiGoActive(row.StarLabel, false);
 
             row.Root = root;
             return row;
@@ -1346,37 +1353,70 @@ namespace HeartopiaMod
         // recipe stays selected. Filtering it there would let a stock shortage silently overwrite
         // the recipe the user picked for a menu. Hiding rows is a view concern, so the view owns it.
         private readonly List<KeyValuePair<int, string>> netCookCookableVisibleEntries = new List<KeyValuePair<int, string>>(256);
+        private readonly List<KeyValuePair<int, string>> netCookUnderFiveVisibleEntries = new List<KeyValuePair<int, string>>(256);
+        // "shown / total" for the RECIPE caption while the star filter is on: total is the grid the
+        // picker would list with the star filter off (the cookable stage already applied), cached on
+        // each pass so the caption never recomputes anything outside the grid pass.
+        private int netCookGridTotalCount;
 
         private List<KeyValuePair<int, string>> GetUguiMassCookRecipeGridEntries()
         {
             List<KeyValuePair<int, string>> visible = this.GetVisibleNetCookRecipeEntries();
-            if (!this.netCookCookableOnly)
-            {
-                return visible;
-            }
+            List<KeyValuePair<int, string>> result = visible;
 
-            // Measuring is budgeted per frame; until the first sweep has been all the way round,
-            // show the list unfiltered rather than dropping rows a few at a time.
-            this.RefreshNetCookCookableCache(visible);
-            if (!this.IsNetCookCookableFilterReady())
+            if (this.netCookCookableOnly)
             {
-                return visible;
-            }
-
-            this.netCookCookableVisibleEntries.Clear();
-            for (int i = 0; i < visible.Count; i++)
-            {
-                if (this.IsNetCookRecipeCookable(visible[i].Key))
+                // Measuring is budgeted per frame; until the first sweep has been all the way round,
+                // show the list unfiltered rather than dropping rows a few at a time.
+                this.RefreshNetCookCookableCache(visible);
+                if (this.IsNetCookCookableFilterReady())
                 {
-                    this.netCookCookableVisibleEntries.Add(visible[i]);
+                    this.netCookCookableVisibleEntries.Clear();
+                    for (int i = 0; i < visible.Count; i++)
+                    {
+                        if (this.IsNetCookRecipeCookable(visible[i].Key))
+                        {
+                            this.netCookCookableVisibleEntries.Add(visible[i]);
+                        }
+                    }
+
+                    result = this.netCookCookableVisibleEntries;
                 }
             }
 
-            return this.netCookCookableVisibleEntries;
+            this.netCookGridTotalCount = result.Count;
+
+            if (this.netCookUnderFiveStarsOnly)
+            {
+                // Per-row test is a dictionary hit on the §2.3 reader caches — this function runs
+                // every gated frame the dropdown is open, so it must never measure (that is why
+                // §2.1 caches the Collection). Unknown (0) KEEPS the row: the same optimistic
+                // default as the cookable filter, so the 217 dishes the Collection cannot report
+                // stay visible instead of silently vanishing for a user who never cooked them.
+                this.netCookUnderFiveVisibleEntries.Clear();
+                for (int i = 0; i < result.Count; i++)
+                {
+                    if (!this.NetCookRecipeFiveStarKnown(result[i].Key))
+                    {
+                        this.netCookUnderFiveVisibleEntries.Add(result[i]);
+                    }
+                }
+
+                result = this.netCookUnderFiveVisibleEntries;
+            }
+
+            return result;
         }
 
         private void SyncUguiFeaturesMassCookRecipeRows(UguiShellFeaturesMassCookHandle handle)
         {
+            // Source A refresh point (§2.1 "first Mass Cook panel open of an epoch"): opening the
+            // picker is the trigger, and TryRefreshNetCookCollectionStars is dirty-flag+throttle
+            // self-gated — a closed panel never runs this, a re-open within the same epoch costs a
+            // cheap flag test. The rows themselves read the cache only.
+            this.EnsureNetCookQualityHooks();
+            this.TryRefreshNetCookCollectionStars();
+
             // Two data sources through one grid: recipes normally, and a slot's candidate items
             // while the picker is parked on a slot. Same cells, same icons, same selection diff —
             // only the list and what a click means change.
@@ -1446,6 +1486,37 @@ namespace HeartopiaMod
                     SetUguiGoActive(row.Badge, isRecent);
                 }
 
+                // Best achieved stars ("4*") — max(Collection, ledger) (§2.3), a record of what was
+                // achieved, never a forecast. Slot-candidate mode is hidden on purpose: its keys are
+                // ingredient item ids, and a coinciding dish id must not borrow a recipe's star.
+                int shownStar = this.netCookSlotPickerIndex < 0
+                    ? this.GetNetCookRecipeBestQuality(entry.Key)
+                    : 0;
+                string starText = shownStar > 0
+                    ? shownStar.ToString(System.Globalization.CultureInfo.InvariantCulture) + "*"
+                    : string.Empty;
+                if (!string.Equals(row.StarsShown, starText, StringComparison.Ordinal))
+                {
+                    row.StarsShown = starText;
+                    bool showStar = starText.Length > 0;
+                    SetUguiGoActive(row.StarLabel, showStar);
+                    if (showStar)
+                    {
+                        this.SetUguiLabelText(row.StarLabel, starText);
+                        Color starColor = this.UguiKitTextColor();
+                        if (shownStar >= NetCookStarMax)
+                        {
+                            starColor = this.UguiKitAccent();
+                        }
+                        else
+                        {
+                            starColor.a = 0.78f;
+                        }
+
+                        this.SetUguiLabelColor(row.StarLabel, starColor);
+                    }
+                }
+
                 // Selection diffs per bind (an IMGUI-twin pick or capture auto-select moves it).
                 // In slot-picker mode the highlighted cell is the slot's preferred ITEM,
                 // not the selected recipe.
@@ -1480,6 +1551,41 @@ namespace HeartopiaMod
 
             this.SyncUguiFeaturesMassCookSlotRow(handle);
             SetUguiGoActive(handle.RecipeEmptyLabel, count <= 0); // :267-270
+
+            // An emptied grid has to explain itself (plan §6.1, the accepted Q7 consequence): the
+            // star filter ON over a maxed account legitimately hides every covered recipe, and a
+            // dropdown that goes blank with no reason reads as broken. Caption choice is a content
+            // diff like any label — no new rect, and both captions come from state, not a measure.
+            // Recipe-mode only: in slot-candidate mode the shared label/counter describe item ids,
+            // and a "5-star Collection" line or a "RECIPE shown/total" counter would describe the
+            // wrong grid entirely.
+            if (this.netCookSlotPickerIndex < 0)
+            {
+                if (count <= 0)
+                {
+                    string emptyCaption = this.netCookUnderFiveStarsOnly
+                        ? this.L("All listed recipes are already 5-star in your Collection")
+                        : this.L("No recipes match your search.");
+                    if (!string.Equals(handle.RecipeEmptyShown, emptyCaption, StringComparison.Ordinal))
+                    {
+                        handle.RecipeEmptyShown = emptyCaption;
+                        this.SetUguiLabelText(handle.RecipeEmptyLabel, emptyCaption);
+                    }
+                }
+
+                // "shown / total" while the star filter is on — shown count vs. the same grid without
+                // the star stage. Off, the caption is the plain "RECIPE" the layout started with.
+                string recipeCaption = this.netCookUnderFiveStarsOnly
+                    ? this.L("RECIPE") + "  ·  " + count.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        + "/" + this.netCookGridTotalCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    : this.L("RECIPE");
+                if (!string.Equals(handle.RecipeLabelShown, recipeCaption, StringComparison.Ordinal))
+                {
+                    handle.RecipeLabelShown = recipeCaption;
+                    this.SetUguiLabelText(handle.RecipeLabel, recipeCaption);
+                }
+            }
+
             int gridRows = (count + UguiMassCookRecipeColumns - 1) / UguiMassCookRecipeColumns;
             this.SetUguiScrollContentHeight(handle.RecipeListContent,
                 Mathf.Max(1f, gridRows * (UguiMassCookRecipeCellH + UguiMassCookRecipeCellGap)));
@@ -1640,28 +1746,14 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.StatusDiagToggle, this.netCookStatusDiagEnabled);
                 this.SyncUguiToggleFromField(handle.ManualIngredientsToggle, this.netCookSlotManualMode);
                 this.SyncUguiToggleFromField(handle.CookableOnlyToggle, this.netCookCookableOnly);
+                this.SyncUguiToggleFromField(handle.UnderFiveToggle, this.netCookUnderFiveStarsOnly);
+                this.SyncUguiToggleFromField(handle.PreferUnderFiveToggle, this.netCookPreferUnderFiveIngredients);
                 this.SyncUguiToggleFromField(handle.MoveIngredientsToggle, this.netCookMoveIngredients);
                 this.SyncUguiToggleFromField(handle.UseAllIngredientsToggle, this.netCookUseAllIngredients);
                 this.SyncUguiToggleFromField(handle.UseUniversalIngredientToggle, this.netCookUseUniversalIngredient);
+                this.SyncUguiToggleFromField(handle.CookUntilFiveToggle, this.netCookCookUntilFiveStarDish);
 
-                // Assist-card measure retry (built-inactive TMP caveat — file header), independent of
-                // the recipe block below: with assist on the card is EXTRA height, not a branch. The
-                // description is constant, so this stops as soon as one measure succeeds, and the
-                // layout signature (assist bit + height bits) triggers the relayout.
-                if (this.netCookAutoAssist && !handle.AssistTextMeasured)
-                {
-                    bool measured;
-                    float measuredH = this.MeasureUguiPicturesWrappedHeight(handle.AssistDescLabel,
-                        "Handles cooking mini-game prompts and auto-collects finished food. It will not prepare or start cooking.",
-                        handle.ContentWidth - 16f - 24f, 32f, out measured);
-                    if (measured)
-                    {
-                        handle.AssistTextMeasured = true;
-                        handle.AssistTextHeight = Mathf.Max(32f, measuredH);
-                    }
-                }
-
-                // STOVE TYPE / RECIPE / dish-limit processing — always runs, assist on or off. The
+                // STOVE TYPE / RECIPE / dish-limit processing — always runs. The
                 // braces are a plain scope (parity of the old else branch), not a branch.
                 {
                     // STOVE TYPE picker — caption/arrow live; rows rebind only when the census
@@ -1689,9 +1781,19 @@ namespace HeartopiaMod
                     // :228 — per-repaint in source; self-caching after the first success.
                     this.EnsureNetCookRecipeCache();
 
-                    // Header caption + arrow (capture can auto-select a recipe — :239 is live).
+                    // Header caption + arrow (capture can auto-select a recipe — :239 is live). The
+                    // caption carries the same best-achieved stars as the rows (" — 4*"), from the
+                    // §2.3 caches; SyncUguiSelfLabelText diffs the full string, so no extra cache.
+                    string recipeHeaderCaption = this.GetNetCookSelectedRecipeLabel();
+                    int headerStar = this.GetNetCookRecipeBestQuality(this.netCookRecipeId);
+                    if (headerStar > 0)
+                    {
+                        recipeHeaderCaption += " — "
+                            + headerStar.ToString(System.Globalization.CultureInfo.InvariantCulture) + "*";
+                    }
+
                     this.SyncUguiSelfLabelText(handle.RecipeHeaderValue, ref handle.RecipeHeaderShown,
-                        this.GetNetCookSelectedRecipeLabel());
+                        recipeHeaderCaption);
                     this.SyncUguiSelfLabelText(handle.RecipeArrow, ref handle.RecipeArrowShown,
                         this.netCookRecipeDropdownOpen ? "^" : "v");
 
@@ -1733,8 +1835,16 @@ namespace HeartopiaMod
                             ? ("Ingredients max: " + this.netCookMaxCookQuantity)
                             : "Ingredients max: —");
 
-                    // Quantity poll pair — second branch also pushes SyncNetCookCookQuantityFromInput's
-                    // normalization back into the field (IMGUI next-repaint snap analog).
+                    // §4.1 caption swap: one rect, one InputField, both modes — the label names which
+                    // value the field currently carries. Content diff only, no geometry.
+                    this.SyncUguiSelfLabelText(handle.DishLimitLabel, ref handle.DishLimitShown,
+                        this.IsNetCookFiveStarModeActive()
+                            ? this.L("BATCH COUNT (0 = all stoves)")
+                            : this.L("DISH LIMIT (0 = unlimited)"));
+
+                    // Quantity poll pair — second branch also pushes the active mode's normalization
+                    // back into the field (IMGUI next-repaint snap analog). While the 5★ mode is
+                    // active the same field shows/parses the BATCH value (§4.1 pushback idiom).
                     InputField qtyField = handle.QtyField;
                     if (qtyField != null)
                     {
@@ -1745,7 +1855,9 @@ namespace HeartopiaMod
                         }
                         else
                         {
-                            string fieldText = this.netCookCookQuantityInput ?? string.Empty;
+                            string fieldText = (this.IsNetCookFiveStarModeActive()
+                                ? this.netCookBatchCountInput
+                                : this.netCookCookQuantityInput) ?? string.Empty;
                             if (!string.Equals(fieldText, handle.QtyApplied, StringComparison.Ordinal))
                             {
                                 handle.QtyApplied = fieldText;
@@ -1755,16 +1867,9 @@ namespace HeartopiaMod
                     }
                 }
 
-                // Slider re-syncs (external IMGUI edits) + value labels. The delay compare uses
-                // the save epsilon; with the fields grid-snapped (0.01 / whole) a matching slider
-                // stays put and a drag snaps to the grid like the IMGUI twin redraws it.
-                if (handle.DelaySlider != null
-                    && Mathf.Abs(handle.DelaySlider.value - this.netCookInterval) > 0.0001f)
-                {
-                    handle.DelaySlider.SetValueWithoutNotify(this.netCookInterval);
-                }
-                this.SyncUguiSelfLabelText(handle.DelayValueLabel, ref handle.DelayShown,
-                    string.Format("{0:F2}s", this.netCookInterval));
+                // Slider re-syncs (external IMGUI edits) + value labels. With the grid-snapped fields
+                // (whole) a matching slider stays put and a drag snaps to the grid like the IMGUI twin
+                // redraws it. (The delay slider's re-sync was removed 2026-11-01 with the slider itself.)
                 if (handle.RadiusSlider != null
                     && Mathf.Abs(handle.RadiusSlider.value - this.netCookScanRadiusMeters) > 0.0001f)
                 {
@@ -1893,7 +1998,7 @@ namespace HeartopiaMod
             UguiShellFeaturesMassCookHandle handle = this.uguiShellFeaturesMassCook;
             if (handle != null && handle.Root != null)
             {
-                this.RefreshUguiFeaturesMassCookLayout(handle); // click-responsive card show/hide
+                this.RefreshUguiFeaturesMassCookLayout(handle); // the cascade-closed dropdowns are layout inputs
             }
         }
 
@@ -2113,12 +2218,59 @@ namespace HeartopiaMod
             }
         }
 
+        // Copy of the CookableOnly handler shape (plan §6.1): set, save, rebind rows. No measurement
+        // to kick — the star filter reads only §2.3 caches, so flipping it re-renders instantly.
+        private void OnUguiFeaturesMassCookUnderFiveToggled(bool value)
+        {
+            // Equal-guard like the other new handlers (and the IMGUI prev-vs-new analog).
+            if (value == this.netCookUnderFiveStarsOnly)
+            {
+                return;
+            }
+
+            this.netCookUnderFiveStarsOnly = value;
+            this.SaveKeybinds();
+
+            UguiShellFeaturesMassCookHandle handle = this.uguiShellFeaturesMassCook;
+            if (handle != null && handle.Root != null)
+            {
+                this.SyncUguiFeaturesMassCookRecipeRows(handle);
+            }
+        }
+
+        // R2 checkbox handler (§6.1 shape). The flag alone changes no geometry — the caption swap and
+        // the field value mirror are content diffs the gated poll picks up on its next frame; only the
+        // recipe-record visibility feeds the layout signature.
+        private void OnUguiFeaturesMassCookCookUntilFiveToggled(bool value)
+        {
+            if (value == this.netCookCookUntilFiveStarDish)
+            {
+                return;
+            }
+
+            this.netCookCookUntilFiveStarDish = value;
+            this.SaveKeybinds();
+        }
+
         private void OnUguiFeaturesMassCookManualIngredientsToggled(bool value)
         {
             this.netCookSlotManualMode = value;
             // Leaving manual mode with the grid parked on a slot would strand the picker on a view
             // whose slot row is no longer drawn.
             this.netCookSlotPickerIndex = -1;
+            this.SaveKeybinds();
+        }
+
+        // R3 checkbox handler (§6.1 shape): set, save. Fixed geometry — the toggle is the static half
+        // pair with Pick Ingredients, so no row refresh and no layout signature feeds it.
+        private void OnUguiFeaturesMassCookPreferUnderFiveToggled(bool value)
+        {
+            if (value == this.netCookPreferUnderFiveIngredients)
+            {
+                return;
+            }
+
+            this.netCookPreferUnderFiveIngredients = value;
             this.SaveKeybinds();
         }
 
@@ -2391,6 +2543,16 @@ namespace HeartopiaMod
         private void ApplyUguiFeaturesMassCookQty(UguiShellFeaturesMassCookHandle handle, string text)
         {
             handle.QtyApplied = text;
+            // One field, two modes (§4.1): the typed text belongs to whichever mode is active. The
+            // sync normalizes the input string; the poll's second branch snaps the normalized form
+            // back into the field like the qty normalization snap always has.
+            if (this.IsNetCookFiveStarModeActive())
+            {
+                this.netCookBatchCountInput = text;
+                this.SyncNetCookBatchCountFromInput();
+                return;
+            }
+
             this.netCookCookQuantityInput = text;
             this.SyncNetCookCookQuantityFromInput();
         }
@@ -2437,16 +2599,7 @@ namespace HeartopiaMod
             }
         }
 
-        // :362-364 — nearest 0.01 (Round(v*100)/100), epsilon-save, NO status side effect.
-        private void OnUguiFeaturesMassCookDelayChanged(float value)
-        {
-            float rounded = Mathf.Round(value * 100f) / 100f;
-            if (Math.Abs(rounded - this.netCookInterval) > 0.0001f)
-            {
-                this.netCookInterval = rounded;
-                try { this.SaveKeybinds(false); } catch { }
-            }
-        }
+        // (OnUguiFeaturesMassCookDelayChanged removed 2026-11-01 with the COOK DELAY slider.)
 
         // :370-376 — WHOLE-number round (plain Mathf.Round — deliberately different from the
         // delay slider), epsilon-save, AND the status string (only this slider sets one).

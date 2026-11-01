@@ -29,6 +29,18 @@ namespace BugtopiaMcp
 
         private static int Main(string[] args)
         {
+            // Diagnostic, not part of the MCP contract:
+            //   BugtopiaMcp.dll --eval-refs-diag "<modAssembly>|<interopDir>|<coreDir>|<runtimeDir>"
+            // answers "which directories would `eval` actually compile against ON THIS MACHINE, given
+            // the paths the game reported" — including the fallback decision — without a game, a
+            // tunnel, or a running server. The four slots are the shape of the game's `env` answer;
+            // pass the real one to reproduce a live session, or a remote user's paths to reproduce the
+            // remote case. Exit 0 always: this reports, it does not judge.
+            if (args.Length > 0 && args[0] == "--eval-refs-diag")
+            {
+                return EvalRefsDiag(args);
+            }
+
             Stream stdin = Console.OpenStandardInput();
             Stream stdout = Console.OpenStandardOutput();
             UTF8Encoding utf8 = new UTF8Encoding(false);
@@ -62,6 +74,53 @@ namespace BugtopiaMcp
 
             GameLink.Close();
             return 0;
+        }
+
+        private static int EvalRefsDiag(string[] args)
+        {
+            string[] parts = (args.Length > 1 ? args[1] : string.Empty).Split('|');
+            EnvPaths reported = new EnvPaths
+            {
+                ModAssembly = DiagSlot(parts, 0),
+                InteropDir = DiagSlot(parts, 1),
+                CoreDir = DiagSlot(parts, 2),
+                RuntimeDir = DiagSlot(parts, 3),
+            };
+
+            Log("eval-refs-diag: as reported by the game:");
+            DiagSlotLine("modAssembly", reported.ModAssembly);
+            DiagSlotLine("interopDir ", reported.InteropDir);
+            DiagSlotLine("coreDir    ", reported.CoreDir);
+            DiagSlotLine("runtimeDir ", reported.RuntimeDir);
+
+            EnvPaths resolved = EvalReferenceFallback.Build(reported, out string source);
+            Log("eval-refs-diag: resolved for THIS machine — "
+                + (ReferenceEquals(resolved, reported) ? "the reported set" : "LOCAL FALLBACK"));
+            DiagSlotLine("modAssembly", resolved.ModAssembly);
+            DiagSlotLine("interopDir ", resolved.InteropDir);
+            DiagSlotLine("coreDir    ", resolved.CoreDir);
+            DiagSlotLine("runtimeDir ", resolved.RuntimeDir);
+            Log("eval-refs-diag: source = " + source);
+            Log("eval-refs-diag: a snippet would compile against "
+                + EvalCompiler.CountReferences(resolved) + " references");
+            return 0;
+        }
+
+        private static string DiagSlot(string[] parts, int index)
+        {
+            return index < parts.Length && parts[index].Length > 0 ? parts[index] : null;
+        }
+
+        private static void DiagSlotLine(string label, string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                Log("    " + label + " = -");
+                return;
+            }
+
+            bool there = File.Exists(value) || Directory.Exists(value);
+            Log("    " + label + " = " + value + (there ? "" : "   [missing on this machine]"));
         }
 
         private static void HandleMessage(string line)
@@ -480,6 +539,7 @@ namespace BugtopiaMcp
                 sb.Append("Compilation failed (").Append(compiled.Diagnostics.Count)
                   .Append(" diagnostic(s), ").Append(Math.Round(compiled.CompileMs)).Append(" ms, ")
                   .Append(compiled.ReferenceCount).AppendLine(" references):");
+                sb.AppendLine("  references from: " + (paths.Source ?? "unknown"));
                 foreach (string d in compiled.Diagnostics)
                 {
                     sb.Append("  ").AppendLine(d);
@@ -489,9 +549,12 @@ namespace BugtopiaMcp
             }
 
             StringBuilder report = new StringBuilder();
+            // The reference source travels with the answer: a snippet built against this checkout's
+            // copies of interop and bugtopia.dll may compile and still fail in the game, because
+            // Il2CppInterop assemblies carry no version to reject the mismatch with.
             report.Append("compiled in ").Append(Math.Round(compiled.CompileMs)).Append(" ms against ")
-                  .Append(compiled.ReferenceCount).Append(" references; ")
-                  .Append(compiled.Dll.Length).Append(" bytes");
+                  .Append(compiled.ReferenceCount).Append(" references (").Append(paths.Source ?? "source unknown")
+                  .Append("); ").Append(compiled.Dll.Length).Append(" bytes");
             foreach (string d in compiled.Diagnostics)
             {
                 report.AppendLine().Append("  ").Append(d);
@@ -579,8 +642,15 @@ namespace BugtopiaMcp
                 return false;
             }
 
+            // These paths are as the GAME sees them. When the game runs on a second machine none of
+            // them exist on this one, and the compile then reports CS0518 "Predefined type
+            // 'System.Object' is not defined" instead of "wrong machine" — which sends the reader off
+            // to debug their snippet. Resolve a local equivalent before anyone compiles.
+            paths = EvalReferenceFallback.Build(paths, out string referenceSource);
+            paths.Source = referenceSource;
+
             cachedEnv = paths;
-            Log("eval references resolved from " + paths.ModAssembly);
+            Log("eval references: " + referenceSource);
             return true;
         }
 
