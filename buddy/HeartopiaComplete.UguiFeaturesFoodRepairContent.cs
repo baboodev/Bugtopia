@@ -83,8 +83,9 @@ namespace HeartopiaMod
     //    prevents two open lists (any outside click closes the open one first), so this edge
     //    logic is the explicit IMGUI-parity mechanism plus belt-and-braces for a failed blocker.
     //  - Repair pick (:817-822): autoRepairType = i + SaveKeybinds(false), verbatim. Food pick
-    //    (:838-858): autoEatFoodType = i FIRST, then the LAST-OPTION CASCADE exactly when
-    //    i == autoEatFoodOptions.Length-1: customFoodPickMode = true;
+    //    (:838-858): autoEatFoodType = i FIRST, then the CUSTOM-OPTION CASCADE exactly when
+    //    i == CustomFoodIndex ("Custom Food"; a tail getter, not a literal - "Normal Food"
+    //    was appended after it and options may only ever be appended): customFoodPickMode = true;
     //    OpenInventory() (REAL game-UI call â€” opens the player's bag); the amber (1,0.8,0.4)
     //    L("Custom Food: Scanning your bag...") toast; scannedBagFoods = null;
     //    customFoodScanRetryTime = Time.time + 0.5f. ANY other pick sets customFoodPickMode =
@@ -92,13 +93,13 @@ namespace HeartopiaMod
     //    (accepted, Birds/Auto-Buy precedent): re-picking the ALREADY-selected option fires no
     //    event â€” so re-entering pick mode with Custom Food already selected needs a hop through
     //    another option (or the IMGUI twin, which re-fires on any option click).
-    //  - DYNAMIC last-option label: GetAutoEatFoodOptionLabel(last) becomes "Custom: X" once a
+    //  - DYNAMIC custom-option label: GetAutoEatFoodOptionLabel(CustomFoodIndex) becomes "Custom: X" once a
     //    custom food is saved (AutoEatRepair.cs:52-55) â€” IMGUI redraws it every frame, a stock
     //    Dropdown bakes option text. The processor recomputes it per gated frame (IMGUI-parity
-    //    alloc budget) and on change writes options[last].text + RefreshShownValue() (both
+    //    alloc budget) and on change writes options[CustomFoodIndex].text + RefreshShownValue() (both
     //    RVA-verified) so caption AND list stay correct across UGUI picks and IMGUI-twin edits.
     //  - CUSTOM FOOD PICKER (:863-1011), visible only while customFoodPickMode &&
-    //    autoEatFoodType == last: built ONCE, shown via relayout-on-signature. The signature
+    //    autoEatFoodType == CustomFoodIndex: built ONCE, shown via relayout-on-signature. The signature
     //    packs picker visibility + the list's null/empty/count state + the current-selection
     //    label's visibility â€” all three drive real layout. The per-frame GAME-STATE POLLING
     //    (IsBagOpen is a GameObject.Find) runs ONLY inside the same pickerVisible condition the
@@ -281,7 +282,7 @@ namespace HeartopiaMod
             // it has to survive the early return below, and it sits well clear of the count field.
             int throwBit = this.AreUguiFeaturesFoodRepairThrowRowsVisible() ? (1 << 30) : 0;
             bool pickerVisible = this.customFoodPickMode
-                && this.autoEatFoodType == this.autoEatFoodOptions.Length - 1;
+                && this.autoEatFoodType == this.CustomFoodIndex;
             if (!pickerVisible)
             {
                 return throwBit;
@@ -566,7 +567,9 @@ namespace HeartopiaMod
             {
                 foodOptions[i] = this.GetAutoEatFoodOptionLabel(i);
             }
-            handle.FoodLastOptionShown = foodOptions[foodOptions.Length - 1];
+            // The dynamic-label sync below tracks the CUSTOM entry, so the snapshot must start on
+            // the custom label too — since "Normal Food" was appended, the tail entry is not Custom.
+            handle.FoodLastOptionShown = foodOptions[this.CustomFoodIndex];
             int foodInitial = Mathf.Clamp(this.autoEatFoodType, 0, foodOptions.Length - 1);
             handle.FoodDropdownLastValue = foodInitial;
             bool foodWired;
@@ -699,7 +702,7 @@ namespace HeartopiaMod
                 UguiFoodRepairFoodDropdownRowY + extraY, 160f, 40f);
 
             bool pickerVisible = this.customFoodPickMode
-                && this.autoEatFoodType == this.autoEatFoodOptions.Length - 1;
+                && this.autoEatFoodType == this.CustomFoodIndex;
             SetUguiGoActive(handle.PickerRoot, pickerVisible);
 
             if (!pickerVisible)
@@ -972,21 +975,21 @@ namespace HeartopiaMod
                     }
                 }
 
-                // Dynamic last-option label â€” "Custom Food" becomes "Custom: X" once a custom
+                // Dynamic custom-option label — "Custom Food" becomes "Custom: X" once a custom
                 // food is saved (file header). Recomputed per frame (IMGUI drew it per frame),
-                // options[last].text + RefreshShownValue only on change.
-                string wantLast = this.GetAutoEatFoodOptionLabel(this.autoEatFoodOptions.Length - 1);
+                // options[custom].text + RefreshShownValue only on change.
+                string wantCustom = this.GetAutoEatFoodOptionLabel(this.CustomFoodIndex);
                 if (handle.FoodDropdown != null
-                    && !string.Equals(wantLast, handle.FoodLastOptionShown, StringComparison.Ordinal))
+                    && !string.Equals(wantCustom, handle.FoodLastOptionShown, StringComparison.Ordinal))
                 {
-                    handle.FoodLastOptionShown = wantLast;
+                    handle.FoodLastOptionShown = wantCustom;
                     try
                     {
                         var opts = handle.FoodDropdown.options;
-                        int lastIdx = this.autoEatFoodOptions.Length - 1;
-                        if (opts != null && opts.Count > lastIdx)
+                        int customIdx = this.CustomFoodIndex;
+                        if (opts != null && opts.Count > customIdx)
                         {
-                            opts[lastIdx].text = wantLast;
+                            opts[customIdx].text = wantCustom;
                             handle.FoodDropdown.RefreshShownValue();
                         }
                     }
@@ -1072,7 +1075,7 @@ namespace HeartopiaMod
                 // source block uses (:864), so IsBagOpen (a GameObject.Find) never runs while
                 // the picker is closed (file header).
                 bool pickerVisible = this.customFoodPickMode
-                    && this.autoEatFoodType == this.autoEatFoodOptions.Length - 1;
+                    && this.autoEatFoodType == this.CustomFoodIndex;
                 if (pickerVisible)
                 {
                     // :870-886 verbatim, incl. the else-if shape and the retry branch's missing
@@ -1327,9 +1330,10 @@ namespace HeartopiaMod
             try { this.SaveKeybinds(false); } catch { }
         }
 
-        // Gui.cs:838-858 â€” index FIRST, then the last-option cascade / customFoodPickMode reset,
-        // SaveKeybinds LAST, all in source order. The cascade fires EXACTLY on the last option
-        // ("Custom Food"): pick mode + OpenInventory() (the REAL game
+        // Gui.cs:838-858 â€” index FIRST, then the custom-option cascade / customFoodPickMode reset,
+        // SaveKeybinds LAST, all in source order. The cascade fires EXACTLY on the Custom Food
+        // option (CustomFoodIndex, not the last entry since "Normal Food" was appended):
+        // pick mode + OpenInventory() (the REAL game
         // bag) + the amber scanning toast + scan-state reset + the 0.5s retry arm. Every other
         // pick only clears pick mode. The :841 autoEatFoodDropdownOpen = false write is
         // IMGUI-only visual state, NOT reproduced. The picker's appearance itself is handled by
@@ -1342,7 +1346,7 @@ namespace HeartopiaMod
                 handle.FoodDropdownLastValue = index;
             }
             this.autoEatFoodType = index;
-            if (index == this.autoEatFoodOptions.Length - 1)
+            if (index == this.CustomFoodIndex)
             {
                 this.customFoodPickMode = true;
                 // (The source also reset lastClickedBagFood here. Its only reader,

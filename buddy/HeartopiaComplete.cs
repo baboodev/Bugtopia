@@ -250,8 +250,16 @@ namespace HeartopiaMod
         private const string STATUS_PANEL_PATH = "GameApp/startup_root(Clone)/XDUIRoot/Status/StatusPanel(Clone)";
         // Default to the newly added "Bad Food" option (index 0)
         private int autoEatFoodType = 0;
-        private readonly string[] autoEatFoodOptions = { "Bad Food", "Blue Jam","Mix Jam", "Bake Mushroom", "Any Food", "Custom Food"};
-        private readonly string[] autoEatFoodKeys = { "food_badfood", "food_bluejam", "food_mixjam", "food_bakemushroom", "food_", "food_custom" };
+        // Options may only be APPENDED: saved autoEatFoodType values (0..5 before
+        // "Normal Food" existed) must keep their meaning, so the entries after "Any Food"
+        // are addressed by the named tail getters below — never by a literal Length-1.
+        private readonly string[] autoEatFoodOptions = { "Bad Food", "Blue Jam","Mix Jam", "Bake Mushroom", "Any Food", "Custom Food", "Normal Food"};
+        private readonly string[] autoEatFoodKeys = { "food_badfood", "food_bluejam", "food_mixjam", "food_bakemushroom", "food_", "food_custom", "food_normal" };
+        // "Normal Food" reuses Any Food's descriptor matching (the key above is only its
+        // food-cache namespace), then filters stars/event tags at pick time.
+        private int AnyFoodIndex => this.autoEatFoodOptions.Length - 3;
+        private int CustomFoodIndex => this.autoEatFoodOptions.Length - 2;
+        private int NormalFoodIndex => this.autoEatFoodOptions.Length - 1;
         private string autoEatCustomFoodName = "";
         private bool customFoodPickMode = false;
         private string[] scannedBagFoods = null;

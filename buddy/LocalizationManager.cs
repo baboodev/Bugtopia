@@ -264,6 +264,7 @@ namespace HeartopiaMod
             { "Mix Jam", "Mix Jam" },
             { "Bake Mushroom", "Bake Mushroom" },
             { "Any Food", "Any Food" },
+            { "Normal Food", "Normal Food" },
             // Interaction / automation text
             { "Tool durability depleted", "Tool durability depleted" },
             { "Scanner Durability low", "Scanner Durability low" },
@@ -1544,6 +1545,7 @@ namespace HeartopiaMod
             { "Mix Jam", "Mermelada mixta" },
             { "Bake Mushroom", "Hongos asados" },
             { "Any Food", "Cualquier comida" },
+            { "Normal Food", "Comida normal" },
             // Interaction / automation text
             { "Tool durability depleted", "La durabilidad de las herramientas se ha agotado, usa la caja de reparación" },
             { "Scanner Durability low", "Durabilidad del escáner baja" },
@@ -2856,6 +2858,7 @@ namespace HeartopiaMod
             { "Mix Jam", "混合果酱" },
             { "Bake Mushroom", "烤蘑菇" },
             { "Any Food", "任意食物" },
+            { "Normal Food", "普通食物" },
             // Interaction / automation text
             { "Tool durability depleted", "工具耐久耗尽，请使用维修盒" },
             { "Scanner Durability low", "扫描器耐久度过低" },
@@ -4139,6 +4142,7 @@ namespace HeartopiaMod
             { "Mix Jam", "Geleia Mista" },
             { "Bake Mushroom", "Cogumelo Assado" },
             { "Any Food", "Qualquer Comida" },
+            { "Normal Food", "Comida normal" },
             { "Tool durability depleted", "A durabilidade de ferramenta está esgotada, por favor use Kit de Reparo." },
             { "Scanner Durability low", "Durabilidade insuficiente do scanner." },
             { "Eat", "Comer" },
@@ -5438,6 +5442,7 @@ namespace HeartopiaMod
             { "Mix Jam", "แยมรวม" },
             { "Bake Mushroom", "เห็ดอบ" },
             { "Any Food", "อาหารใดก็ได้" },
+            { "Normal Food", "อาหารปกติ" },
             { "Tool durability depleted", "ความทนทานเครื่องมือหมดแล้ว" },
             { "Scanner Durability low", "ความทนทานสแกนเนอร์ต่ำ" },
             { "Eat", "กิน" },
@@ -6765,6 +6770,7 @@ namespace HeartopiaMod
             { "Mix Jam", "믹스 잼" },
             { "Bake Mushroom", "구운 버섯" },
             { "Any Food", "아무 음식" },
+            { "Normal Food", "일반 음식" },
             // Interaction / automation text
             { "Tool durability depleted", "도구 내구도가 다 닳았습니다" },
             { "Scanner Durability low", "스캐너 내구도가 낮습니다" },
