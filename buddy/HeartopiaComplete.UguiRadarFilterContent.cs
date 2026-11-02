@@ -43,6 +43,21 @@ namespace HeartopiaMod
             public string IconKey = string.Empty;
             public string Canonical = string.Empty;
             public bool NameUnresolved;
+
+            // Spawn-window gate (docs/plans/2026-11-01-radar-filter-spawn-expiry.md). Scalars
+            // only - raw mono row/array pointers must never be stored here (CI lint E3).
+            // Table gates: appearMonth bitmask + timePeriod ids 1..4 as bits, read once per
+            // world epoch (TableGateEpoch). TableGateKnown=false -> fail open.
+            public bool TableGateKnown;
+            public int TableGateEpoch = -1;
+            public int GateReadTries;
+            public int AppearMonthMask;
+            public int TimePeriodMask;
+
+            // Event/festival gate read live from the game (PictorialBase season verdict).
+            public bool EventGateKnown;
+            public int EventSeasonType = -1;
+            public bool EventGateClosed;
         }
 
         private void ReplaceRadarSpeciesFilter(List<int> source, List<int> dest, HashSet<int> set)
@@ -403,6 +418,10 @@ namespace HeartopiaMod
             this.radarSpeciesNamesPending = true;
             this.radarSpeciesNameMisses = 0;
             this.radarSpeciesNameRetryAt = 0f;
+            // Rebuilt entries carry empty gate fields; re-arm the table batch and the pictorial
+            // scan so the gates are re-read within the same world epoch (plan 7).
+            this.radarSpawnGatePending = true;
+            this.radarCollectionFilterDirty = true;
         }
 
         private List<RadarSpeciesFilterEntry> BuildRadarSpeciesCatalog(Dictionary<int, string> icons, string canonical)
@@ -681,7 +700,10 @@ namespace HeartopiaMod
                 ids = insects ? this.radarInsectQuickNotMaster : this.radarBirdQuickNotMaster;
             }
 
-            this.ApplyRadarSpeciesFilter(insects, ids);
+            // Quick sets classify by Pictorial state and can contain window-restricted ids;
+            // intersect with the current spawn window before applying (plan 6.4) so a quick
+            // button never selects cells the grid hides (Summary vs grid drift).
+            this.ApplyRadarSpeciesFilter(insects, this.FilterRadarSpeciesToSpawnWindow(ids, insects));
         }
 
         private void SetUguiRadarFilterQuickLabel(GameObject button, string text)
@@ -843,6 +865,8 @@ namespace HeartopiaMod
             List<RadarSpeciesFilterEntry> source = handle.ShowingInsects ? this.radarInsectCatalog : this.radarBirdCatalog;
             HashSet<int> selected = handle.ShowingInsects ? this.radarInsectSpeciesFilter : this.radarBirdSpeciesFilter;
             string query = (handle.Search ?? string.Empty).Trim().ToLowerInvariant();
+            // One game-clock snapshot per rebuild feeds the hide predicate below (plan 6.5).
+            this.RefreshRadarSpawnGateSnapshot();
             handle.Visible.Clear();
             if (source != null)
             {
@@ -855,6 +879,14 @@ namespace HeartopiaMod
                     }
 
                     if (query.Length > 0 && entry.NameFold.IndexOf(query, StringComparison.Ordinal) < 0)
+                    {
+                        continue;
+                    }
+
+                    // Spawn window closed (month / day schedule / festival window) -> no cell
+                    // (plan 6.4). Selections and Summary deliberately keep such ids: a closed
+                    // window hides the cell only, never the saved config (plan 7).
+                    if (!this.RadarSpeciesInSpawnWindow(entry))
                     {
                         continue;
                     }
@@ -1168,8 +1200,27 @@ namespace HeartopiaMod
                 if (this.radarCollectionFilterDirty)
                 {
                     this.radarCollectionFilterDirty = false;
-                    this.TryRebuildRadarCollectionQuickSets();
+                    if (this.TryRebuildRadarCollectionQuickSets())
+                    {
+                        // The scan just re-read the per-entry event-window verdict; re-apply
+                        // it to the visible list (plan 11.4).
+                        this.RebuildUguiRadarFilterVisible(handle, false);
+                        // The table batch may have logged this world's spawn-gate line before
+                        // any event verdict existed (scan ordering); after the first successful
+                        // scan of the epoch re-emit the corrected verification line once.
+                        if (this.radarSpawnGateLoggedEpoch == AuraMonoWorldEpoch)
+                        {
+                            this.radarSpawnGateLoggedEpoch = -1;
+                            this.LogRadarSpawnGateOnce();
+                        }
+                    }
                 }
+
+                // Spawn-gate table batch + month/period resort tick (plan 6.1/6.6): both are
+                // budget-bounded and this tick already runs only while the sub-tab is active;
+                // the table pass additionally requires IsWorldReady (no pre-world reads).
+                this.TickRadarSpawnGateBatch(handle, now);
+                this.TickRadarSpawnGateResort(handle, now);
 
                 if (handle.SearchField != null)
                 {

@@ -1873,6 +1873,16 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
   Hidden book ids 51305, 51406, 51503 and 63001 are excluded from the quick sets. A predicate
   that matches nothing is stored as the sentinel id 1 in the existing list, so the allow-list
   stays restrictive and the summary shows `0 selected`.
+  Species whose **spawn window is currently closed** do not appear in the grid: the calendar
+  month mask (`appearMonth`), the in-day schedule (`timePeriod`, Morning/Day/Evening/Night of the
+  game clock), and the festival window — read as the game's own verdict (`PictorialBase`
+  season type: not-open / past / resurface-weeks via the encyclopedia unlock condition). Quick
+  buttons never select window-closed ids. The saved allow-list is never rewritten by this: a
+  selected but currently closed species stays in the settings and in `N filtered`, only its cell
+  is hidden, and it reappears highlighted when the window opens again. Everything fails open —
+  if the game tables or the season verdict cannot be read, the list shows every species as before.
+  Implementation: `HeartopiaComplete.RadarSpawnGate.cs`, plan
+  [2026-11-01-radar-filter-spawn-expiry.md](plans/2026-11-01-radar-filter-spawn-expiry.md).
 - Max distance slider (25–1000 m, default 75 m).
 - Marker styles: **Default** (icon markers) or **Simple Text**.
 - Force refresh scan button.
