@@ -88,7 +88,7 @@ namespace HeartopiaMod
     //
     // Layout replays the source y-cursor chain (content top margin 8 standing in for startY,
     // the Foraging convention), with the two documented height deviations noted below:
-    //   auto card      y=8    h=176  (capture 38, status 43, hint 74, checkbox 98, start/stop 126)
+    //   auto card      y=8    h=176  (capture+reset 38, status 43, hint 74, checkbox 98, start/stop 126)
     //   y += 188   →   radius card  y=196 h=88  (labels 34, slider 54)
     //   y += 100   →   privacy card y=296 h=88  (labels 34, slider 54)
     //   y += 100   →   crops card   y=396 h=160 (storage lbl 36, picker 58, refresh 90, sel 122)
@@ -110,6 +110,14 @@ namespace HeartopiaMod
     // NOTE (2026-09-04): the PRIVACY PAUSE card was inserted after the radius card, so everything
     // from the crops card down is a further +100 (its 88 height + the uniform 12px gap). It has no
     // IMGUI twin — the feature is UGUI-only.
+    // NOTE (2026-11-04): Reset capture joined the auto card's y=38 row — CaptureButton shrank
+    // 200→140px, Reset (danger) sits at 164/130x28. The card height (176) and every y below it
+    // are UNCHANGED. Reset is SetActive-gated on homelandFarmAutoCaptured in the Sync pass
+    // (visible only when there is something to reset; user call same day, supersedes the "never
+    // gated" Mass Cook precedent from the plan); the CapturedLabel x is RELATIVE to its row
+    // neighbour and slides on the visibility flip: 166 (Capture.right+10 — the original 226=16+
+    // 200+10 gap preserved over the narrower button) while hidden, 302 (Reset.right+8) while
+    // shown. No IMGUI twin exists for this either (the drawer was removed repo-wide).
     //
     // Per-gated-frame cadence (shell visible + New Features tab + Homeland Farm sub, matching
     // the source running these on every IMGUI repaint of the tab):
@@ -167,8 +175,13 @@ namespace HeartopiaMod
 
             // AUTO FARMING card
             public GameObject CaptureButton;      // farmInteractive && !running
+            public GameObject ResetButton;        // SetActive on homelandFarmAutoCaptured (visible only when there is something to reset)
             public GameObject CapturedLabel;
             public string CapturedShown;
+            // CapturedLabel x follows Reset visibility (166 hidden / 302 shown) — cached so the
+            // reposition runs only on state change. true = built state (button active, label at 302).
+            public bool ResetShown = true;
+            public float PanelW;                  // stored at build, same idiom as DailyQuests/Extra
             public Toggle AutoFertilizeToggle;    // live-gated AND write-guarded (file header)
             public GameObject AutoStartButton;    // primary — shown while NOT running
             public GameObject AutoStopButton;     // danger — shown while running (same rect)
@@ -504,6 +517,7 @@ namespace HeartopiaMod
             float contentWidth = w - 22f;   // viewport insets: 4 left + 18 right
             float panelW = contentWidth - 16f; // panels at x=8, 8px right margin
             float rowW = panelW - 32f;      // the source's width-32 inner width
+            handle.PanelW = panelW;         // sync pass re-lays the CapturedLabel off this
 
             // -------- 1. AUTO FARMING card (y=8, h=176 — :22232-22298) --------
             GameObject autoCard = this.CreateUguiSettingsMainPanel(scrollContent, "AutoPanel",
@@ -513,12 +527,23 @@ namespace HeartopiaMod
             handle.CaptureButton = this.CreateUguiPrimaryButton(autoCard.transform, "CaptureButton",
                 this.L("homeland_farm.auto_capture"),
                 new System.Action(this.OnUguiHomelandFarmCaptureClicked));
-            PlaceUguiTopLeft(handle.CaptureButton, 16f, 38f, 200f, 28f);
+            PlaceUguiTopLeft(handle.CaptureButton, 16f, 38f, 140f, 28f);
+            this.TrySetUguiButtonLabelSize(handle.CaptureButton, 12f);
+
+            // 2026-11-04: Reset capture — destructive twin of the Capture row (plan
+            // docs/plans/2026-11-04-homeland-farm-reset-button.md). Danger style; the Sync pass
+            // SetActives it on homelandFarmAutoCaptured (nothing to reset → hidden), while the
+            // backend stays stop + clear / idempotent no-op.
+            handle.ResetButton = this.CreateUguiDangerButton(autoCard.transform, "ResetButton",
+                this.L("homeland_farm.reset_capture"),
+                new System.Action(this.OnUguiHomelandFarmResetClicked));
+            PlaceUguiTopLeft(handle.ResetButton, 164f, 38f, 130f, 28f);
+            this.TrySetUguiButtonLabelSize(handle.ResetButton, 12f);
 
             handle.CapturedShown = string.Empty; // sync pass below paints the real text
             handle.CapturedLabel = this.CreateUguiHomelandFarmSectionLabel(autoCard.transform,
                 "CapturedLabel", string.Empty);
-            PlaceUguiTopLeft(handle.CapturedLabel, 226f, 43f, panelW - 242f, 18f);
+            PlaceUguiTopLeft(handle.CapturedLabel, 302f, 43f, panelW - 318f, 18f);
 
             GameObject hint = this.CreateUguiHomelandFarmSectionLabel(autoCard.transform, "HintLabel",
                 this.L("homeland_farm.auto_hint"));
@@ -863,6 +888,26 @@ namespace HeartopiaMod
             // -------- AUTO FARMING --------
             this.SetUguiButtonInteractable(handle.CaptureButton,
                 farmInteractive && !this.homelandFarmAutoRunning); // :22239
+            // Reset capture is only shown while there is something to reset (user call
+            // 2026-11-04, supersedes the Mass Cook "never gated" precedent from the plan): the
+            // snapshot is its only subject — with none captured the danger-styled button just
+            // dangles a no-op. The handler stays an idempotent no-op regardless; a running loop
+            // always implies a snapshot, so the button never hides mid-run. The CapturedLabel
+            // slides into the freed slot (x=166 hidden / x=302 shown) so no gap is left behind —
+            // repositioned only when the visibility actually flips.
+            bool resetShown = this.homelandFarmAutoCaptured;
+            SetUguiGoActive(handle.ResetButton, resetShown);
+            if (resetShown != handle.ResetShown)
+            {
+                // Label x is RELATIVE to its row neighbour, not absolute: the pre-Reset design
+                // kept it 10px right of Capture's right edge (226 = 16 + 200 + 10). Capture is
+                // 140 wide now, so the hidden state keeps that same gap: 16 + 140 + 10 = 166.
+                // The shown state places it right of Reset: 164 + 130 + 8 = 302. Width keeps the
+                // source's 16px right margin (panelW - x - 16).
+                handle.ResetShown = resetShown;
+                PlaceUguiTopLeft(handle.CapturedLabel, resetShown ? 302f : 166f, 43f,
+                    handle.PanelW - (resetShown ? 318f : 182f), 18f);
+            }
             this.SyncUguiSelfLabelText(handle.CapturedLabel, ref handle.CapturedShown,
                 this.homelandFarmAutoCaptured
                     ? this.LF("homeland_farm.auto_captured", this.homelandFarmAutoPlanterCount)
@@ -983,6 +1028,21 @@ namespace HeartopiaMod
         private void OnUguiHomelandFarmCaptureClicked()
         {
             this.CaptureHomelandFarmAutoPlanters();
+        }
+
+        // Reset capture (plan 2026-11-04): always clickable — the backend stops a running
+        // auto-farm/op first, then clears the snapshot + caches (idempotent). try/catch +
+        // ModLogger per the Mass Cook reset handler idiom (UguiFeaturesMassCookContent.cs:1957).
+        private void OnUguiHomelandFarmResetClicked()
+        {
+            try
+            {
+                this.ResetHomelandFarmAutoCapture();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiShell] Homeland Farm capture reset error: " + ex.Message);
+            }
         }
 
         // :22261-22271 — the WRITE guard re-evaluates hasSelectedFertilizer at click time and

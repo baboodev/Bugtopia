@@ -2080,7 +2080,7 @@ Crop-box (planter) farming inside your homeland. All operations are **radius-bas
 
 Tab layout (top → bottom):
 
-1. **Auto Farming** — Capture planters + Start / Stop.
+1. **Auto Farming** — Capture planters + Reset capture + Start / Stop.
 2. **Farm Radius** — single slider (1–80 m) driving every operation below; **persisted to config**.
 3. **Privacy Pause** — single slider (0–100 m, **0 = off**, default off); **persisted to config**.
 4. **Crops** — seed source (Backpack / Warehouse / Both), Refresh seeds, seed selector.
@@ -2104,7 +2104,7 @@ Item names in the seed/fertilizer selectors resolve through the same game-table 
 
 ### Auto Farming
 
-**Capture planters** snapshots the crop boxes in radius (like Mass Cook "Capture Stoves") and pins the working-zone center. **Start auto farm** then runs an autonomous loop (disabled until seeds are selected):
+**Capture planters** snapshots the crop boxes in radius (like Mass Cook "Capture Stoves") and pins the working-zone center. **Reset capture** undoes that snapshot without any world scan: it stops a running auto farm / operation first, then clears the captured planters, sow points, crop and field caches and the field-owner gate — a stale "Captured N planter(s)" from another field or world can therefore be dropped explicitly. The button appears only while a capture exists (hidden when there is nothing to reset) and never touches settings: radius, seed/fertilizer selection and keybinds survive a reset. A capture left idle across a **world change** (entering or leaving any level) is cleared automatically too — netIds are per world instance, and re-entering the same farm regenerates every planter's netId, so the old snapshot is provably dead ids; the status card then reads "Capture cleared — the world changed". A *running* auto farm is exempt and keeps its snapshot until it ends on its own (remote weed/harvest from another world is a deliberate feature). **Start auto farm** then runs an autonomous loop (disabled until seeds are selected):
 
 1. **Discovery first** — one radius scan builds a crop-netId cache (so it never re-sows already-occupied planters on restart).
 2. **Poll** the cached crops directly (no re-scan): remove weeds, harvest ripe crops, drop them from the cache.

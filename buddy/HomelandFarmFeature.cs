@@ -243,6 +243,12 @@ namespace HeartopiaMod
         private Vector3 homelandFarmAutoCenter = Vector3.zero;
         private float homelandFarmAutoCaptureRadius = 0f;
         private int homelandFarmAutoPlanterCount = 0;
+        // WorldReadyEpoch at the moment the planters were captured (0 = no stamp). Lazy-epoch idiom
+        // (PetPoopFeature.RefreshPetPoopEntries): when the epoch moved on while the snapshot idled,
+        // the capture belongs to a torn-down world instance — measured on the live build (plan
+        // 2026-11-04 §8.8) that re-entering the SAME farm regenerates every box/crop netId, so the
+        // stale snapshot is 100% dead ids. UpdateHomelandFarmBackground auto-clears it.
+        private int homelandFarmCaptureWorldEpoch = 0;
         // Last reported sow outcome, so ReportHomelandFarmAutoSowOutcome logs on CHANGE only.
         private string homelandFarmAutoSowReportSignature = string.Empty;
         private int homelandFarmAutoCaptureExcludedOutsideRadius = 0;
@@ -1000,6 +1006,25 @@ namespace HeartopiaMod
             if (this.CurrentWorldStage < WorldStage.LevelBuilt || !this.IsHomelandFarmSceneLoadFinished())
             {
                 return;
+            }
+
+            // Auto-reset a planter snapshot that belongs to a torn-down world (lazy-epoch idiom,
+            // PetPoopFeature.RefreshPetPoopEntries — netIds are per instance; measured live
+            // 2026-11-04, plan §8.8: re-entering the SAME farm returns ZERO intersection with the
+            // captured box netIds, so the snapshot is dead ids even when the field looks identical).
+            // A RUNNING loop is deliberately exempt: remote weed/harvest across worlds is a shipped
+            // feature and stopping a coroutine mid-AuraMono pass is its own crash class — the
+            // snapshot dies on the loop's own end instead (plan §8.4). epoch is monotonic, so this
+            // fires at most once per world arrival; stamp 0 after the drop keeps it idempotent.
+            if (this.homelandFarmAutoCaptured
+                && this.homelandFarmCaptureWorldEpoch != 0
+                && this.homelandFarmCaptureWorldEpoch != this.WorldReadyEpoch
+                && !this.homelandFarmAutoRunning
+                && this.homelandFarmCoroutine == null)
+            {
+                this.ClearHomelandFarmCaptureState(
+                    "world epoch " + this.homelandFarmCaptureWorldEpoch + " -> " + this.WorldReadyEpoch,
+                    true);
             }
 
             // Kick the one-time warmup as soon as the world is ready instead of on the first Farm-tab
@@ -11579,6 +11604,76 @@ namespace HeartopiaMod
             this.homelandFarmBusyUntil = Time.realtimeSinceStartup + HomelandFarmActionCooldownSeconds;
         }
 
+        // "Reset capture" button handler: drop a stale planter capture WITHOUT scanning the world.
+        // The capture flags are otherwise only ever cleared by the capture-failure path, so a
+        // snapshot taken on another field / in another world keeps feeding the auto loop's
+        // presence gate (AutoFieldOwnerNetId), the captured-field scan shortcut
+        // (TryHomelandFarmIsOnCapturedOwnField) and the away re-sow data. Mirrors the Mass Cook
+        // precedent (NetCook.cs ResetNetCookCaptureContext): stop first, then clear. Pure managed
+        // field state — no reflection / AuraMono / game calls, so no world-ready gate needed.
+        private void ResetHomelandFarmAutoCapture()
+        {
+            // Stop first (Mass Cook reset semantics). StopHomelandFarmCoroutine is the canonical
+            // teardown: it clears autoRunning, the scan-center override and the auto caches, and
+            // sets the action cooldown. The weed+water hotkey coroutine is deliberately NOT
+            // killed — stopping it mid-AuraMono pass is its own crash class, and its in-flight
+            // scan holds its netIds in locals, so clearing these lookup caches under it is safe.
+            if (this.homelandFarmAutoRunning || this.homelandFarmCoroutine != null
+                || Time.realtimeSinceStartup < this.homelandFarmBusyUntil)
+            {
+                this.StopHomelandFarmCoroutine();
+            }
+
+            this.ClearHomelandFarmCaptureState("manual", false);
+
+            // The toast belongs to the button press only — the automatic world-change path stays
+            // silent (it lands minutes after a loading screen and would only confuse; the status
+            // card + the sync pass's "Not captured…" label explain it at tab open instead).
+            this.AddMenuNotification(this.L("homeland_farm.status_reset"), new Color(1f, 0.75f, 0.45f));
+        }
+
+        // Shared capture-drop core (manual reset + world-change auto-reset): pure managed field
+        // state, no scan / reflection / AuraMono / game calls, so it needs no world-ready gate.
+        // `reason` goes into the Tier-1 log ("manual", "world epoch 7 -> 8"); `worldChanged` only
+        // picks the status-card key. Idempotent: after a drop the stamp is 0 and the auto condition
+        // never re-fires until the next capture.
+        private void ClearHomelandFarmCaptureState(string reason, bool worldChanged)
+        {
+            int wasPlanterCount = this.homelandFarmAutoPlanterCount;
+            bool wasCaptured = this.homelandFarmAutoCaptured;
+
+            this.homelandFarmAutoCaptured = false;
+            this.homelandFarmAutoPlanterCount = 0;
+            this.homelandFarmAutoCenter = Vector3.zero;
+            this.homelandFarmAutoCaptureRadius = 0f;
+            this.homelandFarmAutoCaptureExcludedOutsideRadius = 0;
+            this.homelandFarmAutoFieldOwnerNetId = 0U;
+            this.homelandFarmCaptureWorldEpoch = 0;
+
+            // The existing cleanup mechanism (shared with re-capture and stop): captured sow
+            // points / crops / farm-netId sets, field freshness, run caches, event-fed state.
+            this.ClearHomelandFarmAutoCaches();
+
+            // The one capture-scoped cache ClearHomelandFarmAutoCaches does NOT cover: stale
+            // putZone entries for now-dead planter netIds would outlive the reset and could be
+            // hit by a netId collision on a later field (read in TryHomelandFarmResolveBoxField-
+            // Placement). Cleared here only — re-capture/stop keep their current cache scope.
+            this.homelandFarmResolvedPutZoneByPlanterNetId.Clear();
+
+            // Status stores a translation KEY (the UGUI status card localizes it, status_stopped
+            // idiom) — not raw English.
+            this.homelandFarmLastStatus = worldChanged
+                ? "homeland_farm.status_reset_world"
+                : "homeland_farm.status_reset";
+
+            FeatureLog.Life(HomelandFarmTag, (worldChanged ? "capture auto-reset: " : "capture reset: ")
+                + reason + " (was captured=" + wasCaptured + " planters=" + wasPlanterCount
+                + ") — cleared the planter snapshot and all capture caches.");
+            this.HomelandFarmLog("Auto capture " + (worldChanged ? "auto-reset" : "reset")
+                + " (" + reason + ", was captured=" + wasCaptured
+                + " planters=" + wasPlanterCount + ").");
+        }
+
         // Drops every auto-farm-only entity cache. Called when (re)capturing planters and when auto
         // farm stops, so a fresh run never reuses targets registered on a previous run / another
         // player's field (stale RegisteredCache netIds were the source of the immediate Capture crash:
@@ -11717,6 +11812,15 @@ namespace HeartopiaMod
             this.homelandFarmAutoCaptureRadius = radius;
             this.homelandFarmAutoPlanterCount = planterCount;
             this.homelandFarmAutoCaptured = true;
+            // Stamp the world this snapshot belongs to; written in the same commit block as the
+            // flags (capture is synchronous in one OnUpdate frame), read lazily in
+            // UpdateHomelandFarmBackground. Tier-1 line: the stamp must be visible in logs without
+            // MasterLogHomelandFarm, so a later auto-reset's "epoch X -> Y" is verifiable (plan
+            // §8.7.1). Button press only — never per-frame.
+            this.homelandFarmCaptureWorldEpoch = this.WorldReadyEpoch;
+            FeatureLog.Life(HomelandFarmTag, "capture: planters=" + planterCount
+                + " world epoch=" + this.homelandFarmCaptureWorldEpoch
+                + " — snapshot stamped to this world.");
             // Remember which field this is (scan-free presence gate for the auto loop). 0 = unknown →
             // the loop falls back to the scan-free own-homeland flag.
             this.homelandFarmAutoFieldOwnerNetId =
