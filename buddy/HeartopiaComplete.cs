@@ -3297,6 +3297,21 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Same cap guard as the durability trigger - the menu button and the bag-automation
+            // replay must not walk into a CanPut refusal either. Checked BEFORE the trigger
+            // timestamp advances: a refused attempt must not spend the debounce window for a
+            // repair that never started. Consume the queue flag on the skip - a leftover
+            // pending request would otherwise wedge every later trigger on "already queued"
+            // while the standing kit blocks the machine.
+            if (this.TryOwnPlacedRepairKitPresent(out uint standingKitNetId, out string kitProbeStatus))
+            {
+                this.pendingAutoRepairRequest = false;
+                this.lastStartWasAutoRepair = false;
+                this.AutoEatRepairLog("[StartRepair] skipped: " + kitProbeStatus + ".");
+                this.LogOwnKitSkip("StartRepair", standingKitNetId);
+                return;
+            }
+
             this.lastRepairTriggerTime = repairStartNow;
             this.AutoEatRepairLog($"[StartRepair] invoked at Time.unscaledTime={repairStartNow}");
 
@@ -3393,8 +3408,28 @@ namespace HeartopiaMod
             switch (repairStep)
             {
                 case DIRECT_REPAIR_STEP_USE:
+                    // Hard gate covering every throw path (game anim path, direct send, the
+                    // VERIFY retry loop, the multi-kit WAIT release): if the player's OWN
+                    // restorer device is still standing, the server's CanPut cap answers false
+                    // and the game pops "Unable to place more!" - end the machine instead of
+                    // burning kits (and dialogs) on refusals. The standing device IS the
+                    // in-progress repair; the next trigger after it despawns proceeds.
+                    if (this.TryOwnPlacedRepairKitPresent(out uint standingKitNetId, out string kitProbeStatus))
+                    {
+                        this.AutoEatRepairLog("[AutoRepair] USE step stopped: " + kitProbeStatus + ".");
+                        this.LogOwnKitSkip("repair machine throw", standingKitNetId);
+                        isRepairing = false;
+                        repairStep = 0;
+                        break;
+                    }
+
                     if (this.TryDirectUseRepairKit())
                     {
+                        // A successful throw places a device that the 2 s probe cache has never
+                        // seen - drop the cache so the VERIFY retry and the (early) WAIT release
+                        // re-read the world instead of getting this throw's own pre-throw
+                        // "nothing standing" answer and throwing kit #2 against kit #1.
+                        this.InvalidateOwnKitProbe();
                         this.lastRepairUseNetId = this.lastDirectBackpackMatchedNetId;
                         this.lastRepairUseCountBefore = this.lastDirectBackpackMatchedCount;
                         this.repairVerifyChecks = 0;

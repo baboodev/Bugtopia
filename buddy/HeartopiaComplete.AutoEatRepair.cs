@@ -235,13 +235,16 @@ namespace HeartopiaMod
                 // the kit was never consumed, or the player left the restore aura before it
                 // finished), durability stays pinned at/below the threshold and the latch would
                 // otherwise disable auto-repair forever. Once the repair machinery is fully idle
-                // (state machine AND restore aura) and the re-arm delay elapsed, drop the latch
-                // so the next poll can trigger a fresh repair.
+                // (state machine AND restore aura AND no own restorer device still standing - a
+                // device outlives the buff edge when the player walks out of the circle, and the
+                // next throw against it would pop "Unable to place more!") and the re-arm delay
+                // elapsed, drop the latch so the next poll can trigger a fresh repair.
                 if (this.liveDurabilityLowLatched
                     && liveDurabilityRatio <= repairTriggerRatio
                     && now >= this.liveDurabilityLatchRearmAt
                     && !this.IsAutoRepairActiveOrQueued()
-                    && !this.IsRepairAuraActive())
+                    && !this.IsRepairAuraActive()
+                    && !this.TryOwnPlacedRepairKitPresent(out _, out _))
                 {
                     this.liveDurabilityLowLatched = false;
                     this.AutoEatRepairLog($"[AutoRepair] Durability still low ({durability}/{maxDurability}) after a triggered repair went idle; latch re-armed.");
@@ -1316,6 +1319,278 @@ namespace HeartopiaMod
             });
         }
 
+        // --- Own placed repair-kit probe (prevents the "Unable to place more!" dialog) ---
+        // The server caps how many ToolRestorer devices one player may have standing: another
+        // CanPutRestorer while one is still up answers Result=false and the game pops
+        // UiAlertWithCancelEvent{contentText=81} ("Unable to place more! Clear existing Repair
+        // Kits and place new ones?") - ToolRestorerProtocolManager.CanPutRestorerResult via
+        // ToolRestorerSyncSystem. The repair-aura bookkeeping cannot cover this case: its
+        // precise OFF edge (buff 701-706 true->false) fires the moment the player steps out of
+        // the 5 m circle while the device KEEPS standing, and the 30 s fallback window is
+        // shorter than a tier-3 kit's buff (BuffConfig 703/706 _time = 40 s). So every throw
+        // decision must also ask the world: is an OWN restorer entity placed right now?
+        // Entity source: Entities.GetComponents<ToolRestorerComponent> (ViewComponent;
+        // ownerNetId inside the inline _componentData struct - boxed-copy read exactly like
+        // TryReadSandRoughComponentData). Probed only at decision points (durability trigger,
+        // StartRepair, USE step, latch re-arm) behind a 2 s cache - worst case ~0.5 Hz for the
+        // life of a standing kit, never from the frame loop.
+        private static readonly string[] ToolRestorerKitViewImages = { "XDTLevelAndEntity", "XDTLevelAndEntity.dll" };
+        private const float OwnPlacedKitProbeCacheSeconds = 2f;
+        private const float OwnKitSkipLogIntervalSeconds = 30f;
+        // How stale the last probe result may be before the Repair Status row stops claiming
+        // "own kit standing". Must cover the trigger gate's own re-probe pacing: the gate
+        // short-circuits the durability polls on the 10 s toast cooldown BEFORE reaching the
+        // probe, and the live durability path is event-driven, so a freshness window shorter
+        // than that pacing makes the suffix flicker while nothing about the world changed.
+        private const float OwnPlacedKitProbeFreshDisplaySeconds = 20f;
+        private IntPtr cachedToolRestorerKitViewClass;
+        private bool ownPlacedKitProbePresent;
+        private uint ownPlacedKitProbeNetId;
+        private string ownPlacedKitProbeStatus = string.Empty;
+        private float nextOwnPlacedKitProbeAt = -999f;
+        private float ownPlacedKitProbeAt = -999f;
+        private float nextOwnKitSkipLogAt = -999f;
+
+        private IntPtr ResolveToolRestorerKitViewClass()
+        {
+            if (this.cachedToolRestorerKitViewClass != IntPtr.Zero)
+            {
+                return this.cachedToolRestorerKitViewClass;
+            }
+
+            // Gameplay/GamePlay spelling aliases (TYPE_RESOLUTION ritual); a Zero result is
+            // NOT cached - the image only exists in-world, and the probe is throttled anyway.
+            IntPtr cls = this.FindAuraMonoClassInImages(
+                "XDTLevelAndEntity.Gameplay.Component.DisplayItem", "ToolRestorerComponent", ToolRestorerKitViewImages);
+            if (cls == IntPtr.Zero)
+            {
+                cls = this.FindAuraMonoClassInImages(
+                    "XDTLevelAndEntity.GamePlay.Component.DisplayItem", "ToolRestorerComponent", ToolRestorerKitViewImages);
+            }
+
+            if (cls == IntPtr.Zero)
+            {
+                cls = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Gameplay.Component.DisplayItem.ToolRestorerComponent");
+            }
+
+            if (cls == IntPtr.Zero)
+            {
+                cls = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.GamePlay.Component.DisplayItem.ToolRestorerComponent");
+            }
+
+            this.cachedToolRestorerKitViewClass = cls;
+            return cls;
+        }
+
+        // ToolRestorerComponentData { int staticId; bool showEffect; uint parentNetId; uint ownerNetId; }
+        // is an INLINE field on the view component; TryGetMonoObjectMember returns a boxed copy, so
+        // the field offsets carry the 2-pointer box header (SandSculpture idiom). Pin the box around
+        // the reads - each getter-free member read can allocate and sgen moves what it collects.
+        private unsafe bool TryReadToolRestorerKitData(IntPtr componentObj, out uint ownerNetId, out int staticId)
+        {
+            ownerNetId = 0U;
+            staticId = 0;
+            if (componentObj == IntPtr.Zero || auraMonoObjectGetClass == null || auraMonoObjectUnbox == null
+                || auraMonoClassGetFieldFromName == null || auraMonoFieldGetOffset == null)
+            {
+                return false;
+            }
+
+            if (!this.TryGetMonoObjectMember(componentObj, "_componentData", out IntPtr boxedData) || boxedData == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            uint boxPin = AuraMonoPinNew(boxedData);
+            try
+            {
+                IntPtr dataClass = auraMonoObjectGetClass(boxedData);
+                if (dataClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr ownerField = auraMonoClassGetFieldFromName(dataClass, "ownerNetId");
+                IntPtr staticField = auraMonoClassGetFieldFromName(dataClass, "staticId");
+                if (ownerField == IntPtr.Zero || staticField == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr raw = auraMonoObjectUnbox(boxedData);
+                if (raw == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                int header = 2 * IntPtr.Size;
+                ownerNetId = (uint)Marshal.ReadInt32(raw, (int)auraMonoFieldGetOffset(ownerField) - header);
+                staticId = Marshal.ReadInt32(raw, (int)auraMonoFieldGetOffset(staticField) - header);
+                return true;
+            }
+            catch
+            {
+                // Silent per component - the probe loop counts failures and logs ONE summary;
+                // a patched-away field name would otherwise repeat this line per component,
+                // per probe, for the whole life of the standing kit.
+                return false;
+            }
+            finally
+            {
+                AuraMonoPinFree(boxPin);
+            }
+        }
+
+        // Drop the probe cache so the next query re-reads the world. The USE step calls this
+        // right after a successful throw: the cache would otherwise hand that same machine's
+        // VERIFY retries and early WAIT releases the stale PRE-throw "nothing standing" answer
+        // - exactly the second-throw-against-the-standing-kit case the gate exists to stop.
+        private void InvalidateOwnKitProbe()
+        {
+            this.nextOwnPlacedKitProbeAt = -999f;
+            this.ownPlacedKitProbePresent = false;
+            this.ownPlacedKitProbeNetId = 0U;
+        }
+
+        // TRUE only when a restorer entity OWNED BY THE LOCAL PLAYER is confirmed standing right now.
+        // A failed/unavailable scan returns false (fail-open) and says so in `status` - never report
+        // "kit standing" off a scan that could not run; the existing window/buff guards stay in
+        // charge in that case. The game's own Repair-button owner id (TryResolveSelfPlayerNetId) is
+        // the comparison, same as FurnitureAutoRepair.
+        private unsafe bool TryOwnPlacedRepairKitPresent(out uint restorerNetId, out string status)
+        {
+            float now = Time.unscaledTime;
+            if (now < this.nextOwnPlacedKitProbeAt)
+            {
+                restorerNetId = this.ownPlacedKitProbeNetId;
+                status = this.ownPlacedKitProbeStatus;
+                return this.ownPlacedKitProbePresent;
+            }
+
+            this.nextOwnPlacedKitProbeAt = now + OwnPlacedKitProbeCacheSeconds;
+            restorerNetId = 0U;
+            status = string.Empty;
+            bool present = false;
+            bool cacheable = true;
+
+            try
+            {
+                IntPtr cls = this.ResolveToolRestorerKitViewClass();
+                if (cls == IntPtr.Zero)
+                {
+                    status = "ToolRestorer view class unavailable";
+                    cacheable = false;
+                }
+                else if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null
+                         || !AuraMonoPinningAvailable)
+                {
+                    status = "AuraMono/pinning unavailable for own-kit probe";
+                    cacheable = false;
+                }
+                else if (!this.TryResolveSelfPlayerNetId(out uint selfNetId) || selfNetId == 0U)
+                {
+                    status = "self player netId unavailable";
+                    cacheable = false;
+                }
+                else
+                {
+                    // Pinned enumeration; the enumeration itself runs INSIDE the try so an
+                    // exception mid-way still frees the pins collected so far.
+                    List<uint> pins = new List<uint>();
+                    try
+                    {
+                        // infrastructureOk is a close proxy, not a perfect one: the helper sets
+                        // it once the inflated GetComponents invoke returns, so a failure while
+                        // ENUMERATING the result list (world change tearing the scan mid-way)
+                        // still reports true and is taken as the "no placed restorers" negative
+                        // below. Rare and self-healing on the next probe - accepted.
+                        if (!this.TryAuraMonoGetComponentObjects(cls, out List<IntPtr> components, out bool infrastructureOk, pins))
+                        {
+                            if (infrastructureOk)
+                            {
+                                status = "no placed restorers";
+                            }
+                            else
+                            {
+                                status = "restorer scan unavailable";
+                                cacheable = false;
+                            }
+                        }
+                        else
+                        {
+                            int readFailures = 0;
+                            for (int i = 0; i < components.Count; i++)
+                            {
+                                if (!this.TryReadToolRestorerKitData(components[i], out uint ownerNetId, out int staticId))
+                                {
+                                    readFailures++;
+                                    continue; // unreadable instance - never treated as ours
+                                }
+
+                                if (ownerNetId == selfNetId)
+                                {
+                                    present = true;
+                                    // The device entity's own netId (0 when unreadable - the
+                                    // ownerNetId must never be printed as if it were the device).
+                                    this.TryHomelandFarmTryReadAuraMonoComponentNetId(components[i], out restorerNetId);
+                                    status = "own repair kit standing (device=" + restorerNetId + " kitStaticId=" + staticId + ")";
+                                    break;
+                                }
+                            }
+
+                            if (!present)
+                            {
+                                status = "no placed restorers";
+                            }
+
+                            if (readFailures > 0)
+                            {
+                                // One summary per probe, not one line per component - a renamed
+                                // field would otherwise repeat per component per probe.
+                                this.AutoEatRepairLog("[AutoRepair] own-kit probe: " + readFailures
+                                    + " restorer component(s) unreadable" + (present ? " (own kit matched elsewhere)" : string.Empty) + ".");
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        FreeAuraMonoPins(pins);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                status = "own-kit probe exception: " + ex.Message;
+                present = false;
+                cacheable = false;
+            }
+
+            this.ownPlacedKitProbePresent = present;
+            this.ownPlacedKitProbeNetId = restorerNetId;
+            this.ownPlacedKitProbeStatus = status;
+            this.ownPlacedKitProbeAt = Time.unscaledTime;
+            if (!cacheable)
+            {
+                // A broken scan must not linger in the cache - retry at the next moment.
+                this.nextOwnPlacedKitProbeAt = Time.unscaledTime + 0.5f;
+            }
+
+            return present;
+        }
+
+        // Shared once-per-window skip line so the user's log shows WHY nothing was thrown
+        // (AutoEatRepairLog is compiled out in ship builds).
+        private void LogOwnKitSkip(string action, uint restorerNetId)
+        {
+            float now = Time.unscaledTime;
+            if (now >= this.nextOwnKitSkipLogAt)
+            {
+                this.nextOwnKitSkipLogAt = now + OwnKitSkipLogIntervalSeconds;
+                ModLogger.Msg("[AutoRepair] " + action + " skipped: own repair kit still placed (device=" + restorerNetId
+                    + ") - a new throw would pop the game's \"Unable to place more!\" dialog.");
+            }
+        }
+
         // --- Event-driven Auto Eat / Auto Repair triggers ---
         // Replaces the poll-only detection (energy = UI-text parse of the energy panel;
         // durability = timed AuraMono read):
@@ -1748,6 +2023,17 @@ namespace HeartopiaMod
             {
                 this.nextAutoRepairToastAllowedAt = now + Mathf.Max(2f, this.resourceAutoRepairPauseSeconds);
                 this.AutoEatRepairLog("[AutoRepair] Durability trigger ignored from " + source + " because repair is already queued.");
+                return false;
+            }
+
+            // The player's own restorer device is still standing server-side: a fresh throw
+            // would hit the CanPut cap and pop the game's "Unable to place more!" dialog.
+            // Pace the retry instead of starting a doomed machine.
+            if (this.TryOwnPlacedRepairKitPresent(out uint standingKitNetId, out string kitProbeStatus))
+            {
+                this.nextAutoRepairToastAllowedAt = now + 10f;
+                this.AutoEatRepairLog("[AutoRepair] Durability trigger ignored from " + source + " because " + kitProbeStatus + ".");
+                this.LogOwnKitSkip("durability trigger", standingKitNetId);
                 return false;
             }
 
@@ -3881,6 +4167,16 @@ namespace HeartopiaMod
             if (this.pendingAutoRepairRequest)
             {
                 return this.L("Queued");
+            }
+
+            // A standing own kit outranks the placement tier: it explains why nothing is being
+            // thrown right now (same role as the "ground 3m / at feet" tier suffix). Only while
+            // the last probe is fresh - the probe is not a poll, so staleness means the
+            // machinery has not asked recently, not that no kit stands.
+            if (this.ownPlacedKitProbePresent
+                && Time.unscaledTime - this.ownPlacedKitProbeAt <= OwnPlacedKitProbeFreshDisplaySeconds)
+            {
+                return this.L("Ready") + " · own kit standing";
             }
 
             // Where the last direct throw actually put the kit — the tiers degrade silently, so this

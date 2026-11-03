@@ -1402,6 +1402,17 @@ is not available at all (a boss run) or every spot refused in a row.
 
 - Opens bag UI programmatically, finds repair kit (standard or crafty), clicks Use, closes bag.
 - Trigger modes: manual hotkey, toast notification, **durability percentage threshold** (default 10%).
+- **Never throws while the player's own kit is still standing** (since 2026-11-03). The server caps how
+  many repair-kit devices one player may have placed at once: another throw answers the CanPut check
+  with "no" and the game pops **"Unable to place more! Clear existing Repair Kits and place new
+  ones?"** (localization id 81). A thrown kit keeps counting at the server even after its aura buff
+  ends — the buff ends the moment the player steps out of the 5 m circle, the device stays. Auto
+  Repair now probes for a placed restorer entity owned by the local player
+  (`Entities.GetComponents<ToolRestorerComponent>`, owner filter) before every trigger and before
+  every throw inside the machine, and skips instead of throwing against the cap — covering kits the
+  player placed by hand too. The Repair Status row shows `Ready · own kit standing` while that skip
+  is in effect, and the log gets one throttled `[AutoRepair] … skipped: own repair kit still placed`
+  line per half-minute. Fail-open: if the scan itself cannot run, auto repair behaves as before.
 - Optional teleport backward before repair (configurable distance).
 - **The primary path is the trimmed game throw** (since 2026-08-06). Configs written before that
   are migrated once on load (`repairThrowPathTrimMigrated`), otherwise the switch would be invisible
@@ -1458,7 +1469,8 @@ is not available at all (a boss run) or every spot refused in a row.
 - The **Repair Status** row appends the placement the last direct throw resolved to
   (`Ready · z 3m`, `Ready · x -1.5m + z 3m`, `Ready · at feet`, and `Ready · at player` when all
   three sliders sit at zero — only non-zero axes are listed), and every throw logs one
-  `[AutoRepair] throw target` line with the resolved position, player position and facing.
+  `[AutoRepair] throw target` line with the resolved position, player position and facing. While a
+  placed own kit is blocking throws, `Ready · own kit standing` replaces the placement tier.
 
 **Auto Eat**
 
