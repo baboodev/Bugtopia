@@ -689,6 +689,179 @@ namespace HeartopiaMod
 
         private GameObject GetPlayer() => GetLocalPlayer();
 
+        // XZ disagreement tolerated between the self Mono entity and the p_player_skeleton(Clone)
+        // GameObject before that GameObject is treated as ours. Same threshold the auto-fishing cast
+        // facing (commit 43416ff) and the noclip hover seed use — normal drift is centimetres of
+        // visual interpolation lag; metres means the Find landed on somebody else.
+        private const float SkeletonSelfAgreementMeters = 2.5f;
+        private float skeletonVerifyWarnAt;
+        private int skeletonIdentityLogEpoch = -1;
+
+        // Unity transform instanceID of the entity the game ITSELF names as local (the GAS entity
+        // behind the noclip drive component — the same object base the write paths already use).
+        // Live-proven on the running build 2026-11-01 by a hot-load probe: Entities.MainPlayer
+        // resolves, its netId equals the mod's authoritative self netId, isSelfPlayer=true. The
+        // singleton is set ONLY when entity.isSelfPlayer, so "skeleton transform id == this id" is
+        // IDENTITY, not proximity. The entity's transform is a MONO-side UnityEngine proxy, NOT an
+        // il2cpp pointer (wrapping that handle as an Il2Cpp transform AV'd the process once during
+        // probing); the proxy's GetInstanceID returns the same Unity id the il2cpp wrapper reports,
+        // which is what lets the two layers compare without ever wrapping a raw pointer. Also
+        // classifies dress-up/preview characters (Entities.CreateGuiCharacter, same resId 307
+        // prefab, same object name) as not-ours.
+        private bool TryGetSelfEntityTransformId(out int transformId)
+        {
+            transformId = 0;
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            if (!this.TryEnsureNoclipPlayerDriveObjects(out IntPtr playerObj, out _) || playerObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryGetMonoObjectMember(playerObj, "entity", out IntPtr entityObj) || entityObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            // entityObj must outlive the method-resolution + invoke calls below; SGen moves what we
+            // hold across any allocation (AGENTS §11) — pin it, free in finally.
+            List<uint> pins = new List<uint>();
+            if (AuraMonoPinningAvailable)
+            {
+                pins.Add(AuraMonoPinNew(entityObj));
+            }
+
+            try
+            {
+                IntPtr entityCls = auraMonoObjectGetClass(entityObj);
+                IntPtr getXform = this.FindAuraMonoMethodOnHierarchy(entityCls, "get_transform", 0);
+                if (getXform == IntPtr.Zero
+                    || !TryAuraInvoke(getXform, entityObj, IntPtr.Zero, out IntPtr xformObj, out string err)
+                    || xformObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                // The proxy's own class — resolved from the live object, never by guessed name.
+                IntPtr xformCls = auraMonoObjectGetClass(xformObj);
+                IntPtr getId = this.FindAuraMonoMethodOnHierarchy(xformCls, "GetInstanceID", 0);
+                if (getId == IntPtr.Zero
+                    || !TryAuraInvoke(getId, xformObj, IntPtr.Zero, out IntPtr boxedId, out err)
+                    || boxedId == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                // Unity instanceIDs are negative for scene objects: reinterpret as signed. A real
+                // instanceID is never 0, so TryUnboxMonoUInt32's reject-zero is not a concern here.
+                if (!this.TryUnboxMonoUInt32(boxedId, out uint rawId))
+                {
+                    return false;
+                }
+
+                transformId = unchecked((int)rawId);
+                return transformId != 0;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+        }
+
+        // The player skeleton ONLY once the self Mono entity proves it is ours. GetLocalPlayer() is a
+        // bare GameObject.Find + 1 s cache and remote players share the object name, so a latch onto
+        // a stranger is silent; this gate is the third pass over that landmine (fishing facing
+        // 43416ff, noclip seed 2026-08-21) covering the teleport/summon writes that still read the
+        // skeleton directly. Null means "not ours (or unproven)" — callers must neither read its
+        // position nor write to it; they keep the entity anchor or skip the write.
+        private GameObject GetVerifiedLocalPlayerSkeleton()
+        {
+            GameObject skeleton = GetPlayer();
+            if (skeleton == null)
+            {
+                return null;
+            }
+
+            // 1) EXACT identity: the Unity transform id of the entity the game's own singleton
+            // names as local. A match is proof, not proximity — it also rejects GUI-preview and
+            // display-box characters that share the prefab name.
+            if (this.TryGetSelfEntityTransformId(out int selfTransformId))
+            {
+                int skeletonTransformId;
+                try
+                {
+                    skeletonTransformId = skeleton.transform.GetInstanceID();
+                }
+                catch
+                {
+                    cachedLocalPlayer = null;
+                    return null;
+                }
+
+                if (skeletonTransformId == selfTransformId)
+                {
+                    if (this.skeletonIdentityLogEpoch != AuraMonoWorldEpoch)
+                    {
+                        this.skeletonIdentityLogEpoch = AuraMonoWorldEpoch;
+                        ModLogger.Msg("[SelfAnchor] skeleton identity proven by transform id "
+                            + selfTransformId + " (self-entity singleton, epoch " + AuraMonoWorldEpoch + ").");
+                    }
+
+                    return skeleton;
+                }
+
+                // The exact condition that warped players onto strangers before — log it when seen.
+                if (Time.unscaledTime >= this.skeletonVerifyWarnAt)
+                {
+                    this.skeletonVerifyWarnAt = Time.unscaledTime + 5f;
+                    ModLogger.Warning("[SelfAnchor] p_player_skeleton(Clone) is NOT ours: transform id "
+                        + skeletonTransformId + " vs self-entity " + selfTransformId
+                        + " (every remote/GUI player shares the object name) — skeleton-based writes skipped.");
+                }
+
+                return null;
+            }
+
+            // 2) The singleton read is unavailable (login, world transition, AuraMono pending):
+            // fall back to the 2.5 m entity-vs-skeleton cross-check — still blind to a body
+            // standing on top of us, but it rejects every far-away latch, which is the class the
+            // bug reports were (a stranger inside their house is never 2.5 m away).
+            if (!this.TryGetNoclipSelfAnchorPose(out Vector3 selfPos, out _, out _, out _))
+            {
+                return null;
+            }
+
+            Vector3 skeletonPos;
+            try
+            {
+                skeletonPos = skeleton.transform.position;
+            }
+            catch
+            {
+                cachedLocalPlayer = null;
+                return null;
+            }
+
+            float drift = new Vector2(skeletonPos.x - selfPos.x, skeletonPos.z - selfPos.z).magnitude;
+            if (drift > SkeletonSelfAgreementMeters)
+            {
+                if (Time.unscaledTime >= this.skeletonVerifyWarnAt)
+                {
+                    this.skeletonVerifyWarnAt = Time.unscaledTime + 5f;
+                    ModLogger.Warning("[SelfAnchor] p_player_skeleton(Clone) is NOT ours: drift "
+                        + drift.ToString("F1") + "m (skeleton " + skeletonPos.ToString("F1")
+                        + ", self entity " + selfPos.ToString("F1") + ") — skeleton-based writes skipped.");
+                }
+
+                return null;
+            }
+
+            return skeleton;
+        }
+
         private GameObject FindPlayerRoot()
         {
             try

@@ -19,6 +19,9 @@ namespace HeartopiaMod
             public string ScoreSeen;
             public GameObject StatusLabel;
             public string StatusShown;
+            public GameObject MoveStatusLabel;
+            public string MoveShown;
+            public bool MoveStatusVisible;
             public int ErrorCount;
         }
 
@@ -75,7 +78,23 @@ namespace HeartopiaMod
             handle.StatusShown = this.BuildUguiHobbyPumpkinStatusText();
             handle.StatusLabel = this.CreateUguiLabel(scrollContent, "Status", handle.StatusShown, 12f, this.UguiKitTextColor(), false);
             PlaceUguiTopLeft(handle.StatusLabel, 8f, 224f, w - 36f, 22f);
-            this.SetUguiScrollContentHeight(scrollContent, 260f);
+
+            // Warehouse refill — the snow MoveSnowballs idiom
+            // (UguiFeaturesPuzzleSnowContent.cs:655-663): primary button + conditional wrapped
+            // muted status label; the scroll height swaps 300/344 with the label (processor).
+            GameObject moveButton = this.CreateUguiPrimaryButton(scrollContent, "MovePumpkinSeeds",
+                this.L("Move pumpkin seeds to backpack"),
+                new System.Action(this.OnUguiHobbyPumpkinMoveClicked));
+            PlaceUguiTopLeft(moveButton, 8f, 254f, 280f, 32f);
+
+            handle.MoveShown = this.pumpkinMoveStatus;
+            handle.MoveStatusLabel = this.CreateUguiLabel(scrollContent, "MoveStatus",
+                handle.MoveShown, 11f, muted, false);
+            this.TrySetUguiLabelWrapped(handle.MoveStatusLabel);
+            PlaceUguiTopLeft(handle.MoveStatusLabel, 8f, 294f, w - 36f, 36f);
+            handle.MoveStatusVisible = !string.IsNullOrEmpty(handle.MoveShown);
+            handle.MoveStatusLabel.SetActive(handle.MoveStatusVisible);
+            this.SetUguiScrollContentHeight(scrollContent, handle.MoveStatusVisible ? 344f : 300f);
 
             handle.Root = block;
             this.uguiShellHobbyPumpkin = handle;
@@ -185,10 +204,39 @@ namespace HeartopiaMod
                     }
                 }
                 this.SyncUguiSelfLabelText(handle.StatusLabel, ref handle.StatusShown, this.BuildUguiHobbyPumpkinStatusText());
+
+                // Move-status label: text synced even while hidden (raw field ref, zero-alloc);
+                // visibility + the 300/344 content-height swap ride the cached flag.
+                this.SyncUguiSelfLabelText(handle.MoveStatusLabel, ref handle.MoveShown, this.pumpkinMoveStatus);
+                bool moveVisible = !string.IsNullOrEmpty(this.pumpkinMoveStatus);
+                if (moveVisible != handle.MoveStatusVisible)
+                {
+                    handle.MoveStatusVisible = moveVisible;
+                    handle.MoveStatusLabel.SetActive(moveVisible);
+                    this.SetUguiScrollContentHeight(handle.ScrollContent, moveVisible ? 344f : 300f);
+                }
             }
             catch
             {
                 handle.ErrorCount++;
+            }
+        }
+
+        // Mirrors OnUguiFeaturesSnowMoveSnowballsClicked (UguiFeaturesPuzzleSnowContent.cs:975-986):
+        // the SAME out-string is stored into pumpkinMoveStatus AND shown as the notification on
+        // both outcomes; failures also go to the file log (Tier-1 rule).
+        private void OnUguiHobbyPumpkinMoveClicked()
+        {
+            if (this.TryMovePumpkinSeedsWarehouseToBackpack(out string moveStatus))
+            {
+                this.pumpkinMoveStatus = moveStatus;
+                this.AddMenuNotification(moveStatus, new Color(0.45f, 1f, 0.55f));
+            }
+            else
+            {
+                this.pumpkinMoveStatus = moveStatus;
+                ModLogger.Msg("[PumpkinCarving] move-from-warehouse failed: " + moveStatus);
+                this.AddMenuNotification(moveStatus, new Color(1f, 0.55f, 0.55f));
             }
         }
     }

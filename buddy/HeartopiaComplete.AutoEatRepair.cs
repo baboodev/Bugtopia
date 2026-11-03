@@ -49,7 +49,7 @@ namespace HeartopiaMod
             }
 
             // For custom food, show the saved custom food name
-            if (index == this.autoEatFoodOptions.Length - 1 && !string.IsNullOrEmpty(this.autoEatCustomFoodName))
+            if (index == this.CustomFoodIndex && !string.IsNullOrEmpty(this.autoEatCustomFoodName))
             {
                 return "Custom: " + GetFoodDisplayName(this.autoEatCustomFoodName);
             }
@@ -2544,6 +2544,17 @@ namespace HeartopiaMod
         private IntPtr autoEatGetEatableMethod = IntPtr.Zero;
         private float nextAutoEatGetEatableResolveAt = -999f;
         private uint autoEatRankLoggedNetId;
+        // "Normal Food" option — event/season dish detection via TableEntity.tags +
+        // EntityTagType labels (see IsEventFoodTagLabel).
+        private IntPtr autoEatGetEntityMethod = IntPtr.Zero;
+        private IntPtr autoEatGetEntityTagTypeMethod = IntPtr.Zero;
+        private float nextAutoEatTableEntityResolveAt = -999f;
+        private readonly Dictionary<int, bool> autoEatEventFoodByStaticId = new Dictionary<int, bool>();
+        private readonly HashSet<int> autoEatEventFoodMissStaticIds = new HashSet<int>();
+        private readonly Dictionary<int, bool> autoEatEventTagByTagId = new Dictionary<int, bool>();
+        private readonly HashSet<int> autoEatEventTagMissIds = new HashSet<int>();
+        private float nextAutoEatEventFoodRetryAt = -999f;
+        private bool autoEatEventFoodReadFailLogged;
 
         private static bool IsEatableEntityType(int entityType)
         {
@@ -2868,6 +2879,302 @@ namespace HeartopiaMod
             }
         }
 
+        // ── "Normal Food": event/season dish detection ───────────────────────────────────────
+        //
+        // The game marks its time-limited event dishes by entity TAGS, not by id range or an
+        // expiry component: TableData.GetEntity(staticId).tags carries EntityTagType ids, and
+        // the season-food tags are SummerSweets(221), HalloweenFood(222), ChinesenewyearFood(223),
+        // AnimalFood(226) and the festival tags whose zh descriptions read "…食物/料理/甜点"
+        // (224/225/227-230/266/271/277/284/289 family). Verified live 2026-11-02:
+        // GetEntity(45129).tags=[303,104,105,221] (t221=SummerSweets/夏日甜点) while plain stove
+        // dishes carry only colour/kitchen/dining tags. Matching the tag LABELS (an English
+        // typeName suffix + zh source description keywords — quoted game DATA, not prose) keeps
+        // future seasons classified automatically; no baked staticId list.
+        // TableData is a global-namespace type: FindAuraMonoClassByFullName returns 0, the
+        // InImages fallback is what resolves it (same two-step as EnsureAutoEatGetEatableMethod).
+        private bool EnsureAutoEatTableEntityMethods()
+        {
+            if (this.autoEatGetEntityMethod != IntPtr.Zero && this.autoEatGetEntityTagTypeMethod != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            if (Time.unscaledTime < this.nextAutoEatTableEntityResolveAt)
+            {
+                return false;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            IntPtr cls = this.FindAuraMonoClassByFullName("TableData");
+            if (cls == IntPtr.Zero)
+            {
+                cls = this.FindAuraMonoClassInImages(string.Empty, "TableData", new[] { "EcsClient", "EcsClient.dll" });
+            }
+
+            if (cls == IntPtr.Zero)
+            {
+                this.nextAutoEatTableEntityResolveAt = Time.unscaledTime + 3f;
+                return false;
+            }
+
+            if (this.autoEatGetEntityMethod == IntPtr.Zero)
+            {
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "GetEntity", 2);
+                if (method == IntPtr.Zero)
+                {
+                    method = this.FindAuraMonoMethodOnHierarchy(cls, "GetEntity", 1);
+                }
+
+                this.autoEatGetEntityMethod = method;
+            }
+
+            if (this.autoEatGetEntityTagTypeMethod == IntPtr.Zero)
+            {
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "GetEntityTagType", 2);
+                if (method == IntPtr.Zero)
+                {
+                    method = this.FindAuraMonoMethodOnHierarchy(cls, "GetEntityTagType", 1);
+                }
+
+                this.autoEatGetEntityTagTypeMethod = method;
+            }
+
+            if (this.autoEatGetEntityMethod == IntPtr.Zero || this.autoEatGetEntityTagTypeMethod == IntPtr.Zero)
+            {
+                this.nextAutoEatTableEntityResolveAt = Time.unscaledTime + 3f;
+                return false;
+            }
+
+            this.nextAutoEatTableEntityResolveAt = -999f;
+            return true;
+        }
+
+        private static bool IsEventFoodTagLabel(string typeName, string description)
+        {
+            if (!string.IsNullOrEmpty(typeName)
+                && (typeName.EndsWith("Food", StringComparison.OrdinalIgnoreCase)
+                    || typeName.EndsWith("Sweets", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            // Quoted game data: EntityTagType._description is the raw zh source string.
+            // Ordinary cooking tags never match — Jam/果酱, colour names, Kitchen/厨房.
+            return !string.IsNullOrEmpty(description)
+                && (description.Contains("食物") || description.Contains("料理") || description.Contains("甜点"));
+        }
+
+        // Fail-OPEN: any table-read failure leaves the dish eatable (an energy-starved
+        // character is worse than eating one event dish), logged once per session.
+        private bool IsAutoEatEventTaggedFood(int staticId)
+        {
+            if (staticId <= 0)
+            {
+                return false;
+            }
+
+            if (this.autoEatEventFoodByStaticId.TryGetValue(staticId, out bool known))
+            {
+                return known;
+            }
+
+            if (!this.EnsureAutoEatTableEntityMethods())
+            {
+                return false;
+            }
+
+            float now = Time.unscaledTime;
+            if (this.autoEatEventFoodMissStaticIds.Contains(staticId) && now < this.nextAutoEatEventFoodRetryAt)
+            {
+                return false;
+            }
+
+            if (!this.TryGetAutoEatEntityTagIds(staticId, out List<int> tags))
+            {
+                this.autoEatEventFoodMissStaticIds.Add(staticId);
+                this.nextAutoEatEventFoodRetryAt = now + 10f;
+                if (!this.autoEatEventFoodReadFailLogged)
+                {
+                    this.autoEatEventFoodReadFailLogged = true;
+                    FeatureLog.Fail("AutoEat", "Normal Food: event-tag table read unavailable (staticId=" + staticId
+                        + "); event dishes stay eatable until the read recovers.");
+                }
+
+                return false;
+            }
+
+            bool eventFood = false;
+            for (int i = 0; i < tags.Count && !eventFood; i++)
+            {
+                eventFood = this.IsAutoEatEventTag(tags[i]);
+            }
+
+            this.autoEatEventFoodByStaticId[staticId] = eventFood;
+            this.autoEatEventFoodMissStaticIds.Remove(staticId);
+            return eventFood;
+        }
+
+        private bool IsAutoEatEventTag(int tagId)
+        {
+            if (tagId <= 0)
+            {
+                return false;
+            }
+
+            if (this.autoEatEventTagByTagId.TryGetValue(tagId, out bool known))
+            {
+                return known;
+            }
+
+            if (this.autoEatEventTagMissIds.Contains(tagId))
+            {
+                return false;
+            }
+
+            if (!this.TryReadAutoEatTagTypeLabel(tagId, out string typeName, out string description))
+            {
+                this.autoEatEventTagMissIds.Add(tagId);
+                return false;
+            }
+
+            bool eventFood = IsEventFoodTagLabel(typeName, description);
+            this.autoEatEventTagByTagId[tagId] = eventFood;
+            return eventFood;
+        }
+
+        // TableData.GetEntity(staticId, needException=false) -> TableEntity.tags (int[]).
+        // Invoke/pin/array pattern copied from TryGetAutoEatFoodEnergy; the bool arg is a
+        // pointer to an int 0 (mono reads one byte from it — same shape the GetEatable call uses).
+        private unsafe bool TryGetAutoEatEntityTagIds(int staticId, out List<int> tags)
+        {
+            tags = null;
+            if (this.autoEatGetEntityMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            int id = staticId;
+            int needException = 0;
+            IntPtr* args = stackalloc IntPtr[2];
+            args[0] = (IntPtr)(&id);
+            args[1] = (IntPtr)(&needException);
+            IntPtr exc = IntPtr.Zero;
+            IntPtr rowObj = auraMonoRuntimeInvoke(this.autoEatGetEntityMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            uint pin = AuraMonoPinNew(rowObj);
+            try
+            {
+                IntPtr pinned = pin != 0U ? AuraMonoPinTarget(pin) : rowObj;
+                if (pinned == IntPtr.Zero || !this.TryGetMonoObjectMember(pinned, "tags", out IntPtr tagsArr) || tagsArr == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                if (auraMonoArrayLength == null || auraMonoArrayAddrWithSize == null)
+                {
+                    return false;
+                }
+
+                int length = (int)Math.Min(auraMonoArrayLength(tagsArr).ToUInt64(), 64UL);
+                if (length == 0)
+                {
+                    tags = new List<int>();
+                    return true;
+                }
+
+                List<int> ids = new List<int>(length);
+                for (int i = 0; i < length; i++)
+                {
+                    IntPtr addr = auraMonoArrayAddrWithSize(tagsArr, sizeof(int), (UIntPtr)i);
+                    if (addr == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    ids.Add(*(int*)addr);
+                }
+
+                tags = ids;
+                return true;
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
+            }
+        }
+
+        private unsafe bool TryReadAutoEatTagTypeLabel(int tagId, out string typeName, out string description)
+        {
+            typeName = null;
+            description = null;
+            if (this.autoEatGetEntityTagTypeMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            int id = tagId;
+            int needException = 0;
+            IntPtr* args = stackalloc IntPtr[2];
+            args[0] = (IntPtr)(&id);
+            args[1] = (IntPtr)(&needException);
+            IntPtr exc = IntPtr.Zero;
+            IntPtr rowObj = auraMonoRuntimeInvoke(this.autoEatGetEntityTagTypeMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            uint pin = AuraMonoPinNew(rowObj);
+            try
+            {
+                IntPtr pinned = pin != 0U ? AuraMonoPinTarget(pin) : rowObj;
+                if (pinned == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                // Live-verified fields: typeName (English label) and _description (zh source).
+                // Require at least one readable — a half-failed read must not bake a false verdict.
+                bool hasName = this.TryGetMonoStringMember(pinned, "typeName", out typeName);
+                bool hasDesc = this.TryGetMonoStringMember(pinned, "_description", out description);
+                return hasName || hasDesc;
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
+            }
+        }
+
+        // Per-row gate for the "Normal Food" option. The star comes from the row's already-read
+        // QualityComponent tier (0 = read failed -> keep eating, same fail-open as everywhere
+        // else in Auto Eat); only a CONFIRMED 5-star dish is held back for the player.
+        private bool IsNormalAutoEatFoodCandidate(AutoEatFoodRow row)
+        {
+            if (row.StarRate >= 5)
+            {
+                FeatureLog.Once("AutoEat", "skip-star:" + row.StaticId,
+                    "Normal Food: keeping a confirmed 5-star dish (staticId=" + row.StaticId + " netId=" + row.NetId + ").");
+                return false;
+            }
+
+            if (this.IsAutoEatEventTaggedFood(row.StaticId))
+            {
+                FeatureLog.Once("AutoEat", "skip-event:" + row.StaticId,
+                    "Normal Food: keeping an event/season dish (staticId=" + row.StaticId + " netId=" + row.NetId + ").");
+                return false;
+            }
+
+            return true;
+        }
+
         // Known rarity, then lower rarity, then known restore, then lower restore, then earlier bag slot.
         private static bool IsPreferredAutoEatFood(ref AutoEatFoodPick candidate, ref AutoEatFoodPick current)
         {
@@ -2894,13 +3201,18 @@ namespace HeartopiaMod
             return candidate.BagIndex < current.BagIndex;
         }
 
-        private bool TryPickBestAutoEatFood(List<AutoEatFoodRow> rows, out AutoEatFoodPick best)
+        private bool TryPickBestAutoEatFood(List<AutoEatFoodRow> rows, out AutoEatFoodPick best, bool normalFoodMode)
         {
             best = default;
             bool any = false;
             for (int i = 0; i < rows.Count; i++)
             {
                 AutoEatFoodRow row = rows[i];
+                if (normalFoodMode && !this.IsNormalAutoEatFoodCandidate(row))
+                {
+                    continue;
+                }
+
                 int starIndex = row.StarRate > 0 ? row.StarRate - 1 : 0;
                 AutoEatFoodPick candidate = new AutoEatFoodPick
                 {
@@ -2946,7 +3258,10 @@ namespace HeartopiaMod
             try
             {
                 string foodKey = this.GetAutoEatFoodKey();
-                bool anyFood = this.autoEatFoodType == this.autoEatFoodOptions.Length - 2;
+                // "Normal Food" matches like "Any Food" (cooking/food descriptors only — raw
+                // p_fruit_*/p_dynamicbush_* never match) and filters at pick time instead.
+                bool anyFood = this.autoEatFoodType == this.AnyFoodIndex || this.autoEatFoodType == this.NormalFoodIndex;
+                bool normalFoodMode = this.autoEatFoodType == this.NormalFoodIndex;
                 this.AutoEatRepairLog("[Auto Eat] Direct food requested. key=" + foodKey + " anyFood=" + anyFood + " option=" + this.GetAutoEatFoodOptionLabel(this.autoEatFoodType) + " energy=" + this.GetCurrentEnergyDisplay());
                 bool bagRead = this.TryFillAutoEatFoodRows(foodKey, anyFood, this.autoEatFoodRows);
                 if (!bagRead && this.TryUseCachedFood(foodKey, anyFood))
@@ -2955,7 +3270,7 @@ namespace HeartopiaMod
                 }
 
                 AutoEatFoodPick best = default;
-                if (!bagRead || !this.TryPickBestAutoEatFood(this.autoEatFoodRows, out best) || best.NetId == 0U)
+                if (!bagRead || !this.TryPickBestAutoEatFood(this.autoEatFoodRows, out best, normalFoodMode) || best.NetId == 0U)
                 {
                     FeatureLog.Fail("AutoEat", "No usable food found in the backpack for " + this.GetAutoEatFoodOptionLabel(this.autoEatFoodType) + ".");
                     this.ClearCachedFood();
@@ -3004,7 +3319,7 @@ namespace HeartopiaMod
 
         private string GetAutoEatFoodKey()
         {
-            if (this.autoEatFoodType == this.autoEatFoodOptions.Length - 1 && !string.IsNullOrWhiteSpace(this.autoEatCustomFoodName))
+            if (this.autoEatFoodType == this.CustomFoodIndex && !string.IsNullOrWhiteSpace(this.autoEatCustomFoodName))
             {
                 return this.NormalizeAutoEatFoodLookupKey(this.autoEatCustomFoodName);
             }

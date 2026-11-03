@@ -72,14 +72,14 @@ Unloading the plugin removes the listener; the file is removed on `Stop()`.
 
 ---
 
-## 2b. Reaching a SECOND machine (Ideapad) over SSH
+## 2b. Reaching a SECOND machine over SSH
 
 The bridge binds **loopback only**, so an SSH port-forward is the only way to reach a game running
-on another box. Setup used for `Ideapad.local`:
+on another box. The examples use `<user>@<game-pc>` for that second box:
 
 ```
-this machine                                    Ideapad.local
-────────────                                    ─────────────
+this machine                                    <game-pc>
+────────────                                    ────────
 client ──▶ 127.0.0.1:8780 ──ssh -L──────────────▶ 127.0.0.1:<bridge port>  (8770-8774)
                                                         │
                                                   BugtopiaMcp.dll
@@ -103,9 +103,20 @@ rewritten in place, a port change tears the forward down and rebuilds it.
 It mirrors the remote endpoint into `%LOCALAPPDATA%\BugtopiaMcpIdeapad\endpoint.json` with the
 **local** port and the **remote** token — that file is what a client should read.
 
+> **When the client bridge is launched without `BUGTOPIA_MCP_ENDPOINT`** (Claude Code's `.mcp.json`
+> does exactly that) it reads the *default* `%LocalLow%/Bugtopia/McpBridge/endpoint.json`, which on
+> this machine is a leftover from an older local session and goes stale on every second-machine
+> game restart
+> — the client then reports "stale token" forever, because the file it reads is not the mirror.
+> Recover by copying the fresh mirror into the default path (or add the env var to the bridge launch);
+> the bridge's game connection is **lazy**, so the next op call picks the replaced file up without
+> restarting the server process. A raw `ssh -R 8770:127.0.0.1:8770` tunnel (what is running today,
+> instead of `tunnel-ideapad.ps1`) carries the mirror's port unchanged — fine while the game keeps
+> picking 8770, stale the moment it picks another port.
+
 > No backtick line continuations anywhere in that script; they broke it once already.
 
-### On the Ideapad side
+### On the second machine's side
 
 1. `bugtopia.dll` deployed to its `BepInEx\plugins\`, and `BugtopiaMcp.dll` enabled under Plugins
    (`%USERPROFILE%\AppData\LocalLow\Bugtopia\Plugins\BugtopiaMcp.dll` plus the sibling `.enabled`).
@@ -137,15 +148,19 @@ its argument schema.
 
 ### Deploying to it
 
+With the launcher, BepInEx on the second machine lives in the mod's own storage tree, NOT next to
+the game — verify where its `runtime\BepInEx\plugins` actually sits before copying:
+
 ```bash
-scp buddy/bin/BepInEx/Release/bugtopia.dll coderus@Ideapad.local:C:/Users/coderus/workplace/HH/BepInEx/plugins/bugtopia.dll
+scp buddy/bin/BepInEx/ReleaseShip/bugtopia.dll "<user>@<game-pc>:C:/Users/<user>/AppData/LocalLow/Bugtopia/runtime/BepInEx/plugins/bugtopia.dll"
 ```
 
-The DLL is **locked while the game runs**. Copy it to `bugtopia.dll.new` instead, then swap once the
+The DLL is **locked while the game runs** (`tasklist /FI "IMAGENAME eq xdt.exe" /NH` over ssh).
+Copy it to `bugtopia.dll.new` instead, then swap once the
 game closes — that keeps the transfer out of the critical path:
 
 ```bash
-ssh coderus@Ideapad.local "move /Y C:\...\plugins\bugtopia.dll.new C:\...\plugins\bugtopia.dll"
+ssh <user>@<game-pc> "move /Y C:\Users\<user>\AppData\LocalLow\Bugtopia\runtime\BepInEx\plugins\bugtopia.dll.new C:\Users\<user>\AppData\LocalLow\Bugtopia\runtime\BepInEx\plugins\bugtopia.dll"
 ```
 
 Verify with a hash on both ends rather than trusting the copy (`Get-FileHash` on the far side).
@@ -159,7 +174,7 @@ bridge and hot-reloads it into the running game (§4b).
 |---|---|
 | Handshake refused / connection closed immediately | Stale token — the game restarted. Re-read the mirrored `endpoint.json`; the poller refreshes it within 15 s |
 | Connects but every op fails | The forward points at the previous launch's port; the poller rebuilds it on the next tick |
-| Nothing on 8780 | The tunnel script is not running, or ssh could not authenticate (`-i ~/.ssh/lenovo`, `BatchMode=yes` hides the prompt) |
+| Nothing on 8780 | The tunnel script is not running, or ssh could not authenticate (`-i ~/.ssh/<key>`, `BatchMode=yes` hides the prompt) |
 | `'<id>' is not loaded` | Sandbox plugins do not survive a game restart — `plugin.load` them again |
 
 ---
@@ -402,6 +417,53 @@ Measured: 857 ms cold, **15–16 ms warm** (the reference set is built once per 
 compile error comes back as a tool *result* with snippet line numbers, so it is fixed without ever
 touching the game; a snippet that throws is reported as `plugin_error` and unloaded anyway.
 
+**When the game runs on another machine, `eval` used to die silently.** `env` reports paths *as the
+game sees them*; the compile happens *here*. Remote game → every reported path is missing locally →
+`AddDirectory` skips a missing directory without complaint → **zero references**, and the failure
+arrives as `error CS0518: Predefined type 'System.Object' is not defined` on any snippet, including
+`return host.IsWorldReady;`. It looks exactly like a broken snippet, which is why it is worth writing
+down: the cause is a path list, not the code.
+
+`EvalReferenceFallback` closes it. If the reported set is not usable on **this** machine, the bridge
+resolves an equivalent one from the checkout: the mod assembly the repo last built
+(`buddy/bin/<flavor>/Release/bugtopia.dll`), the interop folder this machine's own Heartopia install
+generated (`BepInExDir` / `HeartopiaDir` from `buddy/Directory.Build.props`, then
+`MelonLoader/Il2CppAssemblies`), the loader's `core`, and a shared-framework folder **of the same
+generation the game's plugin host runs on** — that last one is the piece that fixes `CS0518`, because
+`System.Private.CoreLib` is where the predefined types come from. `BUGTOPIA_EVAL_REFS="dir;dir;…"`
+overrides everything, so an unusual layout does not need a bridge rebuild.
+
+**What that trades, stated in the response rather than hidden:** a fallback compile is *not* a compile
+against the exact assemblies the session loaded. The local `bugtopia.dll` may be a different commit
+than the one the game runs, and a local interop folder may come from a different game build;
+Il2CppInterop assemblies carry no version, so the runtime will not reject the mismatch — it will just
+fail to find the member when the snippet runs. So every eval answer names its reference source
+(`compiled against 333 references (LOCAL FALLBACK: mod=…, interop=… 177 dll, bcl=… 6.0.36)`), and a
+remote snippet should stay on `host` (the plugin contract, binary-compatible by `PluginSdk.Version`)
+plus reflection over `mod`, rather than direct calls into the mod's surface.
+
+Diagnose it without a game, a tunnel or a running server:
+
+```
+dotnet tools/BugtopiaMcp/bin/Release/net10.0/BugtopiaMcp.dll --eval-refs-diag \
+  "<modAssembly>|<interopDir>|<coreDir>|<runtimeDir>"
+```
+
+prints each slot with `[missing on this machine]`, which set was chosen, and the reference count a
+snippet would get. Measured on a remote session: fallback picked 177 interop + 32 core + 220 BCL dlls
+→ 333 references, compiled in 769 ms, and the snippet ran in the game
+(`result: epoch=2 pinning=True ready=True mod=True`).
+
+**Rebuilding the bridge does not fix a bridge that is already running.** The MCP server is a `dotnet`
+process with the dll mapped, so it keeps serving the code it started with — and while it runs,
+`bin/Release/net10.0/` cannot be written into (`MSB3026`/`MSB3027` file-in-use copy retries). The
+order that works: the image file *can* be deleted out from under the live process (the mapping keeps
+it alive, the directory entry frees), so `rm bin/Release/net10.0/BugtopiaMcp*.dll` + a normal
+`dotnet build` lands the new code on disk; the running server stays on the old image until `/mcp`
+reconnects the `bugtopia` server (or the session restarts), and only then does `eval` behave the new
+way. Symptom of skipping this: every snippet still fails `CS0518` *with `0 references`* — the number
+0 is the tell that you are talking to the pre-fallback binary.
+
 ---
 
 ## 4d. Write ops and crash forensics
@@ -628,7 +690,7 @@ This is a remote-code-execution channel into the game process. It is treated as 
 |---|---|
 | `no endpoint file at …` | Game not running, or BugtopiaMcp.dll is not enabled under Plugins |
 | `no answer on 127.0.0.1:8770 — the endpoint file is stale` | The game exited without a clean shutdown; the file is removed on `Stop()` |
-| `the game rejected the handshake (stale token)` | The game restarted and rotated its token — the bridge re-reads `endpoint.json` on its next reconnect, so just retry |
+| `the game rejected the handshake (stale token)` | The game restarted and rotated its token — the bridge re-reads `endpoint.json` on its next reconnect, so just retry. When the game is on a second machine, first check WHICH `endpoint.json` the bridge reads (the default path vs the mirror) — see the §2b note |
 | `world_not_ready` | Login or loading screen. `status`, `ping`, `log.tail` still work |
 | `timeout` | The main thread is not ticking: loading, stalled, or the mod's breaker disabled the pump — check `log.tail` for `[Mcp]` |
 | Tools missing in the client | The bridge was launched with `dotnet run` (build output corrupts stdout), or the DLL path in `.mcp.json` is wrong |

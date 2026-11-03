@@ -32,6 +32,13 @@ namespace HeartopiaMod
         private const int PumpkinStageCount = 4;
         private const int PumpkinPerfectScore = 100;
 
+        // Pumpkinplanter has exactly one row: id 800300 == the grow-box item staticId, and its
+        // pumpkinSeedId field is the Pumpkin Seeds item (767001) the vanilla grow box consumes to
+        // grow a carvable pumpkin. Verified vs oversea_tables.db 2026-11-02; the fallback constant
+        // covers a failed row read (same pragmatism as SnowballStaticId in SnowSculptureFeature).
+        private const int PumpkinPlanterRowStaticId = 800300;
+        private const int PumpkinSeedStaticIdFallback = 767001;
+
         private const string PumpkinJoinEventName = "XDTDataAndProtocol.Events.JoinPumpkinCarvingEvent";
         private const string PumpkinExpireEventName = "XDTDataAndProtocol.Events.InformPumpkinCarvingExpireEvent";
         private const string PumpkinResultEventName = "XDTDataAndProtocol.Events.InformPumpkinCarvingResultEvent";
@@ -83,6 +90,7 @@ namespace HeartopiaMod
         private IntPtr pumpkinTableClass;
         private IntPtr pumpkinGetRoughMethod;
         private IntPtr pumpkinGetBaseMethod;
+        private IntPtr pumpkinGetPlanterMethod;   // TableData.GetPumpkinplanter(int,bool)
         private float pumpkinPlaceNextAt;
         private float pumpkinWaitStartedAt;
         private float pumpkinCollectUntil;
@@ -105,6 +113,9 @@ namespace HeartopiaMod
         private bool pumpkinCollectPending;
         private string pumpkinStatus = "idle";
         private string pumpkinLastLoggedStatus = string.Empty;
+        // Out-string of the last "Move pumpkin seeds to backpack" click; shown under the button
+        // (snow MoveSnowballs idiom).
+        private string pumpkinMoveStatus = string.Empty;
         private int pumpkinDoneCount;
         private FeatureBreakerState pumpkinBreaker;
 
@@ -1654,6 +1665,257 @@ namespace HeartopiaMod
             }
 
             return result != IntPtr.Zero;
+        }
+
+        // ============================================================================================
+        // Move pumpkin items: warehouse -> backpack
+        // (docs/plans/2026-11-02-pumpkin-seeds-sand-base-warehouse-move.md)
+        //
+        // The "Move pumpkin seeds to backpack" button on the Hobby > Pumpkin Carving tab.
+        // Port of SnowSculptureFeature's TryMoveSnowballsWarehouseToBackpack, with pinned
+        // enumeration (AGENTS §11 — the snow original is unpinned; do not copy that) and a
+        // filter over everything the hobby eats, keyed by the tables the carve loop already
+        // resolves: Pumpkinrough (carvable pumpkins), Pumpkinbase (carving stands),
+        // Pumpkinplanter (grow boxes) + the seed item read from that row's pumpkinSeedId.
+        // The carve loop itself consumes stands + pumpkins (TryPumpkinFindBagItem); seeds
+        // feed the vanilla grow box, which is why the button moves all four categories.
+        // ============================================================================================
+
+        private bool TryEnsurePumpkinPlanterMethod(out string status)
+        {
+            if (!this.EnsurePumpkinPlaceTables(out status))
+            {
+                return false;
+            }
+
+            if (this.pumpkinGetPlanterMethod == IntPtr.Zero)
+            {
+                this.pumpkinGetPlanterMethod = this.FindAuraMonoMethodOnHierarchy(
+                    this.pumpkinTableClass, "GetPumpkinplanter", 2);
+                if (this.pumpkinGetPlanterMethod == IntPtr.Zero)
+                {
+                    this.pumpkinGetPlanterMethod = this.FindAuraMonoMethodOnHierarchy(
+                        this.pumpkinTableClass, "GetPumpkinplanter", 1);
+                }
+            }
+
+            if (this.pumpkinGetPlanterMethod == IntPtr.Zero)
+            {
+                status = "GetPumpkinplanter missing";
+                return false;
+            }
+
+            status = "cached";
+            return true;
+        }
+
+        // Guarded table-getter call that KEEPS the row object (PumpkinTableHasRow discards it).
+        // Same 1/2-param shape; the caller pins the row before reading any field.
+        private unsafe bool TryPumpkinTableRowObject(IntPtr method, int id, out IntPtr rowObj)
+        {
+            rowObj = IntPtr.Zero;
+            if (method == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            int idArg = id;
+            if (AuraMonoMethodParamCountIs(method, 2))
+            {
+                byte needException = 0;
+                IntPtr* args = stackalloc IntPtr[2];
+                args[0] = (IntPtr)(&idArg);
+                args[1] = (IntPtr)(&needException);
+                return TryAuraInvoke(method, IntPtr.Zero, (IntPtr)args, out rowObj, out _)
+                       && rowObj != IntPtr.Zero;
+            }
+
+            IntPtr* singleArgs = stackalloc IntPtr[1];
+            singleArgs[0] = (IntPtr)(&idArg);
+            return TryAuraInvoke(method, IntPtr.Zero, (IntPtr)singleArgs, out rowObj, out _)
+                   && rowObj != IntPtr.Zero;
+        }
+
+        // Seed item staticId for the grow-box path: live read of the planter row's pumpkinSeedId
+        // field (pinned); falls back to the dumped constant when the row/field is unreachable.
+        private unsafe bool TryResolvePumpkinSeedStaticId(out int seedId)
+        {
+            if (AuraMonoPinningAvailable
+                && this.TryPumpkinTableRowObject(this.pumpkinGetPlanterMethod, PumpkinPlanterRowStaticId, out IntPtr rowObj))
+            {
+                uint pin = AuraMonoPinNew(rowObj);
+                try
+                {
+                    if (this.TryGetMonoInt32Member(rowObj, "pumpkinSeedId", out seedId) && seedId > 0)
+                    {
+                        return true;
+                    }
+                }
+                finally
+                {
+                    AuraMonoPinFree(pin);
+                }
+            }
+
+            seedId = PumpkinSeedStaticIdFallback;
+            return false;
+        }
+
+        private unsafe bool TryCollectWarehousePumpkinStacks(
+            out Dictionary<uint, int> map,
+            out int seedStacks, out int boxStacks, out int standStacks, out int roughStacks,
+            out string status)
+        {
+            map = new Dictionary<uint, int>();
+            seedStacks = 0;
+            boxStacks = 0;
+            standStacks = 0;
+            roughStacks = 0;
+            status = string.Empty;
+
+            if (!AuraMonoPinningAvailable)
+            {
+                status = "pinning unavailable";
+                return false;
+            }
+
+            if (!this.TryEnsurePumpkinPlanterMethod(out string resolveStatus))
+            {
+                status = resolveStatus;
+                return false;
+            }
+
+            if (!this.TryResolvePumpkinSeedStaticId(out int seedStaticId))
+            {
+                ModLogger.Msg("[PumpkinCarving] planter pumpkinSeedId unreadable — seed filter uses fallback staticId "
+                              + seedStaticId);
+            }
+
+            if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem", out IntPtr backPack)
+                || backPack == IntPtr.Zero)
+            {
+                status = "BackPackSystem unavailable";
+                return false;
+            }
+
+            IntPtr getAllItem = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(backPack), "GetAllItem", 1);
+            if (getAllItem == IntPtr.Zero)
+            {
+                status = "GetAllItem missing";
+                return false;
+            }
+
+            int storageWarehouse = 2; // EStorageType.Warehouse
+            IntPtr* listArgs = stackalloc IntPtr[1];
+            listArgs[0] = (IntPtr)(&storageWarehouse);
+            if (!TryAuraInvoke(getAllItem, backPack, (IntPtr)listArgs, out IntPtr listObj, out string listError)
+                || listObj == IntPtr.Zero)
+            {
+                status = "warehouse read failed: " + listError;
+                return false;
+            }
+
+            List<uint> pins = new List<uint>();
+            List<IntPtr> items = new List<IntPtr>();
+            try
+            {
+                if (!this.TryEnumerateAuraMonoCollectionItems(listObj, items, pins) || items.Count == 0)
+                {
+                    status = "warehouse empty";
+                    return true; // empty is a valid scan result (snow semantics)
+                }
+
+                for (int i = 0; i < items.Count; i++)
+                {
+                    IntPtr itemObj = items[i];
+                    if (itemObj == IntPtr.Zero
+                        || !this.TryGetDirectBackpackItemNetId(itemObj, out uint netId)
+                        || netId == 0U)
+                    {
+                        continue;
+                    }
+
+                    if (this.TryGetDirectBackpackItemIsLocked(itemObj, out bool isLocked) && isLocked)
+                    {
+                        continue;
+                    }
+
+                    if (!this.TryGetDirectBackpackItemStaticId(itemObj, out int staticId) || staticId <= 0)
+                    {
+                        continue;
+                    }
+
+                    if (!this.TryGetDirectBackpackItemCount(itemObj, out int count) || count <= 0)
+                    {
+                        count = 1;
+                    }
+
+                    bool isSeed = staticId == seedStaticId;
+                    bool isStand = !isSeed && this.PumpkinTableHasRow(this.pumpkinGetBaseMethod, staticId);
+                    bool isRough = !isSeed && !isStand
+                                   && this.PumpkinTableHasRow(this.pumpkinGetRoughMethod, staticId);
+                    bool isBox = !isSeed && !isStand && !isRough
+                                 && this.PumpkinTableHasRow(this.pumpkinGetPlanterMethod, staticId);
+                    if (!isSeed && !isStand && !isRough && !isBox)
+                    {
+                        continue;
+                    }
+
+                    map[netId] = count;
+                    if (isSeed) { seedStacks++; }
+                    else if (isStand) { standStacks++; }
+                    else if (isRough) { roughStacks++; }
+                    else { boxStacks++; }
+                }
+            }
+            catch (Exception ex)
+            {
+                status = "warehouse scan exception: " + ex.Message;
+                ModLogger.Msg("[PumpkinCarving] " + status);
+                return false;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+
+            int total = seedStacks + boxStacks + standStacks + roughStacks;
+            status = total > 0
+                ? "warehouse pumpkin stacks=" + total + " (seeds=" + seedStacks + " boxes=" + boxStacks
+                  + " stands=" + standStacks + " pumpkins=" + roughStacks + ")"
+                : "no pumpkin items in warehouse";
+            return true;
+        }
+
+        private bool TryMovePumpkinSeedsWarehouseToBackpack(out string status)
+        {
+            status = string.Empty;
+            if (!this.TryCollectWarehousePumpkinStacks(
+                    out Dictionary<uint, int> map,
+                    out int seedStacks, out int boxStacks, out int standStacks, out int roughStacks,
+                    out string collectStatus))
+            {
+                status = collectStatus;
+                return false;
+            }
+
+            if (map.Count == 0)
+            {
+                status = collectStatus;
+                return false;
+            }
+
+            if (!this.TrySendWarehouseStacksToBagChunked(map, out int movedStacks, out int movedQty, out string error))
+            {
+                status = string.IsNullOrEmpty(error) ? "MoveBatchBackpackItems failed" : error;
+                return false;
+            }
+
+            status = "Moved " + movedStacks + " pumpkin stack(s), qty " + movedQty
+                     + " -> Bag (seeds " + seedStacks + ", grow boxes " + boxStacks
+                     + ", stands " + standStacks + ", pumpkins " + roughStacks + ")";
+            ModLogger.Msg("[PumpkinCarving] " + status);
+            return true;
         }
     }
 }

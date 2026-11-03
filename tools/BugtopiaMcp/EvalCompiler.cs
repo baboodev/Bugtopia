@@ -166,6 +166,14 @@ namespace BugtopiaMcp
             return d.Severity.ToString().ToLowerInvariant() + " " + d.Id + " (" + where + "): " + d.GetMessage();
         }
 
+        // Used by `--eval-refs-diag`. Runs the real selection (including the collision-dropping rules
+        // and the native-dll guard), so the number is what a snippet would actually get, not a
+        // directory count dressed up to look like one.
+        internal static int CountReferences(EnvPaths paths)
+        {
+            return GetReferences(paths ?? new EnvPaths(), new Result()).Count;
+        }
+
         private static List<MetadataReference> GetReferences(EnvPaths paths, Result result)
         {
             string key = paths.Fingerprint;
@@ -191,7 +199,7 @@ namespace BugtopiaMcp
             // think about.
             HashSet<string> preferredTypes = new HashSet<string>(StringComparer.Ordinal);
 
-            AddAssembly(refs, seen, paths.ModAssembly, preferredTypes, null);
+            AddModAssemblyRef(refs, seen, paths.ModAssembly, preferredTypes);
             AddDirectory(refs, seen, paths.RuntimeDir, preferredTypes, null);
             foreach (string unityModule in PreferredUnityModules)
             {
@@ -243,6 +251,40 @@ namespace BugtopiaMcp
             {
                 AddAssembly(refs, seen, file, collectTypesInto, mustNotCollideWith, skipped);
             }
+        }
+
+        // The mod-assembly slot can arrive as a FILE (what `env` reports, and every fallback
+        // candidate) or as a DIRECTORY (a BUGTOPIA_EVAL_REFS override — Pick matches override slots
+        // against directories). AddAssembly needs a file, so without this resolution the override
+        // for the mod slot would add zero references while the note claimed it applied. Prefer
+        // bugtopia.dll inside the directory; otherwise enumerate it like any other ref folder.
+        private static void AddModAssemblyRef(List<MetadataReference> refs, HashSet<string> seen,
+                                              string path, HashSet<string> preferredTypes)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return;
+            }
+
+            if (File.Exists(path))
+            {
+                AddAssembly(refs, seen, path, preferredTypes, null);
+                return;
+            }
+
+            if (!Directory.Exists(path))
+            {
+                return;
+            }
+
+            string inside = Path.Combine(path, "bugtopia.dll");
+            if (File.Exists(inside))
+            {
+                AddAssembly(refs, seen, inside, preferredTypes, null);
+                return;
+            }
+
+            AddDirectory(refs, seen, path, preferredTypes, null);
         }
 
         private static void AddAssembly(List<MetadataReference> refs, HashSet<string> seen, string path,
@@ -341,7 +383,8 @@ namespace BugtopiaMcp
         }
     }
 
-    // Disk layout of the RUNNING session, from the game's `env` op.
+    // Disk layout the eval compiler builds its references from: the game's `env` op when those paths
+    // exist on THIS machine, otherwise a locally resolved equivalent (see EvalReferenceFallback).
     internal sealed class EnvPaths
     {
         internal string ModAssembly;
@@ -349,8 +392,14 @@ namespace BugtopiaMcp
         internal string CoreDir;
         internal string RuntimeDir;
 
+        // Named in every eval response. "compiled against 214 references" only means something if you
+        // can also say which 214 — the game's loaded assemblies, or this checkout's local copies.
+        internal string Source;
+
+        // Source is in the key: switching between a local game and a remote one must re-resolve the
+        // reference set, not reuse the cached one under an identical path list.
         internal string Fingerprint =>
             (this.ModAssembly ?? "-") + "|" + (this.InteropDir ?? "-") + "|"
-            + (this.CoreDir ?? "-") + "|" + (this.RuntimeDir ?? "-");
+            + (this.CoreDir ?? "-") + "|" + (this.RuntimeDir ?? "-") + "|" + (this.Source ?? "-");
     }
 }

@@ -15,7 +15,9 @@
     <LangVersion>10.0</LangVersion>
     <DebugType>portable</DebugType>
     <BugtopiaDll Condition="'$(BugtopiaDll)' == ''">$(MSBuildThisFileDirectory)..\..\buddy\bin\BepInEx\Release\bugtopia.dll</BugtopiaDll>
-    <InteropDir Condition="'$(InteropDir)' == ''">C:\Users\coder\workplace\Heartopia-Mods\BepInEx\interop</InteropDir>
+    <!-- Standalone-build fallback; the mod build and CI pass -p:InteropDir explicitly.
+         Convention: the loader install sits next to this repo (..\..\..\Heartopia-Mods). -->
+    <InteropDir Condition="'$(InteropDir)' == ''">$(MSBuildThisFileDirectory)..\..\..\Heartopia-Mods\BepInEx\interop</InteropDir>
   </PropertyGroup>
 
   <ItemGroup>

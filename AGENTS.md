@@ -356,6 +356,13 @@ See [FEATURES.md § Aura Farm](docs/FEATURES.md), [TECHNICAL.md § Aura Farm](do
   tools that do not share the author's language, and a mixed-language file cannot be searched,
   reviewed or diffed reliably. Translate at the point of writing, not later. The only non-English
   text that belongs here is *data*: localization tables, game strings, and quoted game identifiers.
+- **No real machine paths, usernames or host names in tracked files.** No committed file — code,
+  comment, log line, doc, script, csproj default — may contain an absolute path under someone's
+  profile (`C:\Users\<real-name>\…`), an account name, a host name or an ssh key file name. Refer
+  to locations portably instead: env-var forms (`%LocalLow%\Bugtopia\…`), MSBuild properties
+  resolved from the gitignored `Directory.Build.props` (`$(BepInExDir)`), repo-relative paths, or
+  placeholders in examples (`<user>@<game-pc>`, `C:\Users\<user>\…`). Machine-specific facts belong
+  in the gitignored layer — `Directory.Build.props`, `.claude/skills`, scratch dirs — never here.
 - Match surrounding naming and patterns; minimal diff scope.
 - Cache resolved `Type` / `MethodInfo` / `IntPtr` — do not scan assemblies every frame. Class/method `IntPtr`s may stay raw (image lifetime); **object** `IntPtr`s cached across frames go through `AuraMonoObjectCache` (HeartopiaComplete.AuraMonoEngine.cs).
 - New AuraMono invokes: prefer `TryAuraInvoke(method, obj, args, out result, out error)`; the `auraMonoRuntimeInvoke` delegate is also safe (bound to the central guard), the raw export is not.
@@ -469,6 +476,7 @@ Fix it exactly like this:
 | Edit orphan `.cs` not in csproj | Won't ship |
 | Install MelonLoader + BepInEx together | Unsupported |
 | Commit `Directory.Build.props` | Machine-specific path |
+| Put a real profile path, username, host name or key file in a tracked file | Machine-specific and leaks personal data; use `%LocalLow%`, MSBuild props, repo-relative paths or `<user>@<game-pc>` placeholders (§9) |
 
 ---
 

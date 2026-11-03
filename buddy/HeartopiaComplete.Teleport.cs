@@ -34,8 +34,11 @@ namespace HeartopiaMod
 
         public void TeleportToLocationWithOffset(Vector3 targetPos, float offset)
         {
-            GameObject p = GetPlayer();
             Vector3 final = targetPos;
+            // The offset direction must come from OUR facing. GetPlayer() is Find on a shared object
+            // name, so a latched stranger's forward would swing the landing point to an arbitrary side
+            // of the target; unverified skeleton → drop the offset, not the teleport.
+            GameObject p = this.GetVerifiedLocalPlayerSkeleton();
             if (p != null)
             {
                 Vector3 forward = p.transform.forward;
@@ -1248,8 +1251,13 @@ namespace HeartopiaMod
 
             this.NoteSelfTeleportTarget(targetPos);
             bool warped = this.TryGameTeleportAuraMono(targetPos, false, Quaternion.identity);
-            // Inside a server respawn our skeleton is gone and Find would hit a remote player.
-            GameObject gameObject = IsSelfPlayerAwaitingSpawn ? null : GameObject.Find("p_player_skeleton(Clone)");
+            // The transform write below and the settle window belong ONLY to our own skeleton.
+            // IsSelfPlayerAwaitingSpawn covers the server-respawn gap, but the bare Find also lands on
+            // a REMOTE player whenever ours is momentarily inactive (seated in a vehicle) or simply
+            // loses the name race — writing their transform dragged their model to our target for 30
+            // frames and toggled their CharacterController. The game warp above moved the real entity;
+            // an unverified skeleton is skipped, not steered.
+            GameObject gameObject = this.GetVerifiedLocalPlayerSkeleton();
             bool flag = gameObject == null;
             if (flag)
             {
@@ -1261,6 +1269,7 @@ namespace HeartopiaMod
             else
             {
                 this.teleportSyncPosition = targetPos;
+                this.teleportSyncSkeleton = gameObject;
                 this.noclipFootHoldValid = false; // noclip hover re-seeds at the warp target
                 CharacterController component = gameObject.GetComponent<CharacterController>();
                 bool flag2 = component != null;
@@ -1293,7 +1302,9 @@ namespace HeartopiaMod
 
             this.NoteSelfTeleportTarget(targetPos);
             bool warped = this.TryGameTeleportAuraMono(targetPos, true, targetRot);
-            GameObject gameObject = IsSelfPlayerAwaitingSpawn ? null : GameObject.Find("p_player_skeleton(Clone)");
+            // Same verified-skeleton rule as the position-only overload above — writing a stranger's
+            // transform position AND rotation scribbles their whole model at our landing point.
+            GameObject gameObject = this.GetVerifiedLocalPlayerSkeleton();
             bool flag = gameObject == null;
             if (flag)
             {
@@ -1306,6 +1317,7 @@ namespace HeartopiaMod
             {
                 this.teleportSyncPosition = targetPos;
                 this.teleportSyncRotation = targetRot;
+                this.teleportSyncSkeleton = gameObject;
                 this.noclipFootHoldValid = false; // noclip hover re-seeds at the warp target
                 CharacterController component = gameObject.GetComponent<CharacterController>();
                 bool flag2 = component != null;
@@ -1331,7 +1343,12 @@ namespace HeartopiaMod
             this.teleportSyncPosition = targetPos;
             this.noclipFootHoldValid = false; // noclip hover re-seeds at the warp target
             teleportFramesRemaining = 10;
-            GameObject p = GetPlayer();
+            // Same rule as TeleportToLocation: the direct transform (and ROOT) writes only run on our
+            // own skeleton. This entry point is fed by StartRepair's backward hop, whose anchor used to
+            // be the skeleton's position + forward — on a latched stranger that meant "2.5 m behind
+            // THEM", and AutoMoveTransfer moved the real self there.
+            GameObject p = this.GetVerifiedLocalPlayerSkeleton();
+            this.teleportSyncSkeleton = p;
             if (p != null)
             {
                 p.transform.position = targetPos;
@@ -1341,17 +1358,27 @@ namespace HeartopiaMod
 
         // Short post-warp settle nudge: plain transform writes for a few frames (NOT a patch).
         // The game warp (TryGameTeleportAuraMono) is the primary teleport; this only smooths the
-        // landing while streaming/animation settles.
+        // landing while streaming/animation settles. The target object was verified by the warp that
+        // opened the window — re-reading GetPlayer() every frame could switch to a stranger's skeleton
+        // mid-window and pin THEIR model to our target.
         private void SyncTeleportPosition()
         {
             if (teleportFramesRemaining > 0)
             {
                 teleportFramesRemaining--;
-                GameObject p = GetPlayer();
-                if (p != null)
+                GameObject p = this.teleportSyncSkeleton;
+                if (p == null)
+                {
+                    return;
+                }
+                try
                 {
                     p.transform.position = this.teleportSyncPosition;
                     if (p.transform.root != null) p.transform.root.position = this.teleportSyncPosition;
+                }
+                catch
+                {
+                    this.teleportSyncSkeleton = null;
                 }
             }
         }

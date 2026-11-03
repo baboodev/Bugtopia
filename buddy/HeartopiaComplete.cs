@@ -250,8 +250,16 @@ namespace HeartopiaMod
         private const string STATUS_PANEL_PATH = "GameApp/startup_root(Clone)/XDUIRoot/Status/StatusPanel(Clone)";
         // Default to the newly added "Bad Food" option (index 0)
         private int autoEatFoodType = 0;
-        private readonly string[] autoEatFoodOptions = { "Bad Food", "Blue Jam","Mix Jam", "Bake Mushroom", "Any Food", "Custom Food"};
-        private readonly string[] autoEatFoodKeys = { "food_badfood", "food_bluejam", "food_mixjam", "food_bakemushroom", "food_", "food_custom" };
+        // Options may only be APPENDED: saved autoEatFoodType values (0..5 before
+        // "Normal Food" existed) must keep their meaning, so the entries after "Any Food"
+        // are addressed by the named tail getters below — never by a literal Length-1.
+        private readonly string[] autoEatFoodOptions = { "Bad Food", "Blue Jam","Mix Jam", "Bake Mushroom", "Any Food", "Custom Food", "Normal Food"};
+        private readonly string[] autoEatFoodKeys = { "food_badfood", "food_bluejam", "food_mixjam", "food_bakemushroom", "food_", "food_custom", "food_normal" };
+        // "Normal Food" reuses Any Food's descriptor matching (the key above is only its
+        // food-cache namespace), then filters stars/event tags at pick time.
+        private int AnyFoodIndex => this.autoEatFoodOptions.Length - 3;
+        private int CustomFoodIndex => this.autoEatFoodOptions.Length - 2;
+        private int NormalFoodIndex => this.autoEatFoodOptions.Length - 1;
         private string autoEatCustomFoodName = "";
         private bool customFoodPickMode = false;
         private string[] scannedBagFoods = null;
@@ -888,13 +896,22 @@ namespace HeartopiaMod
             }
 
             // Post-teleport facing settle: plain transform writes for a few frames (not a patch).
+            // Same verified-skeleton object the warp captured — GetPlayer() could switch to a
+            // stranger mid-window and snap THEIR model's rotation to our target facing.
             if (this.playerRotationFramesRemaining > 0)
             {
                 this.playerRotationFramesRemaining--;
-                GameObject player = GetPlayer();
+                GameObject player = this.teleportSyncSkeleton;
                 if (player != null)
                 {
-                    player.transform.rotation = this.teleportSyncRotation;
+                    try
+                    {
+                        player.transform.rotation = this.teleportSyncRotation;
+                    }
+                    catch
+                    {
+                        this.teleportSyncSkeleton = null;
+                    }
                 }
             }
 
@@ -1408,7 +1425,12 @@ namespace HeartopiaMod
             // Camera FOV will be applied in OnLateUpdate to avoid competing with game camera updates
 
             this.ApplyGameSpeed();
-            if (this.netCookEnabled || this.netCookAutoAssist)
+            // The last condition keeps the pump alive after the run itself has stopped, but only while
+            // a collect-diff job (self-expiring within its ceiling) is outstanding — a stopped mass
+            // cook must still attribute the dish it just collected. The ledger seed does NOT extend
+            // the pump: it runs on the world-ready gate callback (AGENTS §1).
+            if (this.netCookEnabled || this.netCookAutoAssist
+                || this.netCookQualityCollectJobs.Count > 0)
             {
                 this.ProcessNetCookLoop();
             }
@@ -3286,15 +3308,33 @@ namespace HeartopiaMod
             {
                 try
                 {
-                    GameObject p = GetPlayer();
-                    if (p != null)
+                    // Anchor from the self MONO entity, never the skeleton. GetPlayer() is
+                    // GameObject.Find("p_player_skeleton(Clone)") and every remote player shares that
+                    // name, so this hop computed "2.5 m behind the player" off a STRANGER's pose: with
+                    // the cache latched on one (suburban areas, seated in a vehicle, post-respawn),
+                    // AutoMoveTransfer moved the real self to behind THEM — a warp into whoever's
+                    // skeleton was found, their house included. Same shape as the fishing fix in
+                    // 43416ff and the noclip seed fix of 2026-08-21 (memory/player-resolve-and-input-block).
+                    if (!this.TryGetNoclipSelfAnchorPose(out Vector3 cur, out Quaternion selfRot, out bool hasSelfRot, out string anchorSource))
                     {
-                        Vector3 cur = p.transform.position;
-                        Vector3 back = Vector3.zero;
-                        try { back = p.transform.forward; } catch { back = new Vector3(0f, 0f, 1f); }
+                        this.AutoEatRepairLog("[StartRepair] Skipped teleport backward: no self-entity anchor (refusing p_player_skeleton — it can be another player).");
+                    }
+                    else
+                    {
+                        Vector3 back;
+                        if (hasSelfRot)
+                        {
+                            back = selfRot * Vector3.forward;
+                        }
+                        else
+                        {
+                            GameObject verifiedSk = this.GetVerifiedLocalPlayerSkeleton();
+                            back = verifiedSk != null ? verifiedSk.transform.forward : new Vector3(0f, 0f, 1f);
+                        }
+
                         Vector3 target = cur - back.normalized * this.repairTeleportBackDistance;
                         target.y = cur.y; // preserve vertical position
-                        this.AutoEatRepairLog($"[StartRepair] Teleporting player backward from {cur} to {target}");
+                        this.AutoEatRepairLog($"[StartRepair] Teleporting player backward from {cur} to {target} (anchor {anchorSource})");
                         TeleportTo(target);
                     }
                 }
@@ -4112,6 +4152,12 @@ namespace HeartopiaMod
         private Vector3 teleportSyncPosition;
         private Quaternion teleportSyncRotation = Quaternion.identity;
 
+        // The skeleton that opened the settle window, captured after GetVerifiedLocalPlayerSkeleton
+        // proved it is ours. SyncTeleportPosition writes ONLY to this object — re-reading GetPlayer()
+        // each frame could land on a stranger's skeleton (Find, first active match) and pin THEIR
+        // model to our target for the rest of the window.
+        private GameObject teleportSyncSkeleton;
+
         // Token: 0x0400000F RID: 15
         private Vector3 lastKnownPosition;
 
@@ -4511,14 +4557,20 @@ namespace HeartopiaMod
         // NetCookLog, which is gated behind the user's MasterLogNetCook toggle — the skip reason is the
         // only explanation a "Missing ingredients" drain ever gets, so it must not depend on a setting.
         // Throttled so a many-stove run cannot flood the log.
-        private int netCookUniversalSlotsFilled = 0;
+        // Two writers, two counters (review 2026-11-01, finding 14a): a top-up fills a slot AutoFill
+        // left EMPTY; an R3 demotion replaces a slot AutoFill filled with 5★. Counting both into one
+        // int inflated the paid-item telemetry — split by origin, summed in the log line.
+        private int netCookUniversalSlotsFilled = 0;      // top-up fills (empty slots)
+        private int netCookUniversalDemotedSlots = 0;     // R3 replacements of a 5★ fill
         private float nextNetCookUniversalFillLogAt = 0f;
         private float nextNetCookUniversalSkipLogAt = 0f;
         private int netCookCookQuantity = 1;
         private string netCookCookQuantityInput = "1";
         private int netCookMaxCookQuantity = 0;
         private float nextNetCookMaxRefreshAt = 0f;
-        private float netCookInterval = 1.5f;
+        // netCookInterval (COOK DELAY) removed 2026-11-01: the slider only scaled the
+        // collect→next-prepare pause, whose 0.35 s floor always applied; NetCook now uses
+        // NetCookCollectRestartDelaySeconds directly. The key in an old Config.xml is simply ignored.
         private float netCookScanRadiusMeters = NetCookDefaultScanRadiusMeters;
         private int netCookRecipeId = 0;
         private int netCookCookerStaticId = 0;
@@ -4558,6 +4610,27 @@ namespace HeartopiaMod
         private bool netCookSlotManualMode = false;
         // Hide recipes the current stock cannot cover.
         private bool netCookCookableOnly = false;
+        // View-only picker filter: hide recipes whose Collection/ledger record already shows 5★
+        // (plan §3.2). GetVisibleNetCookRecipeEntries — the selection oracle for capture and the
+        // Stove Type switch — is never filtered by it, so a hidden recipe cannot steal the pick.
+        private bool netCookUnderFiveStarsOnly = false;
+        // R2 (plan §4): replenishing-batch mode "cook until a completed dish comes out 5★".
+        // Engagement is latched at run start (netCookFiveStarModeEngaged) and never engages for a
+        // recipe whose §2.3 record already shows 5★.
+        private bool netCookCookUntilFiveStarDish = false;
+        // R3 (plan §5.1): never intentionally spend a 5★ ingredient stack — the slot demotion pass
+        // (NetCookSlotPrefsFeature.TryDemoteNetCookSlotFromFiveStar) implements it on the bag side;
+        // the warehouse move honored it already (low-star-first allocation). Works in automatic AND
+        // manual mode; manual pins always override it. OFF = shipped AutoFill behavior byte-for-byte.
+        private bool netCookPreferUnderFiveIngredients = false;
+        // Concurrency cap in that mode; persisted as text, mirroring how the qty field is mirrored.
+        private string netCookBatchCountInput = "4";
+        private int netCookBatchCount = 4;
+        private bool netCookFiveStarModeEngaged;
+        // Stove memory (requester 2026-11-01): in the 5★ mode the batch is a fixed SET of stoves,
+        // claimed at run start — not a random pick from the captured field each time a slot frees.
+        // LevelObjectNetIds, keyed the same way the collect jobs key their stoves.
+        private readonly System.Collections.Generic.HashSet<ulong> netCookBatchStoveNetIds = new System.Collections.Generic.HashSet<ulong>(8);
         // -1 = the grid shows recipes. >= 0 = it shows the candidate items for that slot.
         private int netCookSlotPickerIndex = -1;
         private readonly Dictionary<int, int> netCookRecipeCookerTypes = new Dictionary<int, int>();

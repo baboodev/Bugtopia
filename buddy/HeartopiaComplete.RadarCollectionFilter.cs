@@ -287,6 +287,13 @@ namespace HeartopiaMod
             IntPtr boxedOk = auraMonoRuntimeInvoke(this.radarPictorialTryGetMethod, systemObj, (IntPtr)args, ref exc);
             bool hasEntry = exc == IntPtr.Zero && outSlot != IntPtr.Zero
                 && (boxedOk == IntPtr.Zero || !this.TryUnboxMonoBoolean(boxedOk, out bool ok) || ok);
+            // Confirmed "the game has no pedia record for this id" - distinct from "the read
+            // failed" (exception / null box / unreadable members): only confirmed absence may
+            // stamp the entry gate-known-open; a failed read leaves it unknown (fail open and
+            // retried on the next scan, plan 11.4).
+            bool confirmedAbsent = exc == IntPtr.Zero && outSlot == IntPtr.Zero
+                && (boxedOk == IntPtr.Zero
+                    || (this.TryUnboxMonoBoolean(boxedOk, out bool absent) && !absent));
             int state = 0;
             bool starKnown = false;
             int star = 0;
@@ -315,12 +322,26 @@ namespace HeartopiaMod
                             // (maxScore) instead of the base field, which stays 0.
                             starKnown = this.TryInvokeAuraMonoZeroArgInt(outSlot, out star, "GetStarRate");
                         }
+
+                        // Event/festival spawn-window verdict from the game itself (plan 11.4) -
+                        // same pinned object, same scan, no extra data fetch. A failed verdict
+                        // leaves the entry unknown, which fails open (never hides blindly).
+                        this.TryApplyRadarSpawnEventGate(outSlot, entry);
                     }
                 }
                 finally
                 {
                     AuraMonoPinFree(pin);
                 }
+            }
+
+            if (confirmedAbsent)
+            {
+                // The game itself says there is no pedia record for this id = no festival gate.
+                // A failed read (hasEntry=false but not confirmed absent) deliberately leaves the
+                // verdict unknown instead: a field rename must not silently un-gate all species.
+                entry.EventGateKnown = true;
+                entry.EventGateClosed = false;
             }
 
             bool unopened;
@@ -357,6 +378,8 @@ namespace HeartopiaMod
             }
 
             this.radarCollectionFilterHooksRegistered = true;
+            // Spawn-window gate rides the same world-ready registration (no new OnUpdate warm-ups).
+            this.EnsureRadarSpawnGateHooks();
             this.RegisterGameEventHook(
                 "XDTDataAndProtocol.Events.UpdatePictorialEvent", 0, this.OnRadarCollectionFilterPictorialDirty);
             this.RegisterGameEventHook(
