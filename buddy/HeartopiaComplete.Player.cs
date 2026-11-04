@@ -796,12 +796,14 @@ namespace HeartopiaMod
             }
         }
 
-        // Proven not-ours. Null the latch. Do not touch lastLocalPlayerCheckTime: GetLocalPlayer
-        // then returns null until LOCAL_PLAYER_CACHE_INTERVAL elapses, instead of Finding the
-        // same remote skeleton on the following call.
+        // Proven not-ours. Null the latch and refresh lastLocalPlayerCheckTime to now so
+        // GetLocalPlayer stays inside LOCAL_PLAYER_CACHE_INTERVAL and returns null instead of
+        // immediately Finding the same remote skeleton (a stale stamp already older than 1 s would
+        // not block that Find).
         private static void DropPoisonedLocalPlayerCache()
         {
             cachedLocalPlayer = null;
+            lastLocalPlayerCheckTime = Time.unscaledTime;
         }
 
         // The player skeleton ONLY once the self Mono entity proves it is ours. GetLocalPlayer() is a
