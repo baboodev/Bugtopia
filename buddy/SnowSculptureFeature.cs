@@ -148,6 +148,15 @@ namespace HeartopiaMod
         // (the machine is the ack, not the bag). A later scan showing a lower ballCount confirms the harvest.
         private readonly Dictionary<uint, int> snowAutoCollectGatherFromCount = new Dictionary<uint, int>();
 
+        private struct SnowAutoCollectSeen
+        {
+            public int State;
+            public int BallCount;
+        }
+
+        private readonly Dictionary<uint, SnowAutoCollectSeen> snowAutoCollectSeen =
+            new Dictionary<uint, SnowAutoCollectSeen>();
+
         private int snowballsCollectedThisRun;         // reset when the toggle rises
         private int snowAutoCollectMachinesSeen;       // last scan's kept machines (UGUI status line)
         private string snowAutoCollectStatus = "idle";
@@ -2306,13 +2315,24 @@ namespace HeartopiaMod
 
             this.snowAutoCollectRegistrationsDone = true;
 
-            // Events-first check (AGENTS §7 step 3): the snow machine has no S2C EventCenter event. Its
-            // state arrives as an ECS data update (SnowSculptingClientSystem ->
-            // SnowSculptureProtocolManager.UpdateSnowMachine -> the view's _data), and the two result
-            // callbacks OnSnowMachineResult / GatherSnowBallResult receive ONLY an ErrorCode — no netId,
-            // so neither can acknowledge a specific machine. There is nothing to hook; the gate only has
-            // to RESOLVE types, and nothing is inflated or compiled before a world exists.
+            // Machine state is still read on the scan timer (no EventCenter event for per-machine _data).
+            // LocalPlayerBuildModeChangeEvent on exit clears snowAutoCollectSeen so the next scan can
+            // send again after building mode; enter does not clear and sends are not suppressed in build mode.
             this.RegisterWorldReadyCallback("snowball-autocollect", this.TryResolveSnowAutoCollect);
+            this.RegisterGameEventHook(
+                "XDTDataAndProtocol.Events.LocalPlayerBuildModeChangeEvent",
+                1,
+                this.OnSnowAutoCollectBuildMode);
+        }
+
+        private void OnSnowAutoCollectBuildMode(GameEventSnapshot e)
+        {
+            if (e.ReadBool(0))
+            {
+                return;
+            }
+
+            this.snowAutoCollectSeen.Clear();
         }
 
         // Resolved BY NAME on the world-ready gate, never from a live instance: the gate can run before
@@ -2469,6 +2489,7 @@ namespace HeartopiaMod
             this.snowAutoCollectLastGatherAt.Clear();
             this.snowAutoCollectLastStartAt.Clear();
             this.snowAutoCollectGatherFromCount.Clear();
+            this.snowAutoCollectSeen.Clear();
             this.snowAutoCollectMachinesSeen = 0;
         }
 
@@ -2657,43 +2678,23 @@ namespace HeartopiaMod
                     SnowMachineSnapshot machine = machines[i];
                     uint netId = machine.NetId;
 
-                    // Plan section 4 step 7 — the gather confirmation is applied BEFORE the send
-                    // decision, and a new send overwrites gatherFromCount only after that delta.
-                    if (this.snowAutoCollectGatherFromCount.TryGetValue(netId, out int fromCount))
+                    if (this.snowAutoCollectGatherFromCount.TryGetValue(netId, out int fromCount)
+                        && machine.BallCount < fromCount)
                     {
-                        this.snowAutoCollectLastGatherAt.TryGetValue(netId, out float lastGather);
-                        if (machine.BallCount < fromCount)
-                        {
-                            this.snowAutoCollectGatherFromCount.Remove(netId);
-                            this.snowballsCollectedThisRun += fromCount - machine.BallCount;
-                            confirmed++;
-                        }
-                        else if (lastGather == 0f || now - lastGather >= SnowAutoCollectSendCooldownSeconds)
-                        {
-                            // The send did not land (or the machine refilled the same count inside the
-                            // window): drop the snapshot so the next scan may send again. lastGather == 0
-                            // is defensive — PruneSnowAutoCollectCooldowns now releases a snapshot whose
-                            // cooldown entry is gone, so this branch is normally the cooldown test alone.
-                            this.snowAutoCollectGatherFromCount.Remove(netId);
-                        }
-                        else
-                        {
-                            // Snapshot still open — no second gather for this machine.
-                            waiting++;
-                            continue;
-                        }
+                        this.snowAutoCollectGatherFromCount.Remove(netId);
+                        this.snowballsCollectedThisRun += fromCount - machine.BallCount;
+                        confirmed++;
                     }
 
-                    float lastSendAt;
-                    if (machine.BallCount > 0)
-                    {
-                        if (this.snowAutoCollectLastGatherAt.TryGetValue(netId, out lastSendAt)
-                            && now - lastSendAt < SnowAutoCollectSendCooldownSeconds)
-                        {
-                            waiting++;
-                            continue;
-                        }
+                    bool hasSeen = this.snowAutoCollectSeen.TryGetValue(netId, out SnowAutoCollectSeen previous);
+                    bool gatherTransition = machine.BallCount > 0
+                        && (!hasSeen || previous.BallCount != machine.BallCount);
+                    bool startTransition = machine.State == SnowMachineStateClosed
+                        && machine.BallCount == 0
+                        && (!hasSeen || previous.State != SnowMachineStateClosed || previous.BallCount != 0);
 
+                    if (gatherTransition)
+                    {
                         if (!this.TrySendSnowMachineProtocol(this.snowAuraMonoGatherSnowBallMethod, "GatherSnowBall", netId, out string gatherStatus))
                         {
                             sendFailed++;
@@ -2707,22 +2708,17 @@ namespace HeartopiaMod
 
                         this.snowAutoCollectLastGatherAt[netId] = now;
                         this.snowAutoCollectGatherFromCount[netId] = machine.BallCount;
+                        this.snowAutoCollectSeen[netId] = new SnowAutoCollectSeen
+                        {
+                            State = machine.State,
+                            BallCount = machine.BallCount,
+                        };
                         gatherSent++;
                         continue;
                     }
 
-                    // ballCount == 0: only a CLOSED machine is restarted. Live behavior (plan section
-                    // 9.2) is that a harvest leaves the machine Making with an empty ballCount — the
-                    // next ball is another harvest, never a restart. Idle is never started from here.
-                    if (machine.State == SnowMachineStateClosed)
+                    if (startTransition)
                     {
-                        if (this.snowAutoCollectLastStartAt.TryGetValue(netId, out lastSendAt)
-                            && now - lastSendAt < SnowAutoCollectSendCooldownSeconds)
-                        {
-                            waiting++;
-                            continue;
-                        }
-
                         if (!this.TrySendSnowMachineProtocol(this.snowAuraMonoOnSnowMachineMethod, "OnSnowMachine", netId, out string startStatus))
                         {
                             sendFailed++;
@@ -2735,10 +2731,20 @@ namespace HeartopiaMod
                         }
 
                         this.snowAutoCollectLastStartAt[netId] = now;
+                        this.snowAutoCollectSeen[netId] = new SnowAutoCollectSeen
+                        {
+                            State = machine.State,
+                            BallCount = machine.BallCount,
+                        };
                         startSent++;
                         continue;
                     }
 
+                    this.snowAutoCollectSeen[netId] = new SnowAutoCollectSeen
+                    {
+                        State = machine.State,
+                        BallCount = machine.BallCount,
+                    };
                     waiting++;
                 }
 
@@ -2762,7 +2768,8 @@ namespace HeartopiaMod
             // machine removed, no longer owned) are dropped — plan section 4 step 6.
             if (this.snowAutoCollectLastGatherAt.Count == 0
                 && this.snowAutoCollectLastStartAt.Count == 0
-                && this.snowAutoCollectGatherFromCount.Count == 0)
+                && this.snowAutoCollectGatherFromCount.Count == 0
+                && this.snowAutoCollectSeen.Count == 0)
             {
                 return;
             }
@@ -2773,9 +2780,9 @@ namespace HeartopiaMod
             // reached without us ever being able to observe the drop, so the snapshot is released here
             // (with no credit). Keeping it would confirm a later reuse of that netId against a stale
             // ballCount. Snapshots of machines that ARE in the filtered set are never touched here — the
-            // per-machine loop owns
-            // their lifecycle (confirm, expire, re-send). This runs before the cooldown keys are dropped
-            // below, so the cooldown test still has its timestamp to work from.
+            // per-machine loop owns their lifecycle (confirm on a lower count; an unchanged count stays
+            // latched). This runs before the cooldown keys are dropped below, so the cooldown test still
+            // has its timestamp to work from.
             if (this.snowAutoCollectGatherFromCount.Count > 0)
             {
                 List<uint> staleSnapshots = null;
@@ -2837,6 +2844,24 @@ namespace HeartopiaMod
                 for (int i = 0; i < stale.Count; i++)
                 {
                     this.snowAutoCollectLastStartAt.Remove(stale[i]);
+                }
+            }
+
+            stale = null;
+            foreach (KeyValuePair<uint, SnowAutoCollectSeen> pair in this.snowAutoCollectSeen)
+            {
+                if (!seenNetIds.Contains(pair.Key))
+                {
+                    stale = stale ?? new List<uint>();
+                    stale.Add(pair.Key);
+                }
+            }
+
+            if (stale != null)
+            {
+                for (int i = 0; i < stale.Count; i++)
+                {
+                    this.snowAutoCollectSeen.Remove(stale[i]);
                 }
             }
 
