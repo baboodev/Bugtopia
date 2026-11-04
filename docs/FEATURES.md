@@ -62,7 +62,7 @@ Tab index **1** is unused in the main tab bar (historical gap).
 | Homeland Farm | Crop-box farming: auto farm, water/weed/harvest/sow/fertilize in radius, seed/fertilizer selection |
 | Pictures | Decrypt / re-encrypt `ScreenCapture` cache (Photo, Draw, …). Draw files get a color preview via game `ColorLut`; index maps kept in `Draw/.index/` |
 | Extras | Ice skating: network "Perfect Ice Skating" sequences (`IceSkatingSequenceFeature`) + real-time **Auto Ice Skating** bot (`AutoIceSkatingFeature`) |
-| Extra | Open Craft panel; **Clear Missed Calls** — empty the watch's missed-call list (`ClearMissedCallsFeature`); **Analog Move** gamepad-stick → character bridge (`MovementInputFeature`); **Carpet Stamp** — scan party carpets + send a single step-on/step-off (`CarpetStampFeature`) |
+| Extra | Open Craft panel; **Clear Missed Calls** — empty the watch's missed-call list (`ClearMissedCallsFeature`); **Analog Move** gamepad-stick → character bridge (`MovementInputFeature`); **Furniture Lights** — radius slider + Turn ON/OFF for every light piece (campfires/lanterns) you own nearby (`FurnitureLightRadiusFeature`); **Carpet Stamp** — scan party carpets + send a single step-on/step-off (`CarpetStampFeature`) |
 
 **Hobby** (sidebar category immediately after New Features)
 
@@ -2304,6 +2304,43 @@ Research tool for the party **stampede carpets** — Slippery Rug `260242` (`p_m
 - **Logging** — always on, no toggle: resolution pointers, dictionary walk per-actor lines (netId/staticId/ugcType/pos/dist), full command payloads, invoke results/exceptions.
 
 Skill ids are per-staticId constants recovered from the decrypted design tables (`oversea.bytes`) (`Mechanism.ugcSkills` → `Ugcskill` → `UgcServerAction`/`BuffConfig`); the game-side pipeline this replays is `UGCTriggerCase → LocalPlayerComponent.TriggerEnter → PhysInteractionSystem → PhysEventSkill → Action_Command_UgcOperate`. Research: `/ugc-mechanism-carpet-interaction.md`.
+
+---
+
+## New Features — Extra (Furniture Lights)
+
+**Tab:** New Features → Extra. **Source:** `FurnitureLightRadiusFeature.cs`. Research:
+[docs/plans/2026-11-04-furniture-light-radius.md](./plans/2026-11-04-furniture-light-radius.md).
+
+A radius slider (3–60 m, default 15) and **Turn ON / Turn OFF** buttons: one press sets every
+switchable light piece **you own** around you (campfires, braziers, lanterns) to that state.
+Server-authoritative like the vanilla switch button — other clients see it, the state persists.
+
+- **The two bits are different visuals**: `BatchEntity` applies `UgcSwitch` bit 0 (Light) to the
+  model's lit tint + room lighting and bit 1 (Operate) to the flame material property. A
+  Light-only flip lights the model but produces **no flame** — the vanilla button always sets
+  both. The feature sends the absolute byte `0b11` / `0b00`, so each send is complete and
+  idempotent (re-pressing the same direction is a no-op server-side).
+- **Send**: `HomelandProtocolManager.SwitchState(netId, get_HomeNetId, in UgcSwitch)` — the exact
+  packet the campfire button (`SwitchInteractionCommand`) sends. There are **two 3-arg
+  overloads** (single-bit toggle vs absolute); the feature enumerates the class's methods and
+  picks the one whose signature is `{uint, uint, byref}` — an unverified overload is never
+  invoked (`mono_class_get_method_from_name` alone would be a coin flip).
+- **Which pieces**: `TableData.DecodeTypeEntityData(staticId)` → `f_asLight` set **and** the
+  entity type must be `lighting` (`id 55`, the 350001-359999 family — campfires/lanterns/
+  braziers). `f_asLight=1` alone spans 19 furniture/build entity types (bed/chair/wardrobe/
+  door/roof/brick/catnest/…); writing a `UgcSwitchComponent` to a piece that has no vanilla
+  switch permanently overrides its auto-on fallback (`MakeUgcSwitch` returns the synced
+  component raw) — a server-persisted wrong glow, so only the lighting family is touched.
+  Owner must be the local player; ≤ 64 sends per press, closest-first (a > 64 overflow names
+  how many farther pieces were skipped). Verdicts are cached per staticId.
+- No per-frame work, no detours, no state store — the scan runs only when a button is clicked,
+  with the standard pinned-enumeration discipline. Errors cool through the feature breaker and
+  land in the log + status line, never toast-only.
+- **Verification status**: the both-bits flame/glow behavior is decompile-verified (and matches
+  why a Light-only flip lit models without flames), but the first live ON/OFF screenshot pair
+  and the overload-resolution log confirmation on build 3.3.9 were still pending at deploy —
+  see the plan's §5 before trusting the behavior as field-proven.
 
 ---
 

@@ -175,6 +175,13 @@ namespace HeartopiaMod
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         internal delegate uint MonoSignatureGetParamCountDelegate(IntPtr signature);
 
+        // mono_signature_get_params(MonoMethodSignature*, void** iter) -> MonoType*. The
+        // MonoType's enumeration int sits at offset 0 of the struct (first member in every
+        // mono version — see HomelandUtility struct-offset notes; reading it is pure metadata,
+        // no allocation, no GC interaction).
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate IntPtr MonoSignatureGetParamsDelegate(IntPtr signature, ref IntPtr iter);
+
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate UIntPtr MonoArrayLengthDelegate(IntPtr array);
 
@@ -318,6 +325,8 @@ namespace HeartopiaMod
         internal static MonoMethodSignatureDelegate auraMonoMethodSignature;
 
         internal static MonoSignatureGetParamCountDelegate auraMonoSignatureGetParamCount;
+
+        internal static MonoSignatureGetParamsDelegate auraMonoSignatureGetParams;
 
         private static MonoArrayLengthDelegate auraMonoArrayLength;
 
@@ -985,6 +994,7 @@ namespace HeartopiaMod
             auraMonoFieldGetName = this.GetAuraMonoExport<MonoFieldGetNameDelegate>(monoModule, "mono_field_get_name");
             auraMonoMethodSignature = this.GetAuraMonoExport<MonoMethodSignatureDelegate>(monoModule, "mono_method_signature");
             auraMonoSignatureGetParamCount = this.GetAuraMonoExport<MonoSignatureGetParamCountDelegate>(monoModule, "mono_signature_get_param_count");
+            auraMonoSignatureGetParams = this.GetAuraMonoExport<MonoSignatureGetParamsDelegate>(monoModule, "mono_signature_get_params");
             auraMonoArrayLength = this.GetAuraMonoExport<MonoArrayLengthDelegate>(monoModule, "mono_array_length");
             auraMonoArrayAddrWithSize = this.GetAuraMonoExport<MonoArrayAddrWithSizeDelegate>(monoModule, "mono_array_addr_with_size");
             auraMonoArrayElementSize = this.GetAuraMonoExport<MonoArrayElementSizeDelegate>(monoModule, "mono_array_element_size");

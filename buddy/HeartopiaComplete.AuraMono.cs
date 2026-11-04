@@ -1868,6 +1868,131 @@ namespace HeartopiaMod
             }
         }
 
+        // Finds a method by name + arity ONLY when every parameter's signature type matches
+        // the expected MonoType enumerations. The generic answer to the trap that five+ other
+        // features hit with plain name+arity lookups: mono_class_get_method_from_name returns
+        // whichever same-arity overload is declared first, and invoking the wrong overload is
+        // a corruption or a crash. The MonoType's enumeration int sits at offset 0 of the
+        // struct (first member in every mono version); reading it is pure metadata — no
+        // invoke, no allocation, no GC interaction. Candidates matching the name but not the
+        // shape are logged with their actual enumerations so a future build's signature drift
+        // is diagnosable from the log line. CorElementType reference: I4=0x08, U4=0x09,
+        // BYREF=0x10 (an `in T` parameter), VALUETYPE=0x11 (a byval struct/enum).
+        private IntPtr FindAuraMonoMethodByParamTypes(IntPtr classPtr, string methodName,
+            int paramCount, int[] expectedTypes, string logTag)
+        {
+            if (classPtr == IntPtr.Zero || string.IsNullOrEmpty(methodName)
+                || expectedTypes == null || expectedTypes.Length != paramCount
+                || auraMonoClassGetMethods == null || auraMonoMethodGetName == null
+                || auraMonoMethodSignature == null || auraMonoSignatureGetParamCount == null
+                || auraMonoSignatureGetParams == null)
+            {
+                return IntPtr.Zero;
+            }
+
+            IntPtr iter = IntPtr.Zero;
+            IntPtr method;
+            while ((method = auraMonoClassGetMethods(classPtr, ref iter)) != IntPtr.Zero)
+            {
+                IntPtr namePtr = auraMonoMethodGetName(method);
+                if (namePtr == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                // mono_method_get_name returns an image-owned const char* — never freed (AuraFarm.cs:344).
+                if (Marshal.PtrToStringAnsi(namePtr) != methodName)
+                {
+                    continue;
+                }
+
+                IntPtr signature = auraMonoMethodSignature(method);
+                if (signature == IntPtr.Zero
+                    || unchecked((int)auraMonoSignatureGetParamCount(signature)) != paramCount)
+                {
+                    continue;
+                }
+
+                IntPtr typeIter = IntPtr.Zero;
+                bool ok = true;
+                int[] actual = new int[paramCount];
+                for (int i = 0; i < paramCount; i++)
+                {
+                    IntPtr typePtr = auraMonoSignatureGetParams(signature, ref typeIter);
+                    if (typePtr == IntPtr.Zero)
+                    {
+                        ok = false;
+                        break;
+                    }
+
+                    int typeEnum = Marshal.ReadInt32(typePtr, 0);
+                    actual[i] = typeEnum;
+                    if (typeEnum != expectedTypes[i])
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+
+                if (ok)
+                {
+                    return method;
+                }
+
+                // Resolution runs once per world, so the small array and this line are free
+                // where it matters (0 entries = the parameter iteration ended early).
+                ModLogger.Msg((string.IsNullOrEmpty(logTag) ? "[AuraMono]" : logTag)
+                    + " signature mismatch: " + methodName + "/" + paramCount
+                    + " expected {" + string.Join(", ", Array.ConvertAll(expectedTypes, t => "0x" + t.ToString("X")))
+                    + "} got {" + string.Join(", ", Array.ConvertAll(actual, t => "0x" + t.ToString("X"))) + "}");
+            }
+
+            return IntPtr.Zero;
+        }
+
+        // Getter-invoke readers shared by the furniture features (get_OwnerId / get_StaticId /
+        // get_HomeNetId on AuraMono ECS components). UInt: the result is a boxed uint —
+        // TryUnboxMonoUInt32 rejects 0, so a zero-valued getter reads as failure and callers
+        // treat "unowned / no home root" as skip. Int: unbox + direct read (the
+        // TryGetMonoInt32Member shape applied to an invoke result instead of a field).
+        private bool TryInvokeAuraMonoUIntGetter(IntPtr obj, IntPtr getter, out uint value)
+        {
+            value = 0U;
+            if (obj == IntPtr.Zero || getter == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(getter, obj, IntPtr.Zero, ref exc);
+            return exc == IntPtr.Zero && boxed != IntPtr.Zero && this.TryUnboxMonoUInt32(boxed, out value);
+        }
+
+        private unsafe bool TryInvokeAuraMonoIntGetter(IntPtr obj, IntPtr getter, out int value)
+        {
+            value = 0;
+            if (obj == IntPtr.Zero || getter == IntPtr.Zero || auraMonoRuntimeInvoke == null || auraMonoObjectUnbox == null)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr boxed = auraMonoRuntimeInvoke(getter, obj, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero || boxed == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr raw = auraMonoObjectUnbox(boxed);
+            if (raw == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            value = *(int*)raw;
+            return true;
+        }
+
         private IntPtr FindAuraMonoClassInImages(string nameSpace, string className, string[] imageNames)
         {
             if (string.IsNullOrWhiteSpace(className) || auraMonoClassFromName == null || imageNames == null)
