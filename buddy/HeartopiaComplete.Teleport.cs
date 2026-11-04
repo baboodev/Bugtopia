@@ -1234,6 +1234,15 @@ namespace HeartopiaMod
             }
         }
 
+        // Drops an in-flight skeleton pin. Called when this warp could not prove a skeleton,
+        // so SyncTeleportPosition / the rotation settle cannot keep writing the previous target.
+        private void ClearTeleportSkeletonSettle()
+        {
+            this.teleportFramesRemaining = 0;
+            this.playerRotationFramesRemaining = 0;
+            this.teleportSyncSkeleton = null;
+        }
+
         // Token: 0x06000025 RID: 37 RVA: 0x00006E00 File Offset: 0x00005000
         private void TeleportToLocation(Vector3 targetPos)
         {
@@ -1250,17 +1259,14 @@ namespace HeartopiaMod
             }
 
             this.NoteSelfTeleportTarget(targetPos);
-            bool warped = this.TryGameTeleportAuraMono(targetPos, false, Quaternion.identity);
-            // The transform write below and the settle window belong ONLY to our own skeleton.
-            // IsSelfPlayerAwaitingSpawn covers the server-respawn gap, but the bare Find also lands on
-            // a REMOTE player whenever ours is momentarily inactive (seated in a vehicle) or simply
-            // loses the name race — writing their transform dragged their model to our target for 30
-            // frames and toggled their CharacterController. The game warp above moved the real entity;
-            // an unverified skeleton is skipped, not steered.
+            // Prove the skeleton while it and the entity still share a pose. After the warp the
+            // 2.5 m fallback compares a stale visual against the new entity position and rejects
+            // our own body on any hop longer than that.
             GameObject gameObject = this.GetVerifiedLocalPlayerSkeleton();
-            bool flag = gameObject == null;
-            if (flag)
+            bool warped = this.TryGameTeleportAuraMono(targetPos, false, Quaternion.identity);
+            if (gameObject == null)
             {
+                this.ClearTeleportSkeletonSettle();
                 if (!warped)
                 {
                     ModLogger.Msg("Player not found!");
@@ -1301,13 +1307,11 @@ namespace HeartopiaMod
             }
 
             this.NoteSelfTeleportTarget(targetPos);
-            bool warped = this.TryGameTeleportAuraMono(targetPos, true, targetRot);
-            // Same verified-skeleton rule as the position-only overload above — writing a stranger's
-            // transform position AND rotation scribbles their whole model at our landing point.
             GameObject gameObject = this.GetVerifiedLocalPlayerSkeleton();
-            bool flag = gameObject == null;
-            if (flag)
+            bool warped = this.TryGameTeleportAuraMono(targetPos, true, targetRot);
+            if (gameObject == null)
             {
+                this.ClearTeleportSkeletonSettle();
                 if (!warped)
                 {
                     ModLogger.Msg("Player not found!");
@@ -1339,21 +1343,20 @@ namespace HeartopiaMod
 
         private void TeleportTo(Vector3 targetPos)
         {
+            GameObject p = this.GetVerifiedLocalPlayerSkeleton();
             this.TryGameTeleportAuraMono(targetPos, false, Quaternion.identity);
             this.teleportSyncPosition = targetPos;
             this.noclipFootHoldValid = false; // noclip hover re-seeds at the warp target
-            teleportFramesRemaining = 10;
-            // Same rule as TeleportToLocation: the direct transform (and ROOT) writes only run on our
-            // own skeleton. This entry point is fed by StartRepair's backward hop, whose anchor used to
-            // be the skeleton's position + forward — on a latched stranger that meant "2.5 m behind
-            // THEM", and AutoMoveTransfer moved the real self there.
-            GameObject p = this.GetVerifiedLocalPlayerSkeleton();
-            this.teleportSyncSkeleton = p;
-            if (p != null)
+            if (p == null)
             {
-                p.transform.position = targetPos;
-                if (p.transform.root != null) p.transform.root.position = targetPos;
+                this.ClearTeleportSkeletonSettle();
+                return;
             }
+
+            this.teleportSyncSkeleton = p;
+            teleportFramesRemaining = 10;
+            p.transform.position = targetPos;
+            if (p.transform.root != null) p.transform.root.position = targetPos;
         }
 
         // Short post-warp settle nudge: plain transform writes for a few frames (NOT a patch).
