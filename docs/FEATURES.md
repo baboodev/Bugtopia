@@ -1411,8 +1411,9 @@ is not available at all (a boss run) or every spot refused in a row.
   (`Entities.GetComponents<ToolRestorerComponent>`, owner filter) before every trigger and before
   every throw inside the machine, and skips instead of throwing against the cap — covering kits the
   player placed by hand too. The Repair Status row shows `Ready · own kit standing` while that skip
-  is in effect, and the log gets one throttled `[AutoRepair] … skipped: own repair kit still placed`
-  line per half-minute. Fail-open: if the scan itself cannot run, auto repair behaves as before.
+  is in effect, and the log gets one throttled `[AutoRepair] … skipped: own repair kit still placed (device=… kitStaticId=…)`
+  line per half-minute.
+- **Limits of that skip.** The probe only sees `ToolRestorerComponent` instances the client has streamed in. A kit left in another region is invisible, so one "Unable to place more!" dialog can still show on the trigger that follows the 30 s latch re-arm; later triggers skip once the device is in view. The mod does not press the dialog's clear-and-replace confirm. Nothing listens for despawn — the next trigger or USE probe is what notices the device is gone. If the scan cannot run (class missing, pinning off, exception, or every returned component unreadable), one `[AutoRepair] own-kit probe unavailable (<kind>): …` line is logged on that transition and throws are allowed, which is the behavior from before the skip existed. The sea-cleaner contamination retry (`FarmWalkFeature.TryRetryContaminationRepairThrow`) uses the same probe: a standing own kit is not one of the four failed throws, and the farm throws again once the device is gone.
 - Optional teleport backward before repair (configurable distance).
 - **The primary path is the trimmed game throw** (since 2026-08-06). Configs written before that
   are migrated once on load (`repairThrowPathTrimMigrated`), otherwise the switch would be invisible

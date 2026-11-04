@@ -1332,8 +1332,9 @@ namespace HeartopiaMod
         // Entity source: Entities.GetComponents<ToolRestorerComponent> (ViewComponent;
         // ownerNetId inside the inline _componentData struct - boxed-copy read exactly like
         // TryReadSandRoughComponentData). Probed only at decision points (durability trigger,
-        // StartRepair, USE step, latch re-arm) behind a 2 s cache - worst case ~0.5 Hz for the
-        // life of a standing kit, never from the frame loop.
+        // StartRepair, USE step, latch re-arm, sea-cleaner contamination retry) behind a 2 s
+        // cache — worst case ~0.5 Hz for the life of a standing kit. The retry's verify window
+        // may call in on consecutive frames; those hits return the cached answer.
         private static readonly string[] ToolRestorerKitViewImages = { "XDTLevelAndEntity", "XDTLevelAndEntity.dll" };
         private const float OwnPlacedKitProbeCacheSeconds = 2f;
         private const float OwnKitSkipLogIntervalSeconds = 30f;
@@ -1350,16 +1351,23 @@ namespace HeartopiaMod
         private float nextOwnPlacedKitProbeAt = -999f;
         private float ownPlacedKitProbeAt = -999f;
         private float nextOwnKitSkipLogAt = -999f;
+        private int ownPlacedKitProbeStaticId;
+        private int cachedToolRestorerKitViewClassEpoch = -1;
+        private string ownKitProbeUnavailableKind = string.Empty;
 
         private IntPtr ResolveToolRestorerKitViewClass()
         {
-            if (this.cachedToolRestorerKitViewClass != IntPtr.Zero)
+            if (this.cachedToolRestorerKitViewClass != IntPtr.Zero
+                && this.cachedToolRestorerKitViewClassEpoch == AuraMonoWorldEpoch)
             {
                 return this.cachedToolRestorerKitViewClass;
             }
 
-            // Gameplay/GamePlay spelling aliases (TYPE_RESOLUTION ritual); a Zero result is
-            // NOT cached - the image only exists in-world, and the probe is throttled anyway.
+            // Epoch moved or the last resolve failed. A Zero result stays uncached so the
+            // next probe tries again; the probe's own throttle is what limits the lookup.
+            this.cachedToolRestorerKitViewClass = IntPtr.Zero;
+            this.cachedToolRestorerKitViewClassEpoch = AuraMonoWorldEpoch;
+
             IntPtr cls = this.FindAuraMonoClassInImages(
                 "XDTLevelAndEntity.Gameplay.Component.DisplayItem", "ToolRestorerComponent", ToolRestorerKitViewImages);
             if (cls == IntPtr.Zero)
@@ -1378,7 +1386,11 @@ namespace HeartopiaMod
                 cls = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.GamePlay.Component.DisplayItem.ToolRestorerComponent");
             }
 
-            this.cachedToolRestorerKitViewClass = cls;
+            if (cls != IntPtr.Zero)
+            {
+                this.cachedToolRestorerKitViewClass = cls;
+            }
+
             return cls;
         }
 
@@ -1450,6 +1462,7 @@ namespace HeartopiaMod
             this.nextOwnPlacedKitProbeAt = -999f;
             this.ownPlacedKitProbePresent = false;
             this.ownPlacedKitProbeNetId = 0U;
+            this.ownPlacedKitProbeStaticId = 0;
         }
 
         // TRUE only when a restorer entity OWNED BY THE LOCAL PLAYER is confirmed standing right now.
@@ -1472,6 +1485,8 @@ namespace HeartopiaMod
             status = string.Empty;
             bool present = false;
             bool cacheable = true;
+            string unavailableKind = null;
+            int matchedStaticId = 0;
 
             try
             {
@@ -1480,17 +1495,20 @@ namespace HeartopiaMod
                 {
                     status = "ToolRestorer view class unavailable";
                     cacheable = false;
+                    unavailableKind = "class";
                 }
                 else if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null
                          || !AuraMonoPinningAvailable)
                 {
                     status = "AuraMono/pinning unavailable for own-kit probe";
                     cacheable = false;
+                    unavailableKind = "runtime";
                 }
                 else if (!this.TryResolveSelfPlayerNetId(out uint selfNetId) || selfNetId == 0U)
                 {
                     status = "self player netId unavailable";
                     cacheable = false;
+                    unavailableKind = "self";
                 }
                 else
                 {
@@ -1514,6 +1532,7 @@ namespace HeartopiaMod
                             {
                                 status = "restorer scan unavailable";
                                 cacheable = false;
+                                unavailableKind = "scan";
                             }
                         }
                         else
@@ -1530,6 +1549,7 @@ namespace HeartopiaMod
                                 if (ownerNetId == selfNetId)
                                 {
                                     present = true;
+                                    matchedStaticId = staticId;
                                     // The device entity's own netId (0 when unreadable - the
                                     // ownerNetId must never be printed as if it were the device).
                                     this.TryHomelandFarmTryReadAuraMonoComponentNetId(components[i], out restorerNetId);
@@ -1538,17 +1558,27 @@ namespace HeartopiaMod
                                 }
                             }
 
-                            if (!present)
+                            if (present)
+                            {
+                                this.ownPlacedKitProbeStaticId = matchedStaticId;
+                                if (readFailures > 0)
+                                {
+                                    this.AutoEatRepairLog("[AutoRepair] own-kit probe: " + readFailures
+                                        + " restorer component(s) unreadable (own kit matched elsewhere).");
+                                }
+                            }
+                            else if (readFailures > 0)
+                            {
+                                // An unreadable component might be ours. Caching this as "no placed
+                                // restorers" for 2 s is what lets the dialog return with a dead reader.
+                                status = readFailures + " of " + components.Count + " restorer component(s) unreadable";
+                                cacheable = false;
+                                unavailableKind = "unreadable";
+                                present = false;
+                            }
+                            else
                             {
                                 status = "no placed restorers";
-                            }
-
-                            if (readFailures > 0)
-                            {
-                                // One summary per probe, not one line per component - a renamed
-                                // field would otherwise repeat per component per probe.
-                                this.AutoEatRepairLog("[AutoRepair] own-kit probe: " + readFailures
-                                    + " restorer component(s) unreadable" + (present ? " (own kit matched elsewhere)" : string.Empty) + ".");
                             }
                         }
                     }
@@ -1563,23 +1593,54 @@ namespace HeartopiaMod
                 status = "own-kit probe exception: " + ex.Message;
                 present = false;
                 cacheable = false;
+                unavailableKind = "exception";
             }
 
             this.ownPlacedKitProbePresent = present;
             this.ownPlacedKitProbeNetId = restorerNetId;
+            if (!present)
+            {
+                this.ownPlacedKitProbeStaticId = 0;
+            }
+
             this.ownPlacedKitProbeStatus = status;
             this.ownPlacedKitProbeAt = Time.unscaledTime;
             if (!cacheable)
             {
-                // A broken scan must not linger in the cache - retry at the next moment.
                 this.nextOwnPlacedKitProbeAt = Time.unscaledTime + 0.5f;
+                this.NoteOwnKitProbeUnavailable(unavailableKind ?? "unknown", status);
+            }
+            else
+            {
+                this.ClearOwnKitProbeUnavailable();
             }
 
             return present;
         }
 
-        // Shared once-per-window skip line so the user's log shows WHY nothing was thrown
-        // (AutoEatRepairLog is compiled out in ship builds).
+        // Ship-visible. AutoEatRepairLog is gated by MasterLogAutoEatRepair (default
+        // false) and is not compiled out — a dead probe must not depend on that flag.
+        // One line per transition into a kind, not per probe. A later successful scan
+        // clears the kind so the next failure logs again.
+        private void NoteOwnKitProbeUnavailable(string kind, string detail)
+        {
+            if (string.Equals(this.ownKitProbeUnavailableKind, kind, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            this.ownKitProbeUnavailableKind = kind ?? string.Empty;
+            ModLogger.Msg("[AutoRepair] own-kit probe unavailable (" + this.ownKitProbeUnavailableKind + "): "
+                + detail + ". Throws stay allowed until the scan works.");
+        }
+
+        private void ClearOwnKitProbeUnavailable()
+        {
+            this.ownKitProbeUnavailableKind = string.Empty;
+        }
+
+        // Shared once-per-window skip line so the log shows why nothing was thrown.
+        // MasterLogAutoEatRepair defaults to false, so AutoEatRepairLog is not this line.
         private void LogOwnKitSkip(string action, uint restorerNetId)
         {
             float now = Time.unscaledTime;
@@ -1587,6 +1648,7 @@ namespace HeartopiaMod
             {
                 this.nextOwnKitSkipLogAt = now + OwnKitSkipLogIntervalSeconds;
                 ModLogger.Msg("[AutoRepair] " + action + " skipped: own repair kit still placed (device=" + restorerNetId
+                    + " kitStaticId=" + this.ownPlacedKitProbeStaticId
                     + ") - a new throw would pop the game's \"Unable to place more!\" dialog.");
             }
         }

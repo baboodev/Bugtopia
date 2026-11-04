@@ -5256,6 +5256,13 @@ namespace HeartopiaMod
             // instead and this never runs.)
             if (now < this.farmRepairNextAttemptAt)
             {
+                if (this.TryOwnPlacedRepairKitPresent(out uint heldKitNetId, out _))
+                {
+                    this.LogOwnKitSkip("farm walk repair throw", heldKitNetId);
+                    this.autoFarmStatus = "Own repair kit already placed";
+                    return true;
+                }
+
                 this.autoFarmStatus = "Checking the repair kit landed...";
                 return true;
             }
@@ -5271,6 +5278,14 @@ namespace HeartopiaMod
                 }
 
                 this.autoFarmStatus = "Descending to place the repair kit...";
+                return true;
+            }
+
+            if (this.TryOwnPlacedRepairKitPresent(out uint standingKitNetId, out _))
+            {
+                this.LogOwnKitSkip("farm walk repair throw", standingKitNetId);
+                this.farmRepairNextAttemptAt = now + 2f;
+                this.autoFarmStatus = "Own repair kit already placed";
                 return true;
             }
 
