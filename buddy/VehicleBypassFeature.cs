@@ -666,7 +666,10 @@ namespace HeartopiaMod
 
             if (!hasPlayerRot)
             {
-                playerRot = Quaternion.identity;
+                GameObject facingSkeleton = this.GetVerifiedLocalPlayerSkeleton();
+                playerRot = facingSkeleton != null
+                    ? Quaternion.Euler(0f, facingSkeleton.transform.eulerAngles.y, 0f)
+                    : Quaternion.identity;
             }
 
             Vector3 forward = playerRot * Vector3.forward;
