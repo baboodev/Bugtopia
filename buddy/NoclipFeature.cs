@@ -487,8 +487,13 @@ namespace HeartopiaMod
             if (Time.unscaledTime >= this.noclipFootHoldSeedLogAt)
             {
                 this.noclipFootHoldSeedLogAt = Time.unscaledTime + 5f;
+                string yawLog = skeleton != null
+                    ? "yaw from verified skeleton"
+                    : (hasSelfRot || Camera.main != null
+                        ? "yaw from self entity or camera"
+                        : "yaw left unchanged");
                 ModLogger.Msg("[Noclip] foot hover seeded at " + selfPos.ToString("F1") + " via " + source
-                    + (skeleton != null ? " (yaw from verified skeleton)" : " (yaw from self entity or camera)"));
+                    + " (" + yawLog + ")");
             }
 
             return true;
