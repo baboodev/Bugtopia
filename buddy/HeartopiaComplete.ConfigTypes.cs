@@ -157,6 +157,8 @@ namespace HeartopiaMod
             public int keyFeedAllCats;
             public int keyFeedAllDogs;
             public int keySpawnBubble;
+            public int keyFurnitureLightsOn;
+            public int keyFurnitureLightsOff;
             public float noclipSpeed;
             public float noclipBoostMultiplier;
             public float areaLoadDelay;

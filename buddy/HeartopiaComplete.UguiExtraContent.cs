@@ -239,8 +239,8 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.MissedCallsStatusLabel, 8f, 172f, panelW, 20f);
 
             // ==================== Part 2b — Furniture Lights ====================
-            // FurnitureLightRadiusFeature.cs — one-shot radius set of every light piece the
-            // player owns (campfires/lanterns/braziers). Fixed-height block (like Missed Calls
+            // FurnitureLightRadiusFeature.cs — one-shot radius set of every light piece in
+            // this house (campfires/lanterns/braziers), whoever placed it. Fixed-height block (like Missed Calls
             // above), so the carpet block below simply starts 156px lower; the relayout is
             // untouched. Feedback: the feature writes furnitureLightStatus + toasts on its own
             // (RunFurnitureLightsAction); this page only mirrors the status line.
@@ -251,7 +251,7 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(lightsHeader, 8f, 198f, 460f, 24f);
 
             GameObject lightsHint = this.CreateUguiBodyLabel(scrollContent, "LightsHint",
-                this.L("Turn every campfire/lantern you own within the radius on or off at once (server-synced, flames included)."), 13f);
+                this.L("Turn every campfire/lantern in this house within the radius on or off at once (server-synced, flames included)."), 13f);
             PlaceUguiTopLeft(lightsHint, 8f, 226f, panelW, 20f);
 
             // Value label left of the slider; the slider's onChanged rewrites it immediately.

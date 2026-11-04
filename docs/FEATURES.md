@@ -62,7 +62,7 @@ Tab index **1** is unused in the main tab bar (historical gap).
 | Homeland Farm | Crop-box farming: auto farm, water/weed/harvest/sow/fertilize in radius, seed/fertilizer selection |
 | Pictures | Decrypt / re-encrypt `ScreenCapture` cache (Photo, Draw, …). Draw files get a color preview via game `ColorLut`; index maps kept in `Draw/.index/` |
 | Extras | Ice skating: network "Perfect Ice Skating" sequences (`IceSkatingSequenceFeature`) + real-time **Auto Ice Skating** bot (`AutoIceSkatingFeature`) |
-| Extra | Open Craft panel; **Clear Missed Calls** — empty the watch's missed-call list (`ClearMissedCallsFeature`); **Analog Move** gamepad-stick → character bridge (`MovementInputFeature`); **Furniture Lights** — radius slider + Turn ON/OFF for every light piece (campfires/lanterns) you own nearby (`FurnitureLightRadiusFeature`); **Carpet Stamp** — scan party carpets + send a single step-on/step-off (`CarpetStampFeature`) |
+| Extra | Open Craft panel; **Clear Missed Calls** — empty the watch's missed-call list (`ClearMissedCallsFeature`); **Analog Move** gamepad-stick → character bridge (`MovementInputFeature`); **Furniture Lights** — radius slider + Turn ON/OFF for every light piece (campfires/lanterns) in the current house, whoever placed it (`FurnitureLightRadiusFeature`); hotkeys **Furniture Lights ON** / **Furniture Lights OFF**; **Carpet Stamp** — scan party carpets + send a single step-on/step-off (`CarpetStampFeature`) |
 
 **Hobby** (sidebar category immediately after New Features)
 
@@ -2314,33 +2314,44 @@ Skill ids are per-staticId constants recovered from the decrypted design tables 
 
 A radius slider (3–60 m, default 15) and **Turn ON / Turn OFF** buttons: one press sets every
 switchable light piece **you own** around you (campfires, braziers, lanterns) to that state.
-Server-authoritative like the vanilla switch button — other clients see it, the state persists.
+Server-authoritative. Other clients see both the light and the campfire flame, and the
+light state persists.
 
 - **The two bits are different visuals**: `BatchEntity` applies `UgcSwitch` bit 0 (Light) to the
-  model's lit tint + room lighting and bit 1 (Operate) to the flame material property. A
-  Light-only flip lights the model but produces **no flame** — the vanilla button always sets
-  both. The feature sends the absolute byte `0b11` / `0b00`, so each send is complete and
-  idempotent (re-pressing the same direction is a no-op server-side).
+  model's lit tint + room lighting and bit 1 (Operate) to the operate material. The looping
+  campfire flame is a separate clip: `BuildActionClipComponent.InitInteractActionClip` plays
+  `config_interaction_{id}_on` via `PlayAnim` at spawn, and only the server's
+  `ExecuteActionNetworkEvent` replaces it with `config_interaction_{id}_off` / `_on`.
+  `SwitchState` alone leaves the loop running; a `quickCast` alone leaves the light.
+  Confirmed on two clients, same press: `LocalPlayerComponent.Cast(PlayerActionSwitchInteractArg)`
+  with `quickCast` set and `switchFlag` 1 (off clip) or 0 (on clip). The body pose is not
+  played, but the clip still hides the left hand and switches the animator; after the casts
+  the feature calls `UpdateMotionFocus(false)` then `true` so walk and jump come back.
+  Then the absolute byte `0b11` / `0b00`. The timeline is not played locally. The byte is
+  idempotent.
 - **Send**: `HomelandProtocolManager.SwitchState(netId, get_HomeNetId, in UgcSwitch)` — the exact
   packet the campfire button (`SwitchInteractionCommand`) sends. There are **two 3-arg
   overloads** (single-bit toggle vs absolute); the feature enumerates the class's methods and
-  picks the one whose signature is `{uint, uint, byref}` — an unverified overload is never
-  invoked (`mono_class_get_method_from_name` alone would be a coin flip).
-- **Which pieces**: `TableData.DecodeTypeEntityData(staticId)` → `f_asLight` set **and** the
-  entity type must be `lighting` (`id 55`, the 350001-359999 family — campfires/lanterns/
-  braziers). `f_asLight=1` alone spans 19 furniture/build entity types (bed/chair/wardrobe/
-  door/roof/brick/catnest/…); writing a `UgcSwitchComponent` to a piece that has no vanilla
-  switch permanently overrides its auto-on fallback (`MakeUgcSwitch` returns the synced
-  component raw) — a server-persisted wrong glow, so only the lighting family is touched.
-  Owner must be the local player; ≤ 64 sends per press, closest-first (a > 64 overflow names
-  how many farther pieces were skipped). Verdicts are cached per staticId.
-- No per-frame work, no detours, no state store — the scan runs only when a button is clicked,
+  picks the absolute overload: third param type name is `UgcSwitch` or `UgcSwitch&` (`in UgcSwitch`),
+  never `UgcSwitch.Idx` (that overload XORs one bit). CorElementType is VALUETYPE for both;
+  `mono_type_get_type` is required (offset 0 of MonoType is not the enum on this runtime).
+- **Which pieces**: `TableData.DecodeTypeEntityData(staticId)` → `f_asLight` set **and** entity
+  type `lighting` (`id 55`, 350001–359999 campfires/lanterns) or `outdoorlamp` (`id 221`,
+  37800–37999). `f_ugcSwitch` is not used: on decoration (`id 50`, 300001–309999) it is set for
+  every row, including Pumpkin Grimkin Surprise Box `302832` (skill `500100116`, trigger
+  `PlayerEnter`, timeline `ugcview_302832_touch`). `SwitchState` on that piece plays the scare.
+  The `Lighting` table is only 350001–350494. Plain `f_asLight=1` still spans bed/chair/catnest/…
+  and those stay excluded. `homeNetId` must be non-zero (the house instance; a visited home is
+  included, a public-area prop is not). ≤ 64 sends per press, closest-first
+  (a > 64 overflow names how many farther pieces were skipped). Verdicts are cached per staticId.
+  Hotkeys **Furniture Lights ON** / **Furniture Lights OFF** (Settings → Keybinds, unbound by default)
+  run the same action as the buttons.
+- No per-frame scan, no detours, no state store — the scan runs only when a button or hotkey is pressed,
   with the standard pinned-enumeration discipline. Errors cool through the feature breaker and
   land in the log + status line, never toast-only.
-- **Verification status**: the both-bits flame/glow behavior is decompile-verified (and matches
-  why a Light-only flip lit models without flames), but the first live ON/OFF screenshot pair
-  and the overload-resolution log confirmation on build 3.3.9 were still pending at deploy —
-  see the plan's §5 before trusting the behavior as field-proven.
+- **Verification status**: confirmed in game on two clients. `switchFlag` 1 extinguishes the
+  flame and 0 ignites it; `SwitchState` `0x00` / `0x03` is only the light. Same press, cast
+  then byte. The body pose is not played.
 
 ---
 

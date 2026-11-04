@@ -175,12 +175,16 @@ namespace HeartopiaMod
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         internal delegate uint MonoSignatureGetParamCountDelegate(IntPtr signature);
 
-        // mono_signature_get_params(MonoMethodSignature*, void** iter) -> MonoType*. The
-        // MonoType's enumeration int sits at offset 0 of the struct (first member in every
-        // mono version — see HomelandUtility struct-offset notes; reading it is pure metadata,
-        // no allocation, no GC interaction).
+        // mono_signature_get_params(MonoMethodSignature*, void** iter) -> MonoType*. Pass each
+        // MonoType to mono_type_get_type for the CorElementType — do not read struct offset 0.
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         internal delegate IntPtr MonoSignatureGetParamsDelegate(IntPtr signature, ref IntPtr iter);
+
+        // Returns the CorElementType / MonoTypeEnum for a MonoMethodSignature parameter (MONO_TYPE_I4,
+        // MONO_TYPE_U4, MONO_TYPE_BYREF, …). Do NOT read MonoType at offset 0 on this embedded mono —
+        // that field is not the enumeration on bdwgc builds and signature checks see {0,0,0}.
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        internal delegate int MonoTypeGetTypeDelegate(IntPtr type);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate UIntPtr MonoArrayLengthDelegate(IntPtr array);
@@ -327,6 +331,8 @@ namespace HeartopiaMod
         internal static MonoSignatureGetParamCountDelegate auraMonoSignatureGetParamCount;
 
         internal static MonoSignatureGetParamsDelegate auraMonoSignatureGetParams;
+
+        internal static MonoTypeGetTypeDelegate auraMonoTypeGetType;
 
         private static MonoArrayLengthDelegate auraMonoArrayLength;
 
@@ -995,6 +1001,7 @@ namespace HeartopiaMod
             auraMonoMethodSignature = this.GetAuraMonoExport<MonoMethodSignatureDelegate>(monoModule, "mono_method_signature");
             auraMonoSignatureGetParamCount = this.GetAuraMonoExport<MonoSignatureGetParamCountDelegate>(monoModule, "mono_signature_get_param_count");
             auraMonoSignatureGetParams = this.GetAuraMonoExport<MonoSignatureGetParamsDelegate>(monoModule, "mono_signature_get_params");
+            auraMonoTypeGetType = this.GetAuraMonoExport<MonoTypeGetTypeDelegate>(monoModule, "mono_type_get_type");
             auraMonoArrayLength = this.GetAuraMonoExport<MonoArrayLengthDelegate>(monoModule, "mono_array_length");
             auraMonoArrayAddrWithSize = this.GetAuraMonoExport<MonoArrayAddrWithSizeDelegate>(monoModule, "mono_array_addr_with_size");
             auraMonoArrayElementSize = this.GetAuraMonoExport<MonoArrayElementSizeDelegate>(monoModule, "mono_array_element_size");

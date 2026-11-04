@@ -122,6 +122,8 @@ namespace HeartopiaMod
                     new UguiKeybindRowBinding("Auto Sea Clean QTE", () => this.seaCleanQteHotkey),
                     new UguiKeybindRowBinding("Bird Vacuum", () => this.keyBirdVacuum),
                     new UguiKeybindRowBinding("Spawn Bubble", () => this.keySpawnBubble),
+                    new UguiKeybindRowBinding("Furniture Lights ON", () => this.keyFurnitureLightsOn),
+                    new UguiKeybindRowBinding("Furniture Lights OFF", () => this.keyFurnitureLightsOff),
                     new UguiKeybindRowBinding("Auto Repair", () => this.keyAutoRepair),
                     new UguiKeybindRowBinding("Quest Walk", () => this.keyQuestWalk),
                     new UguiKeybindRowBinding("Auto Eat", () => this.keyAutoEat),

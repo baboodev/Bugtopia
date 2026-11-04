@@ -1872,20 +1872,22 @@ namespace HeartopiaMod
         // the expected MonoType enumerations. The generic answer to the trap that five+ other
         // features hit with plain name+arity lookups: mono_class_get_method_from_name returns
         // whichever same-arity overload is declared first, and invoking the wrong overload is
-        // a corruption or a crash. The MonoType's enumeration int sits at offset 0 of the
-        // struct (first member in every mono version); reading it is pure metadata — no
-        // invoke, no allocation, no GC interaction. Candidates matching the name but not the
-        // shape are logged with their actual enumerations so a future build's signature drift
-        // is diagnosable from the log line. CorElementType reference: I4=0x08, U4=0x09,
-        // BYREF=0x10 (an `in T` parameter), VALUETYPE=0x11 (a byval struct/enum).
+        // a corruption or a crash. Parameter types come from mono_type_get_type on each
+        // mono_signature_get_params slot — not from reading MonoType at offset 0 (wrong on this
+        // embedded mono). Candidates matching the name but not the shape are logged with their
+        // actual enumerations so a future build's signature drift is diagnosable from the log line.
+        // CorElementType reference: I4=0x08, U4=0x09, BYREF=0x10 (an `in T` parameter),
+        // VALUETYPE=0x11 (a byval struct/enum).
         private IntPtr FindAuraMonoMethodByParamTypes(IntPtr classPtr, string methodName,
-            int paramCount, int[] expectedTypes, string logTag)
+            int paramCount, int[] expectedTypes, string logTag,
+            int verifyParamTypeNameIndex = -1, string verifyParamTypeNameContains = null,
+            string verifyParamTypeNameExactStruct = null, bool logSignatureMismatches = true)
         {
             if (classPtr == IntPtr.Zero || string.IsNullOrEmpty(methodName)
                 || expectedTypes == null || expectedTypes.Length != paramCount
                 || auraMonoClassGetMethods == null || auraMonoMethodGetName == null
                 || auraMonoMethodSignature == null || auraMonoSignatureGetParamCount == null
-                || auraMonoSignatureGetParams == null)
+                || auraMonoSignatureGetParams == null || auraMonoTypeGetType == null)
             {
                 return IntPtr.Zero;
             }
@@ -1915,22 +1917,85 @@ namespace HeartopiaMod
 
                 IntPtr typeIter = IntPtr.Zero;
                 bool ok = true;
+                bool enumMismatch = false;
                 int[] actual = new int[paramCount];
+                IntPtr[] paramTypePtrs = new IntPtr[paramCount];
                 for (int i = 0; i < paramCount; i++)
                 {
                     IntPtr typePtr = auraMonoSignatureGetParams(signature, ref typeIter);
                     if (typePtr == IntPtr.Zero)
                     {
                         ok = false;
+                        enumMismatch = true;
                         break;
                     }
 
-                    int typeEnum = Marshal.ReadInt32(typePtr, 0);
+                    paramTypePtrs[i] = typePtr;
+                    int typeEnum = auraMonoTypeGetType(typePtr);
                     actual[i] = typeEnum;
                     if (typeEnum != expectedTypes[i])
                     {
                         ok = false;
+                        enumMismatch = true;
                         break;
+                    }
+                }
+
+                if (ok && verifyParamTypeNameIndex >= 0 && verifyParamTypeNameIndex < paramCount
+                    && !string.IsNullOrEmpty(verifyParamTypeNameContains)
+                    && auraMonoTypeGetName != null && auraMonoFree != null)
+                {
+                    IntPtr paramType = paramTypePtrs[verifyParamTypeNameIndex];
+                    string typeName = null;
+                    if (paramType != IntPtr.Zero)
+                    {
+                        IntPtr typeNamePtr = auraMonoTypeGetName(paramType);
+                        if (typeNamePtr != IntPtr.Zero)
+                        {
+                            typeName = Marshal.PtrToStringAnsi(typeNamePtr);
+                            auraMonoFree(typeNamePtr);
+                        }
+                    }
+
+                    if (string.IsNullOrEmpty(typeName)
+                        || typeName.IndexOf(verifyParamTypeNameContains, StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        ok = false;
+                        if (logSignatureMismatches)
+                        {
+                            ModLogger.Msg((string.IsNullOrEmpty(logTag) ? "[AuraMono]" : logTag)
+                                + " signature type-name mismatch: " + methodName + "/" + paramCount
+                                + " param " + verifyParamTypeNameIndex + " expected name containing '"
+                                + verifyParamTypeNameContains + "' got '" + (typeName ?? string.Empty) + "'");
+                        }
+                    }
+                }
+
+                if (ok && verifyParamTypeNameIndex >= 0 && verifyParamTypeNameIndex < paramCount
+                    && !string.IsNullOrEmpty(verifyParamTypeNameExactStruct))
+                {
+                    string typeName = null;
+                    IntPtr paramType = paramTypePtrs[verifyParamTypeNameIndex];
+                    if (paramType != IntPtr.Zero && auraMonoTypeGetName != null && auraMonoFree != null)
+                    {
+                        IntPtr typeNamePtr = auraMonoTypeGetName(paramType);
+                        if (typeNamePtr != IntPtr.Zero)
+                        {
+                            typeName = Marshal.PtrToStringAnsi(typeNamePtr);
+                            auraMonoFree(typeNamePtr);
+                        }
+                    }
+
+                    if (!AuraMonoTypeNameIsExactNonNestedStruct(typeName, verifyParamTypeNameExactStruct))
+                    {
+                        ok = false;
+                        if (logSignatureMismatches)
+                        {
+                            ModLogger.Msg((string.IsNullOrEmpty(logTag) ? "[AuraMono]" : logTag)
+                                + " signature struct mismatch: " + methodName + "/" + paramCount
+                                + " param " + verifyParamTypeNameIndex + " expected exact struct '"
+                                + verifyParamTypeNameExactStruct + "' got '" + (typeName ?? string.Empty) + "'");
+                        }
                     }
                 }
 
@@ -1939,15 +2004,44 @@ namespace HeartopiaMod
                     return method;
                 }
 
-                // Resolution runs once per world, so the small array and this line are free
-                // where it matters (0 entries = the parameter iteration ended early).
-                ModLogger.Msg((string.IsNullOrEmpty(logTag) ? "[AuraMono]" : logTag)
-                    + " signature mismatch: " + methodName + "/" + paramCount
-                    + " expected {" + string.Join(", ", Array.ConvertAll(expectedTypes, t => "0x" + t.ToString("X")))
-                    + "} got {" + string.Join(", ", Array.ConvertAll(actual, t => "0x" + t.ToString("X"))) + "}");
+                if (enumMismatch && logSignatureMismatches)
+                {
+                    ModLogger.Msg((string.IsNullOrEmpty(logTag) ? "[AuraMono]" : logTag)
+                        + " signature mismatch: " + methodName + "/" + paramCount
+                        + " expected {" + string.Join(", ", Array.ConvertAll(expectedTypes, t => "0x" + t.ToString("X")))
+                        + "} got {" + string.Join(", ", Array.ConvertAll(actual, t => "0x" + t.ToString("X"))) + "}");
+                }
             }
 
             return IntPtr.Zero;
+        }
+
+        // Rejects UgcSwitch.Idx; accepts …UgcSwitch and …UgcSwitch& (`in UgcSwitch` in mono names).
+        private static bool AuraMonoTypeNameIsExactNonNestedStruct(string typeName, string structName)
+        {
+            if (string.IsNullOrEmpty(typeName) || string.IsNullOrEmpty(structName))
+            {
+                return false;
+            }
+
+            if (typeName.IndexOf('+') >= 0 || typeName.IndexOf('/') >= 0)
+            {
+                return false;
+            }
+
+            if (typeName.IndexOf(".Idx", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+
+            string trimmed = typeName;
+            if (trimmed.EndsWith("&", StringComparison.Ordinal))
+            {
+                trimmed = trimmed.Substring(0, trimmed.Length - 1);
+            }
+
+            return trimmed.Equals(structName, StringComparison.OrdinalIgnoreCase)
+                || trimmed.EndsWith("." + structName, StringComparison.OrdinalIgnoreCase);
         }
 
         // Getter-invoke readers shared by the furniture features (get_OwnerId / get_StaticId /

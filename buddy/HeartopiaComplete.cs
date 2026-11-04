@@ -85,6 +85,8 @@ namespace HeartopiaMod
         private KeyCode keyFeedAllCats = KeyCode.None;
         private KeyCode keyFeedAllDogs = KeyCode.None;
         private KeyCode keySpawnBubble = KeyCode.None;
+        private KeyCode keyFurnitureLightsOn = KeyCode.None;
+        private KeyCode keyFurnitureLightsOff = KeyCode.None;
         
         // Key Rebinding State
         private string keyBindingActive = "";
@@ -1037,6 +1039,14 @@ namespace HeartopiaMod
                     this.AddMenuNotification(
                         spawned ? "Bubble spawned" : "Bubble spawn failed (enter world / wait for mono hooks)",
                         spawned ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+                }
+                if (this.TryGetModHotkeyDown(this.keyFurnitureLightsOn))
+                {
+                    this.RunFurnitureLightsAction(true);
+                }
+                if (this.TryGetModHotkeyDown(this.keyFurnitureLightsOff))
+                {
+                    this.RunFurnitureLightsAction(false);
                 }
                 if (this.TryGetModHotkeyDown(this.keyBypassUI))
                 {

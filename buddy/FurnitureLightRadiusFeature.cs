@@ -9,37 +9,38 @@ namespace HeartopiaMod
     // player can switch within a radius around them to ON or OFF (campfires, braziers, lanterns).
     //
     // Mechanics verified against ilspy-dumps + live MCP probes (docs/plans/2026-11-04-furniture-light-radius.md):
-    // the UgcSwitch byte's two bits drive DIFFERENT visuals — BatchEntity.cs:1645-1647 applies
-    // Get(Light) to the dye/emissive + room-lighting dirty flag and Get(Operate) to the
-    // SetProp material property, which IS the flame for campfires (their MechanismItem row
-    // carries no timeline, so the Operate bit is the only flame driver). The vanilla switch
-    // button (SwitchInteractionCommand) therefore sets BOTH bits at once; flipping only Light
-    // lights the model but never produces a flame. Payload semantics: bits 0-1 are the whole
-    // byte's meaning, so the absolute value (on ? 0b11 : 0b00) is complete and idempotent —
+    // the UgcSwitch byte's two bits drive dye/room light (Light) and the operate material
+    // (Operate). The looping campfire flame is NOT that material. InitInteractActionClip plays
+    // config_interaction_{id}_on via RendererComponent.PlayAnim when Operate is set, and nothing
+    // in the UgcSwitch update path stops it. The vanilla button (SwitchInteractionCommand) does
+    // both: SetMask(Operate|Light) + SwitchState, AND player.Cast, whose server echo
+    // (ExecuteActionNetworkEvent) reaches every client, including this one, and
+    // BuildActionClipComponent replaces the clip with config_interaction_{id}_off / _on.
+    // SwitchState alone changes the light and leaves the loop running. A quickCast alone
+    // changes the flame and leaves the light. Confirmed in game, both clients: switchFlag 1
+    // plays the off clip, switchFlag 0 plays the on clip, then the absolute byte
+    // (on ? 0b11 : 0b00) in the same press. quickCast skips the body pose
+    // (QuickActionEvent, not CastActionEvent). The timeline is not played locally.
+    // Payload semantics: bits 0-1 are the whole byte's meaning, so the value is idempotent —
     // no current-state read is needed, and re-sending the same value is a no-op server-side.
     //
     // Send: HomelandProtocolManager.SwitchState(uint netId, uint buildRootNetId, in UgcSwitch)
     // — the same absolute packet the button sends (SendBuildBatchOperation → Building channel),
     // exactly the op Auto Repair already ships on that channel. buildRootNetId comes from the
     // piece's own get_HomeNetId, the same FurnitureBaseData.homeNetId the vanilla 2-arg
-    // overload resolves. THE OVERLOAD IS NOT AMBIGUOUS-ARITY SAFE: there are two 3-arg
-    // SwitchState methods ((…, Idx) single-bit toggle and (…, in UgcSwitch) absolute), and
-    // mono_class_get_method_from_name returns whichever is declared first. The resolve uses
-    // FindAuraMonoMethodByParamTypes instead — the absolute overload is identified by its
-    // signature {U4, U4, BYREF} and an unverified candidate is never stored or invoked.
+    // overload resolves. THE OVERLOAD IS NOT AMBIGUOUS-ARITY SAFE: SwitchState(uint,uint,UgcSwitch.Idx)
+    // toggles one bit then sends; SwitchState(uint,uint,in UgcSwitch) sends the absolute struct.
+    // Both third params are VALUETYPE — Contains("UgcSwitch") also matches UgcSwitch/Idx; resolve
+    // requires exact struct name. Wrong overload treats payload as Idx → light-only XOR toggles.
     // DecodeTypeEntityData has the same trap ((int) vs (string)) → {I4}.
     //
-    // Capability gate: TableData.DecodeTypeEntityData(staticId) (static, global-namespace
-    // TableData in the EcsClient image) → TableEntityType row → f_asLight set AND
-    // id == 55 (the lighting family — the only switch behavior traced end to end; f_asLight
-    // alone spans 19 furniture/build types and the switch byte would persistently override
-    // their auto-on fallback, see the constant comment). The TableUgcSwitch /
-    // MechanismItem.ugcSkills / InteractionEffect paths were all live-disproven as light
-    // sources — do not re-add them.
+    // Capability gate: TableData.DecodeTypeEntityData(staticId) → TableEntityType → f_asLight
+    // AND (id == 55 lighting OR id == 221 outdoorlamp). f_ugcSwitch is not a lamp test: on
+    // decoration (id 50) it is set for the whole 300001-309999 range.
     //
-    // Scope: pieces whose get_OwnerId is the local player only (same getter + rationale as
-    // FurnitureAutoRepair). The build channel's server-side permission for other players'
-    // pieces is unverified — sending for them would burn rejected packets.
+    // Scope: any light piece in radius whose get_HomeNetId is non-zero. That id is the house
+    // instance, not the player who placed the piece, so a visited home is included. homeNetId 0
+    // is a public-area prop and stays out.
     public partial class HeartopiaComplete
     {
         internal static bool MasterLogFurnitureLightRadius = false;
@@ -50,25 +51,28 @@ namespace HeartopiaMod
         // One action must not put a whole festival of pieces on the wire in one frame — the
         // leftover candidates go out on the next press.
         private const int FurnitureLightMaxSendsPerAction = 64;
-        // EntityType row id of the lighting type (DB EntityType id 55, staticId range
-        // 350001-359999): the ONLY family whose switch behavior was traced end to end
-        // (campfires, braziers, lanterns, crow lamps — the 28 flame pieces of the live pile
-        // scan are all type 55). f_asLight=1 alone is NOT the gate: it spans 19 entity types
-        // (bed/chair/wardrobe/door/roof/brick/catnest/photoframe/displaybox/...), and writing
-        // a UgcSwitchComponent to a piece that has no vanilla switch permanently overrides
-        // the auto-on fallback in HomelandUtility.GetLightState (MakeUgcSwitch returns the
-        // synced component raw) — a server-persisted wrong glow. Same "not verified ⇒
-        // excluded" rule the cooker (id 57) follows.
+        // EntityType row ids from oversea EntityType. f_asLight is a type flag, not a per-item
+        // lamp bit: decoration (id 50, 300001-309999) has f_asLight and f_ugcSwitch set for all
+        // 3023 rows, including Pumpkin Grimkin Surprise Box 302832 (skill 500100116, trigger
+        // PlayerEnter, timeline ugcview_302832_touch). SwitchState on that piece plays the scare.
+        // The Lighting table is only 350001-350494 (id 55). Outdoor lamps are id 221.
         private const int FurnitureLightLightingEntityTypeId = 55;
+        private const int FurnitureLightOutdoorLampEntityTypeId = 221;
 
-        // MonoTypeEnumeration (CorElementType) values the signature check compares against:
-        // uint32 params, and a BYREF slot for the `in UgcSwitch` parameter (the enum overload
-        // would present VALUETYPE there — the check rejects it).
+        // CorElementType via mono_type_get_type. Both 3-arg SwitchState overloads are VALUETYPE
+        // in slot 2 (UgcSwitch.Idx vs in UgcSwitch, whose mono name is UgcSwitch&). Disambiguate
+        // by exact struct name, not BYREF.
+        private const int MonoTypeBoolean = 0x02;
         private const int MonoTypeI4 = 0x08;
         private const int MonoTypeU4 = 0x09;
-        private const int MonoTypeByref = 0x10;
-        // (The enum overload would present VALUETYPE 0x11 in slot 2 — the {U4, U4, BYREF}
-        // expectation rejects it; kept here only as the documented counter-example.)
+        private const int MonoTypeValuetype = 0x11;
+        // TargetDirection.Middle. quickCast does not aim the body; the field is still serialized.
+        private const int FurnitureLightTargetDirectionMiddle = 4;
+        // InteractType.Switch. Only rows with enableSwitchLight own the on/off flame timeline
+        // (doors are also type 2 and must not be played).
+        private const int FurnitureLightSwitchInteractionType = 2;
+        private const int FurnitureLightFlameMaxDepth = 4;
+        private const int FurnitureLightFlameMaxNodes = 96;
 
         private static readonly string[] FurnitureLightViewImages =
         {
@@ -95,6 +99,7 @@ namespace HeartopiaMod
         private bool furnitureLightRegistrationsDone;
         private bool furnitureLightResolveReady;
         private bool furnitureLightResolveFailureLogged;
+        private bool furnitureLightSignatureMismatchLogged;
         private IntPtr furnitureLightComponentClass;    // FurnitureBaseComponent
         private IntPtr furnitureLightProtocolClass;     // HomelandProtocolManager
         private IntPtr furnitureLightTableDataClass;    // TableData (EcsClient, empty namespace)
@@ -103,6 +108,23 @@ namespace HeartopiaMod
         private IntPtr furnitureLightOwnerGetter;       // FurnitureBaseComponent.get_OwnerId -> uint
         private IntPtr furnitureLightStaticIdGetter;    // FurnitureBaseComponent.get_StaticId -> int
         private IntPtr furnitureLightHomeNetGetter;     // FurnitureBaseComponent.get_HomeNetId -> uint
+        private IntPtr furnitureLightUgcSwitchClass;    // XDT.Scene.Shared.Modules.Build.UgcSwitch
+        private IntPtr furnitureLightUgcSwitchValueField; // UgcSwitch.value (byte)
+        // Flame cast. Resolved lazily and never part of furnitureLightResolveReady: a miss
+        // must still let SwitchState turn the light on.
+        private IntPtr furnitureLightLevelObjectClass;
+        private IntPtr furnitureLightGetInteractionMethod; // TableData.GetInteraction(int, bool)
+        private IntPtr furnitureLightSwitchArgClass;       // PlayerActionSwitchInteractArg
+        private IntPtr furnitureLightPlayerClass;          // LocalPlayerComponent
+        private IntPtr furnitureLightCastMethod;           // LocalPlayerComponent.Cast(ActionContext)
+        private bool furnitureLightFlameSignatureLogged;
+        private bool furnitureLightFlameFailureLogged;
+
+        private struct FurnitureLightSwitchTarget
+        {
+            public int InteractId;
+            public ulong LevelObjectNetId;
+        }
 
         // staticId → is-a-switchable-light-piece. Config-table derived, world-independent, so
         // it survives world changes on purpose (staticIds are constants). A failed decode is
@@ -148,6 +170,7 @@ namespace HeartopiaMod
         {
             if (this.furnitureLightResolveReady)
             {
+                this.EnsureFurnitureLightFlameReady();
                 return true;
             }
 
@@ -192,7 +215,15 @@ namespace HeartopiaMod
             {
                 this.furnitureLightSwitchStateMethod = this.FindAuraMonoMethodByParamTypes(
                     this.furnitureLightProtocolClass, "SwitchState", 3,
-                    new int[] { MonoTypeU4, MonoTypeU4, MonoTypeByref }, "[FurnitureLights]");
+                    new int[] { MonoTypeU4, MonoTypeU4, MonoTypeValuetype },
+                    "[FurnitureLights]",
+                    2,
+                    verifyParamTypeNameExactStruct: "UgcSwitch",
+                    logSignatureMismatches: !this.furnitureLightSignatureMismatchLogged);
+                if (this.furnitureLightSwitchStateMethod == IntPtr.Zero)
+                {
+                    this.furnitureLightSignatureMismatchLogged = true;
+                }
             }
 
             if (this.furnitureLightDecodeMethod == IntPtr.Zero)
@@ -220,11 +251,26 @@ namespace HeartopiaMod
                     this.furnitureLightComponentClass, "get_HomeNetId", 0);
             }
 
+            if (this.furnitureLightUgcSwitchClass == IntPtr.Zero)
+            {
+                this.furnitureLightUgcSwitchClass = this.FindAuraMonoClassByFullName(
+                    "XDT.Scene.Shared.Modules.Build.UgcSwitch");
+            }
+
+            if (this.furnitureLightUgcSwitchClass != IntPtr.Zero
+                && this.furnitureLightUgcSwitchValueField == IntPtr.Zero)
+            {
+                this.furnitureLightUgcSwitchValueField = this.FindAuraMonoFieldOnHierarchy(
+                    this.furnitureLightUgcSwitchClass, "value");
+            }
+
             this.furnitureLightResolveReady = this.furnitureLightSwitchStateMethod != IntPtr.Zero
                 && this.furnitureLightDecodeMethod != IntPtr.Zero
                 && this.furnitureLightOwnerGetter != IntPtr.Zero
                 && this.furnitureLightStaticIdGetter != IntPtr.Zero
-                && this.furnitureLightHomeNetGetter != IntPtr.Zero;
+                && this.furnitureLightHomeNetGetter != IntPtr.Zero
+                && this.furnitureLightUgcSwitchClass != IntPtr.Zero
+                && this.furnitureLightUgcSwitchValueField != IntPtr.Zero;
 
             if (this.furnitureLightResolveReady && MasterLogFurnitureLightRadius)
             {
@@ -237,6 +283,11 @@ namespace HeartopiaMod
             else if (!this.furnitureLightResolveReady)
             {
                 this.LogFurnitureLightResolveFailureOnce("method/getter unresolved");
+            }
+
+            if (this.furnitureLightResolveReady)
+            {
+                this.EnsureFurnitureLightFlameReady();
             }
 
             return this.furnitureLightResolveReady;
@@ -333,14 +384,6 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                // Same id the game's own switch button compares against (the repair feature's
-                // rationale): without it every piece would be skipped rather than sent.
-                if (!this.TryResolveSelfPlayerNetId(out uint selfNetId) || selfNetId == 0U)
-                {
-                    status = this.L("self player netId unavailable");
-                    return false;
-                }
-
                 for (int i = 0; i < components.Count; i++)
                 {
                     IntPtr obj = components[i];
@@ -352,13 +395,6 @@ namespace HeartopiaMod
                     piecesSeen++;
 
                     if (!this.TryHomelandFarmTryReadAuraMonoComponentNetId(obj, out uint netId) || netId == 0U)
-                    {
-                        continue;
-                    }
-
-                    uint ownerId;
-                    if (!this.TryInvokeAuraMonoUIntGetter(obj, this.furnitureLightOwnerGetter, out ownerId)
-                        || ownerId != selfNetId)
                     {
                         continue;
                     }
@@ -415,7 +451,7 @@ namespace HeartopiaMod
                     ? this.LF(" ({0} without house root)", skippedNoHome)
                     : string.Empty;
                 status = this.LF(
-                    "no switchable light pieces of mine within {0} m{1} (pieces seen: {2})",
+                    "no switchable light pieces within {0} m{1} (pieces seen: {2})",
                     (int)radius,
                     noHomePart,
                     piecesSeen);
@@ -424,18 +460,50 @@ namespace HeartopiaMod
 
             int sent = 0;
             int failed = 0;
+            int flameCasts = 0;
             string lastError = null;
-            int cap = Math.Min(targets.Count, FurnitureLightMaxSendsPerAction);
-            for (int i = 0; i < cap; i++)
+            bool flameReady = this.EnsureFurnitureLightFlameReady();
+            List<uint> playerPins = new List<uint>();
+            IntPtr playerObj = IntPtr.Zero;
+            if (flameReady)
             {
-                if (!this.TrySendFurnitureLightSwitch(targets[i].NetId, targets[i].HomeNetId, turnOn, out string error))
+                this.TryGetFurnitureLightLocalPlayer(out playerObj, playerPins);
+            }
+
+            int cap = Math.Min(targets.Count, FurnitureLightMaxSendsPerAction);
+            try
+            {
+                for (int i = 0; i < cap; i++)
                 {
-                    failed++;
-                    lastError = error;
-                    continue;
+                    // Cast first, then SwitchState. Same-frame order confirmed live on two clients:
+                    // flag 1 extinguishes the flame, flag 0 ignites it, the byte is only the light.
+                    if (playerObj != IntPtr.Zero)
+                    {
+                        flameCasts += this.TryCastFurnitureLightFlame(targets[i].NetId, turnOn, playerObj);
+                    }
+
+                    if (!this.TrySendFurnitureLightSwitch(targets[i].NetId, targets[i].HomeNetId, turnOn, out string error))
+                    {
+                        failed++;
+                        lastError = error;
+                        continue;
+                    }
+
+                    sent++;
+                }
+            }
+            finally
+            {
+                // ConfigurableActionClip.OnStart hides the left hand and plays the interact
+                // controller even when quickCast skips the body pose. EndCasting does not run
+                // the pose-restore clip. Re-focus motion, the same pair EquipHandhold uses
+                // after an override change, or walk and jump stay dead until the item changes.
+                if (playerObj != IntPtr.Zero && flameCasts > 0)
+                {
+                    this.RestoreFurnitureLightLocomotion(playerObj);
                 }
 
-                sent++;
+                FreeAuraMonoPins(playerPins);
             }
 
             string onOff = turnOn ? this.L("ON") : this.L("OFF");
@@ -448,7 +516,12 @@ namespace HeartopiaMod
             string skipSuffix = skippedNoHome > 0
                 ? this.LF(", skipped {0} no house root", skippedNoHome)
                 : string.Empty;
-            status = this.LF("{0}: sent {1}{2}{3}{4}", onOff, sent, capSuffix, failSuffix, skipSuffix);
+            string flameSuffix = !flameReady
+                ? this.L(", flame cast unresolved")
+                : playerObj == IntPtr.Zero
+                    ? this.L(", no local player")
+                    : this.LF(", flame casts {0}", flameCasts);
+            status = this.LF("{0}: sent {1}{2}{3}{4}{5}", onOff, sent, capSuffix, failSuffix, skipSuffix, flameSuffix);
             if (MasterLogFurnitureLightRadius)
             {
                 ModLogger.Msg("[FurnitureLights] " + (turnOn ? "ON" : "OFF") + " radius=" + radius
@@ -458,10 +531,9 @@ namespace HeartopiaMod
             return sent > 0 && failed == 0;
         }
 
-        // One static invoke of the signature-verified absolute SwitchState. The UgcSwitch
-        // struct is { byte value }; byref args travel as a pointer to the local, the same
-        // convention TrySendFurnitureRepair uses for uint. Both bits carry the same value —
-        // the vanilla button's SetMask({Light, Operate}, value) result (file header).
+        // One static invoke of the signature-verified absolute SwitchState. Build a real
+        // UgcSwitch on the mono heap (value field), unbox to the struct address mono expects
+        // for the 3rd parameter — a bare byte* on the stack is not a UgcSwitch for this sig.
         private unsafe bool TrySendFurnitureLightSwitch(uint netId, uint homeNetId, bool turnOn, out string error)
         {
             error = null;
@@ -472,21 +544,57 @@ namespace HeartopiaMod
                 return false;
             }
 
-            uint localNetId = netId;
-            uint localRootNetId = homeNetId;
-            byte switchValue = turnOn ? (byte)0b11 : (byte)0b00;
-
-            IntPtr* args = stackalloc IntPtr[3];
-            args[0] = (IntPtr)(&localNetId);
-            args[1] = (IntPtr)(&localRootNetId);
-            args[2] = (IntPtr)(&switchValue);
-
-            IntPtr exc = IntPtr.Zero;
-            auraMonoRuntimeInvoke(method, IntPtr.Zero, (IntPtr)args, ref exc);
-            if (exc != IntPtr.Zero)
+            if (auraMonoObjectNew == null || auraMonoFieldSetValue == null || auraMonoObjectUnbox == null
+                || this.furnitureLightUgcSwitchClass == IntPtr.Zero
+                || this.furnitureLightUgcSwitchValueField == IntPtr.Zero)
             {
-                error = "exc=0x" + exc.ToInt64().ToString("X");
+                error = this.L("UgcSwitch layout unresolved");
                 return false;
+            }
+
+            IntPtr switchObj = auraMonoObjectNew(this.auraMonoRootDomain, this.furnitureLightUgcSwitchClass);
+            if (switchObj == IntPtr.Zero)
+            {
+                error = "UgcSwitch alloc failed";
+                return false;
+            }
+
+            uint pin = AuraMonoPinNew(switchObj);
+            try
+            {
+                uint localNetId = netId;
+                uint localRootNetId = homeNetId;
+                byte switchValue = turnOn ? (byte)0b11 : (byte)0b00;
+                auraMonoFieldSetValue(switchObj, this.furnitureLightUgcSwitchValueField, (IntPtr)(&switchValue));
+                IntPtr switchStructPtr = auraMonoObjectUnbox(switchObj);
+                if (switchStructPtr == IntPtr.Zero)
+                {
+                    error = "UgcSwitch unbox failed";
+                    return false;
+                }
+
+                IntPtr* args = stackalloc IntPtr[3];
+                args[0] = (IntPtr)(&localNetId);
+                args[1] = (IntPtr)(&localRootNetId);
+                args[2] = switchStructPtr;
+
+                IntPtr exc = IntPtr.Zero;
+                auraMonoRuntimeInvoke(method, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    error = "exc=0x" + exc.ToInt64().ToString("X");
+                    return false;
+                }
+
+                if (MasterLogFurnitureLightRadius)
+                {
+                    ModLogger.Msg("[FurnitureLights] SwitchState netId=" + netId + " home=" + homeNetId
+                        + " value=0x" + switchValue.ToString("X2"));
+                }
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
             }
 
             return true;
@@ -504,6 +612,7 @@ namespace HeartopiaMod
             lightPiece = false;
             if (this.furnitureLightCapabilityCache.TryGetValue(staticId, out bool cached))
             {
+                lightPiece = cached;
                 return true;
             }
 
@@ -532,12 +641,14 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                lightPiece = asLight && entityTypeId == FurnitureLightLightingEntityTypeId;
+                lightPiece = asLight && (entityTypeId == FurnitureLightLightingEntityTypeId
+                    || entityTypeId == FurnitureLightOutdoorLampEntityTypeId);
                 this.furnitureLightCapabilityCache[staticId] = lightPiece;
                 if (MasterLogFurnitureLightRadius)
                 {
                     ModLogger.Msg("[FurnitureLights] capability staticId=" + staticId
-                        + " entityTypeId=" + entityTypeId + " f_asLight=" + asLight + " → " + lightPiece);
+                        + " entityTypeId=" + entityTypeId + " f_asLight=" + asLight
+                        + " → " + lightPiece);
                 }
 
                 return true;
@@ -552,6 +663,464 @@ namespace HeartopiaMod
         // helpers (HeartopiaComplete.AuraMono.cs) — same getters as FurnitureAutoRepair.
         // A Zero owner (TryUnboxMonoUInt32 rejects 0) is not the local player, so the piece
         // is skipped; a Zero homeNetId fails the uint read the same way.
+
+        // Cast + GetInteraction. Independent of SwitchState readiness so a flame
+        // miss cannot disable the light send. Signature mismatches log once.
+        private bool EnsureFurnitureLightFlameReady()
+        {
+            if (this.furnitureLightCastMethod != IntPtr.Zero
+                && this.furnitureLightSwitchArgClass != IntPtr.Zero
+                && this.furnitureLightGetInteractionMethod != IntPtr.Zero
+                && this.furnitureLightLevelObjectClass != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                || this.furnitureLightTableDataClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (this.furnitureLightLevelObjectClass == IntPtr.Zero)
+            {
+                // ByFullName's image list returned null on the running build (log: levelObject=0x0)
+                // while the all-image sweep resolves this class. Without it the interact walk
+                // never starts, the cast is skipped, and only SwitchState runs.
+                this.furnitureLightLevelObjectClass = this.FindAuraMonoClassAnySpelling(
+                    "ScriptsRefactory.LevelAndEntity.LevelObject");
+            }
+
+            if (this.furnitureLightGetInteractionMethod == IntPtr.Zero)
+            {
+                this.furnitureLightGetInteractionMethod = this.FindAuraMonoMethodByParamTypes(
+                    this.furnitureLightTableDataClass, "GetInteraction", 2,
+                    new int[] { MonoTypeI4, MonoTypeBoolean },
+                    "[FurnitureLights]",
+                    logSignatureMismatches: !this.furnitureLightFlameSignatureLogged);
+            }
+
+            if (this.furnitureLightCastMethod == IntPtr.Zero || this.furnitureLightSwitchArgClass == IntPtr.Zero)
+            {
+                if (this.furnitureLightPlayerClass == IntPtr.Zero)
+                {
+                    this.furnitureLightPlayerClass = this.FindAuraMonoClassByFullName(
+                        "XDTLevelAndEntity.Gameplay.Component.Player.LocalPlayerComponent");
+                }
+
+                if (this.furnitureLightPlayerClass != IntPtr.Zero && this.furnitureLightCastMethod == IntPtr.Zero)
+                {
+                    this.furnitureLightCastMethod = this.FindAuraMonoMethodOnHierarchy(
+                        this.furnitureLightPlayerClass, "Cast", 1);
+                }
+
+                if (this.furnitureLightSwitchArgClass == IntPtr.Zero)
+                {
+                    this.furnitureLightSwitchArgClass = this.FindAuraMonoClassByFullName(
+                        "XDTLevelAndEntity.Gameplay.Action.PlayerActionSwitchInteractArg");
+                }
+            }
+
+            bool ready = this.furnitureLightCastMethod != IntPtr.Zero
+                && this.furnitureLightSwitchArgClass != IntPtr.Zero
+                && this.furnitureLightGetInteractionMethod != IntPtr.Zero
+                && this.furnitureLightLevelObjectClass != IntPtr.Zero;
+            if (!ready)
+            {
+                this.furnitureLightFlameSignatureLogged = true;
+                if (!this.furnitureLightFlameFailureLogged)
+                {
+                    this.furnitureLightFlameFailureLogged = true;
+                    ModLogger.Msg("[FurnitureLights] flame cast unresolved"
+                        + " cast=0x" + this.furnitureLightCastMethod.ToInt64().ToString("X")
+                        + " arg=0x" + this.furnitureLightSwitchArgClass.ToInt64().ToString("X")
+                        + " interaction=0x" + this.furnitureLightGetInteractionMethod.ToInt64().ToString("X")
+                        + " levelObject=0x" + this.furnitureLightLevelObjectClass.ToInt64().ToString("X"));
+                }
+            }
+            else if (MasterLogFurnitureLightRadius)
+            {
+                ModLogger.Msg("[FurnitureLights] flame cast ready cast=0x"
+                    + this.furnitureLightCastMethod.ToInt64().ToString("X"));
+            }
+
+            return ready;
+        }
+
+        // quickCast of PlayerActionSwitchInteractArg. switchFlag 1 is the off clip, 0 is the on
+        // clip (confirmed; not a read of the current Operate bit). The body pose is not played,
+        // but OnStart still hides the hand and switches the animator; the caller restores
+        // locomotion afterwards. Returns how many casts the player accepted.
+        private int TryCastFurnitureLightFlame(uint netId, bool turnOn, IntPtr playerObj)
+        {
+            if (netId == 0U || playerObj == IntPtr.Zero || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                return 0;
+            }
+
+            if (!this.TryGetAuraMonoEntityObjectByNetId(netId, out IntPtr entityObj) || entityObj == IntPtr.Zero)
+            {
+                return 0;
+            }
+
+            List<uint> pins = new List<uint>();
+            try
+            {
+                pins.Add(AuraMonoPinNew(entityObj));
+                if (!this.TryGetMonoObjectMember(entityObj, "transformComponent", out IntPtr transformObj)
+                    || transformObj == IntPtr.Zero
+                    || !this.TryGetMonoObjectMember(transformObj, "hierarchy", out IntPtr hierarchyObj)
+                    || hierarchyObj == IntPtr.Zero)
+                {
+                    return 0;
+                }
+
+                pins.Add(AuraMonoPinNew(transformObj));
+                pins.Add(AuraMonoPinNew(hierarchyObj));
+
+                List<FurnitureLightSwitchTarget> targets = new List<FurnitureLightSwitchTarget>(4);
+                int nodes = 0;
+                this.CollectFurnitureLightInteractIds(hierarchyObj, 0, targets, pins, ref nodes);
+                int casts = 0;
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    FurnitureLightSwitchTarget target = targets[i];
+                    if (!this.FurnitureLightInteractionSwitchesLight(target.InteractId))
+                    {
+                        continue;
+                    }
+
+                    if (this.TryCastFurnitureLightSwitch(playerObj, netId, target, !turnOn))
+                    {
+                        casts++;
+                    }
+                }
+
+                if (MasterLogFurnitureLightRadius)
+                {
+                    ModLogger.Msg("[FurnitureLights] flame cast netId=" + netId
+                        + " " + (turnOn ? "on" : "off")
+                        + " ids=" + targets.Count + " casts=" + casts + " nodes=" + nodes);
+                }
+
+                return casts;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+        }
+
+        private bool TryGetFurnitureLightLocalPlayer(out IntPtr playerObj, List<uint> pins)
+        {
+            playerObj = IntPtr.Zero;
+            if (this.furnitureLightPlayerClass == IntPtr.Zero
+                || !this.TryAuraMonoGetComponentObjects(this.furnitureLightPlayerClass, out List<IntPtr> players, pins)
+                || players == null
+                || players.Count == 0
+                || players[0] == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            playerObj = players[0];
+            return true;
+        }
+
+        // Direct children of the entity hierarchy, then their children, bounded. The root
+        // object's type is the furniture ResourceComponent; LevelObjects hang underneath it,
+        // which is the walk InitInteractActionClip does via GetObjectList.
+        private void CollectFurnitureLightInteractIds(IntPtr hierarchyObj, int depth, List<FurnitureLightSwitchTarget> targets, List<uint> pins, ref int nodes)
+        {
+            if (hierarchyObj == IntPtr.Zero || depth >= FurnitureLightFlameMaxDepth || nodes >= FurnitureLightFlameMaxNodes)
+            {
+                return;
+            }
+
+            if (!this.TryInvokeAuraMonoZeroArg(hierarchyObj, out IntPtr childrenObj, "GetAllChild")
+                || childrenObj == IntPtr.Zero)
+            {
+                return;
+            }
+
+            pins.Add(AuraMonoPinNew(childrenObj));
+            List<IntPtr> children = new List<IntPtr>();
+            if (!this.TryEnumerateAuraMonoCollectionItems(childrenObj, children, pins))
+            {
+                return;
+            }
+
+            for (int i = 0; i < children.Count && nodes < FurnitureLightFlameMaxNodes; i++)
+            {
+                IntPtr child = children[i];
+                if (child == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                nodes++;
+                if (this.TryGetMonoObjectMember(child, "Object", out IntPtr levelObjectObj) && levelObjectObj != IntPtr.Zero)
+                {
+                    pins.Add(AuraMonoPinNew(levelObjectObj));
+                    if (this.IsAuraMonoClassAssignableTo(auraMonoObjectGetClass(levelObjectObj), this.furnitureLightLevelObjectClass))
+                    {
+                        this.AppendFurnitureLightInteractIds(levelObjectObj, targets);
+                    }
+                }
+
+                this.CollectFurnitureLightInteractIds(child, depth + 1, targets, pins, ref nodes);
+            }
+        }
+
+        private void AppendFurnitureLightInteractIds(IntPtr levelObjectObj, List<FurnitureLightSwitchTarget> targets)
+        {
+            if (!this.TryReadFurnitureLightLevelObjectNetId(levelObjectObj, out ulong levelObjectNetId)
+                || levelObjectNetId == 0UL)
+            {
+                return;
+            }
+
+            if (!this.TryInvokeAuraMonoZeroArg(levelObjectObj, out IntPtr arrayObj, "GetInteractIdArray")
+                || arrayObj == IntPtr.Zero
+                || !this.IsAuraMonoArrayObject(arrayObj)
+                || auraMonoArrayLength == null
+                || auraMonoArrayAddrWithSize == null)
+            {
+                return;
+            }
+
+            uint pin = AuraMonoPinNew(arrayObj);
+            try
+            {
+                int length = (int)Math.Min(auraMonoArrayLength(arrayObj).ToUInt64(), 8UL);
+                IntPtr arrayBase = auraMonoArrayAddrWithSize(arrayObj, sizeof(int), UIntPtr.Zero);
+                if (arrayBase == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                for (int i = 0; i < length; i++)
+                {
+                    int interactId = Marshal.ReadInt32(arrayBase, i * sizeof(int));
+                    if (interactId <= 0)
+                    {
+                        continue;
+                    }
+
+                    bool seen = false;
+                    for (int s = 0; s < targets.Count; s++)
+                    {
+                        if (targets[s].InteractId == interactId)
+                        {
+                            seen = true;
+                            break;
+                        }
+                    }
+
+                    if (!seen)
+                    {
+                        targets.Add(new FurnitureLightSwitchTarget
+                        {
+                            InteractId = interactId,
+                            LevelObjectNetId = levelObjectNetId,
+                        });
+                    }
+                }
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
+            }
+        }
+
+        private unsafe bool TryReadFurnitureLightLevelObjectNetId(IntPtr levelObjectObj, out ulong netId)
+        {
+            netId = 0UL;
+            if (!this.TryInvokeAuraMonoZeroArg(levelObjectObj, out IntPtr boxed, "get_netId")
+                || boxed == IntPtr.Zero
+                || auraMonoObjectUnbox == null
+                || !this.TryAuraMonoBoxedIsValueType(boxed))
+            {
+                return false;
+            }
+
+            IntPtr raw = auraMonoObjectUnbox(boxed);
+            if (raw == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            netId = *(ulong*)raw;
+            return netId != 0UL;
+        }
+
+        private unsafe bool FurnitureLightInteractionSwitchesLight(int interactId)
+        {
+            IntPtr method = this.furnitureLightGetInteractionMethod;
+            if (method == IntPtr.Zero || interactId <= 0)
+            {
+                return false;
+            }
+
+            int localId = interactId;
+            bool needException = false;
+            IntPtr* args = stackalloc IntPtr[2];
+            args[0] = (IntPtr)(&localId);
+            args[1] = (IntPtr)(&needException);
+            IntPtr exc = IntPtr.Zero;
+            IntPtr rowObj = auraMonoRuntimeInvoke(method, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero || rowObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            uint pin = AuraMonoPinNew(rowObj);
+            try
+            {
+                if (!this.TryGetMonoInt32Member(rowObj, "interactionType", out int interactionType)
+                    || interactionType != FurnitureLightSwitchInteractionType
+                    || !this.TryGetMonoBoolMember(rowObj, "enableSwitchLight", out bool enableSwitchLight))
+                {
+                    return false;
+                }
+
+                return enableSwitchLight;
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
+            }
+        }
+
+        private unsafe bool TryCastFurnitureLightSwitch(IntPtr playerObj, uint furnitureNetId, FurnitureLightSwitchTarget target, bool switchFlag)
+        {
+            if (playerObj == IntPtr.Zero || this.furnitureLightCastMethod == IntPtr.Zero
+                || this.furnitureLightSwitchArgClass == IntPtr.Zero
+                || auraMonoObjectNew == null || auraMonoFieldSetValue == null
+                || this.auraMonoRootDomain == IntPtr.Zero
+                || !AuraMonoPinningAvailable)
+            {
+                return false;
+            }
+
+            IntPtr argObj = auraMonoObjectNew(this.auraMonoRootDomain, this.furnitureLightSwitchArgClass);
+            if (argObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            uint pin = AuraMonoPinNew(argObj);
+            try
+            {
+                byte quick = 1;
+                byte flag = switchFlag ? (byte)1 : (byte)0;
+                int interactId = target.InteractId;
+                uint netId = furnitureNetId;
+                ulong levelObjectNetId = target.LevelObjectNetId;
+                int direction = FurnitureLightTargetDirectionMiddle;
+                Vector2 forward = Vector2.zero;
+                if (!this.TrySetFurnitureLightField(argObj, "quickCast", &quick)
+                    || !this.TrySetFurnitureLightField(argObj, "switchFlag", &flag)
+                    || !this.TrySetFurnitureLightField(argObj, "interactId", &interactId)
+                    || !this.TrySetFurnitureLightField(argObj, "netid", &netId)
+                    || !this.TrySetFurnitureLightField(argObj, "target", &levelObjectNetId)
+                    || !this.TrySetFurnitureLightField(argObj, "targetDirection", &direction)
+                    || !this.TrySetFurnitureLightField(argObj, "targetForward", &forward))
+                {
+                    if (MasterLogFurnitureLightRadius)
+                    {
+                        ModLogger.Msg("[FurnitureLights] flame cast field missing interactId=" + interactId);
+                    }
+
+                    return false;
+                }
+
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = argObj;
+                IntPtr exc = IntPtr.Zero;
+                IntPtr result = auraMonoRuntimeInvoke(this.furnitureLightCastMethod, playerObj, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero)
+                {
+                    if (MasterLogFurnitureLightRadius)
+                    {
+                        ModLogger.Msg("[FurnitureLights] flame cast exc=0x" + exc.ToInt64().ToString("X")
+                            + " interactId=" + interactId);
+                    }
+
+                    return false;
+                }
+
+                int code = result == IntPtr.Zero ? 0 : this.ReadAuraMonoBoxedInt32(result);
+                if (MasterLogFurnitureLightRadius || code != 0)
+                {
+                    ModLogger.Msg("[FurnitureLights] flame cast interactId=" + interactId
+                        + " netId=" + furnitureNetId + " target=" + levelObjectNetId
+                        + " switchFlag=" + (switchFlag ? 1 : 0) + " ActionErrorCode=" + code);
+                }
+
+                return code == 0;
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
+            }
+        }
+
+        private unsafe void RestoreFurnitureLightLocomotion(IntPtr playerObj)
+        {
+            if (playerObj == IntPtr.Zero || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                return;
+            }
+
+            if (!this.TryGetMonoObjectMember(playerObj, "actionGraph", out IntPtr graph) || graph == IntPtr.Zero)
+            {
+                return;
+            }
+
+            uint pin = AuraMonoPinNew(graph);
+            try
+            {
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(graph), "UpdateMotionFocus", 1);
+                if (method == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                this.InvokeFurnitureLightMotionFocus(method, graph, false);
+                this.InvokeFurnitureLightMotionFocus(method, graph, true);
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
+            }
+        }
+
+        private unsafe void InvokeFurnitureLightMotionFocus(IntPtr method, IntPtr graph, bool focus)
+        {
+            byte value = focus ? (byte)1 : (byte)0;
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = (IntPtr)(&value);
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(method, graph, (IntPtr)args, ref exc);
+        }
+
+        private unsafe bool TrySetFurnitureLightField(IntPtr obj, string fieldName, void* value)
+        {
+            if (obj == IntPtr.Zero || auraMonoObjectGetClass == null || auraMonoFieldSetValue == null)
+            {
+                return false;
+            }
+
+            IntPtr field = this.FindAuraMonoFieldOnHierarchy(auraMonoObjectGetClass(obj), fieldName);
+            if (field == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            auraMonoFieldSetValue(obj, field, (IntPtr)value);
+            return true;
+        }
 
         private void FurnitureLightSetStatus(string message)
         {
