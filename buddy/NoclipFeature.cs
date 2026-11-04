@@ -465,13 +465,16 @@ namespace HeartopiaMod
 
             GameObject skeleton = this.GetVerifiedLocalPlayerSkeleton();
             this.noclipFootHoldPosition = selfPos;
+            string yawLog = "yaw left unchanged";
             if (skeleton != null)
             {
                 this.noclipFootHoldRotation = Quaternion.Euler(0f, skeleton.transform.eulerAngles.y, 0f);
+                yawLog = "yaw from verified skeleton";
             }
             else if (hasSelfRot)
             {
                 this.noclipFootHoldRotation = Quaternion.Euler(0f, selfRot.eulerAngles.y, 0f);
+                yawLog = "yaw from self entity";
             }
             else
             {
@@ -479,6 +482,7 @@ namespace HeartopiaMod
                 if (facingCamera != null)
                 {
                     this.noclipFootHoldRotation = Quaternion.Euler(0f, facingCamera.transform.eulerAngles.y, 0f);
+                    yawLog = "yaw from camera";
                 }
             }
 
@@ -487,11 +491,6 @@ namespace HeartopiaMod
             if (Time.unscaledTime >= this.noclipFootHoldSeedLogAt)
             {
                 this.noclipFootHoldSeedLogAt = Time.unscaledTime + 5f;
-                string yawLog = skeleton != null
-                    ? "yaw from verified skeleton"
-                    : (hasSelfRot || Camera.main != null
-                        ? "yaw from self entity or camera"
-                        : "yaw left unchanged");
                 ModLogger.Msg("[Noclip] foot hover seeded at " + selfPos.ToString("F1") + " via " + source
                     + " (" + yawLog + ")");
             }

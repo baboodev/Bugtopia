@@ -783,10 +783,9 @@ namespace HeartopiaMod
             }
         }
 
-        // Proven not-ours. Null the latch and refresh lastLocalPlayerCheckTime to now so
-        // GetLocalPlayer stays inside LOCAL_PLAYER_CACHE_INTERVAL and returns null instead of
-        // immediately Finding the same remote skeleton (a stale stamp already older than 1 s would
-        // not block that Find).
+        // Proven not-ours, or a transform read on the cached skeleton threw. Null the latch and
+        // refresh lastLocalPlayerCheckTime to now so GetLocalPlayer stays inside
+        // LOCAL_PLAYER_CACHE_INTERVAL and returns null instead of immediately Find-ing again.
         private static void DropPoisonedLocalPlayerCache()
         {
             cachedLocalPlayer = null;
@@ -819,7 +818,7 @@ namespace HeartopiaMod
                 }
                 catch
                 {
-                    cachedLocalPlayer = null;
+                    DropPoisonedLocalPlayerCache();
                     return null;
                 }
 
@@ -864,7 +863,7 @@ namespace HeartopiaMod
             }
             catch
             {
-                cachedLocalPlayer = null;
+                DropPoisonedLocalPlayerCache();
                 return null;
             }
 

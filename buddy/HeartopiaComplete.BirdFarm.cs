@@ -4618,7 +4618,15 @@ namespace HeartopiaMod
             Vector3 forward;
             if (this.TryGetNoclipSelfAnchorPose(out anchorPos, out Quaternion selfRot, out bool hasSelfRot, out _))
             {
-                forward = hasSelfRot ? selfRot * Vector3.forward : Vector3.forward;
+                if (hasSelfRot)
+                {
+                    forward = selfRot * Vector3.forward;
+                }
+                else
+                {
+                    GameObject ownSkeleton = this.GetVerifiedLocalPlayerSkeleton();
+                    forward = ownSkeleton != null ? ownSkeleton.transform.forward : Vector3.forward;
+                }
             }
             else
             {
