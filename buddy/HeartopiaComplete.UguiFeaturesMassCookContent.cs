@@ -2553,8 +2553,16 @@ namespace HeartopiaMod
             // back into the field like the qty normalization snap always has.
             if (this.IsNetCookFiveStarModeActive())
             {
+                string previous = this.netCookBatchCountInput;
                 this.netCookBatchCountInput = text;
                 this.SyncNetCookBatchCountFromInput();
+                // DISH LIMIT is reset to 1 on every load. BATCH COUNT is the persisted value
+                // (plan §4.1 / §6.2). SaveAllSettings is the silent flush; SaveKeybinds would
+                // log a line per keystroke.
+                if (!string.Equals(previous, this.netCookBatchCountInput, StringComparison.Ordinal))
+                {
+                    try { this.SaveAllSettings(); } catch { }
+                }
                 return;
             }
 
