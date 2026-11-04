@@ -716,7 +716,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryEnsureNoclipPlayerDriveObjects(out IntPtr playerObj, out _) || playerObj == IntPtr.Zero)
+            if (!this.TryGetSelfPlayerObjectForIdentity(out IntPtr playerObj) || playerObj == IntPtr.Zero)
             {
                 return false;
             }
@@ -745,7 +745,20 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                // The proxy's own class — resolved from the live object, never by guessed name.
+                if (AuraMonoPinningAvailable)
+                {
+                    uint xformPin = AuraMonoPinNew(xformObj);
+                    if (xformPin != 0U)
+                    {
+                        pins.Add(xformPin);
+                        IntPtr pinnedXform = AuraMonoPinTarget(xformPin);
+                        if (pinnedXform != IntPtr.Zero)
+                        {
+                            xformObj = pinnedXform;
+                        }
+                    }
+                }
+
                 IntPtr xformCls = auraMonoObjectGetClass(xformObj);
                 IntPtr getId = this.FindAuraMonoMethodOnHierarchy(xformCls, "GetInstanceID", 0);
                 if (getId == IntPtr.Zero
@@ -755,8 +768,20 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                // Unity instanceIDs are negative for scene objects: reinterpret as signed. A real
-                // instanceID is never 0, so TryUnboxMonoUInt32's reject-zero is not a concern here.
+                if (AuraMonoPinningAvailable)
+                {
+                    uint boxedPin = AuraMonoPinNew(boxedId);
+                    if (boxedPin != 0U)
+                    {
+                        pins.Add(boxedPin);
+                        IntPtr pinnedBox = AuraMonoPinTarget(boxedPin);
+                        if (pinnedBox != IntPtr.Zero)
+                        {
+                            boxedId = pinnedBox;
+                        }
+                    }
+                }
+
                 if (!this.TryUnboxMonoUInt32(boxedId, out uint rawId))
                 {
                     return false;
@@ -769,6 +794,14 @@ namespace HeartopiaMod
             {
                 FreeAuraMonoPins(pins);
             }
+        }
+
+        // Proven not-ours. Null the latch. Do not touch lastLocalPlayerCheckTime: GetLocalPlayer
+        // then returns null until LOCAL_PLAYER_CACHE_INTERVAL elapses, instead of Finding the
+        // same remote skeleton on the following call.
+        private static void DropPoisonedLocalPlayerCache()
+        {
+            cachedLocalPlayer = null;
         }
 
         // The player skeleton ONLY once the self Mono entity proves it is ours. GetLocalPlayer() is a
@@ -822,6 +855,7 @@ namespace HeartopiaMod
                         + " (every remote/GUI player shares the object name) — skeleton-based writes skipped.");
                 }
 
+                DropPoisonedLocalPlayerCache();
                 return null;
             }
 
@@ -856,6 +890,7 @@ namespace HeartopiaMod
                         + ", self entity " + selfPos.ToString("F1") + ") — skeleton-based writes skipped.");
                 }
 
+                DropPoisonedLocalPlayerCache();
                 return null;
             }
 

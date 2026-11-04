@@ -782,6 +782,40 @@ namespace HeartopiaMod
             this.ApplyNoclipVehicleFacing(vehicleComponentObj, anchorPosition, faceRot, flatDir);
         }
 
+        // Transform-id proof only. Character.Player is the self object. PlayerMoveComponent is a
+        // noclip-drive concern; requiring it here, or arming noclipPlayerResolveRetryAt on its
+        // failure, blanks skeleton identity for a second and forces the 2.5 m fallback.
+        private bool TryGetSelfPlayerObjectForIdentity(out IntPtr playerObj)
+        {
+            playerObj = IntPtr.Zero;
+            if (IsSelfPlayerAwaitingSpawn)
+            {
+                return false;
+            }
+
+            if (!this.EnsureAuraMonoApiReady()
+                || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null
+                || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+
+            if (this.cachedNoclipPlayerObj.TryGet(out playerObj) && playerObj != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            playerObj = IntPtr.Zero;
+            if (!this.TryGetAuraMonoLocalPlayerObject(out playerObj) || playerObj == IntPtr.Zero)
+            {
+                playerObj = IntPtr.Zero;
+                return false;
+            }
+
+            return true;
+        }
+
         // Resolves (and caches) the self BasePlayerComponent plus its PlayerMoveComponent — the
         // pair every foot-noclip write goes through, and the pair the hover seed reads its anchor
         // from, so the two can never end up on different players. TryGetAuraMonoLocalPlayerObject
