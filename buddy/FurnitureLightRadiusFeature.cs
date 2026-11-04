@@ -89,7 +89,7 @@ namespace HeartopiaMod
         // same policy as AutoFishingFarm's shadow range.
         private float furnitureLightRadiusMeters = FurnitureLightDefaultRadiusMeters;
 
-        private string furnitureLightStatus = "idle";
+        private string furnitureLightStatus = string.Empty;
         private string furnitureLightLastLoggedStatus = string.Empty;
 
         private bool furnitureLightRegistrationsDone;
@@ -121,7 +121,15 @@ namespace HeartopiaMod
                 FurnitureLightMinRadiusMeters, FurnitureLightMaxRadiusMeters);
         }
 
-        public string GetFurnitureLightStatus() => this.furnitureLightStatus ?? string.Empty;
+        public string GetFurnitureLightStatus()
+        {
+            if (string.IsNullOrEmpty(this.furnitureLightStatus))
+            {
+                return this.L("Idle");
+            }
+
+            return this.furnitureLightStatus;
+        }
 
         // ===== Registration / resolution =====
 
@@ -263,7 +271,7 @@ namespace HeartopiaMod
 
             if (!this.furnitureLightResolveReady)
             {
-                this.FurnitureLightSetStatus("not ready yet — enter a homeland and retry");
+                this.FurnitureLightSetStatus(this.L("not ready yet — enter a homeland and retry"));
                 this.AddMenuNotification(this.L("Furniture lights: ") + this.furnitureLightStatus, FurnitureLightFailColor);
                 return;
             }
@@ -271,7 +279,7 @@ namespace HeartopiaMod
             float now = Time.unscaledTime;
             if (!this.furnitureLightBreaker.ShouldRun(now))
             {
-                this.FurnitureLightSetStatus("cooling down after a repeated error");
+                this.FurnitureLightSetStatus(this.L("cooling down after a repeated error"));
                 return;
             }
 
@@ -286,7 +294,7 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 this.furnitureLightBreaker.Failure("FurnitureLightRadius", ex, now);
-                this.FurnitureLightSetStatus("error: " + ex.Message);
+                this.FurnitureLightSetStatus(this.LF("error: {0}", ex.Message));
                 ModLogger.Msg("[FurnitureLights] action error: " + ex);
                 this.AddMenuNotification(this.L("Furniture lights failed: ") + ex.Message, FurnitureLightFailColor);
             }
@@ -298,7 +306,7 @@ namespace HeartopiaMod
         // scalarized to (netId, homeNetId) before the send loop.
         private unsafe bool TryFurnitureLightApply(bool turnOn, out string status)
         {
-            status = "AuraMono unavailable";
+            status = this.L("AuraMono unavailable");
             if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
             {
                 return false;
@@ -315,13 +323,13 @@ namespace HeartopiaMod
                 if (!this.TryAuraMonoGetComponentObjects(
                         this.furnitureLightComponentClass, out components, out bool infrastructureOk, pins))
                 {
-                    status = infrastructureOk ? "no furniture pieces loaded" : "component scan unavailable";
+                    status = infrastructureOk ? this.L("no furniture pieces loaded") : this.L("component scan unavailable");
                     return false;
                 }
 
                 if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos))
                 {
-                    status = "player position unavailable";
+                    status = this.L("player position unavailable");
                     return false;
                 }
 
@@ -329,7 +337,7 @@ namespace HeartopiaMod
                 // rationale): without it every piece would be skipped rather than sent.
                 if (!this.TryResolveSelfPlayerNetId(out uint selfNetId) || selfNetId == 0U)
                 {
-                    status = "self player netId unavailable";
+                    status = this.L("self player netId unavailable");
                     return false;
                 }
 
@@ -403,9 +411,14 @@ namespace HeartopiaMod
 
             if (targets.Count == 0)
             {
-                status = "no switchable light pieces of mine within " + (int)radius + " m"
-                    + (skippedNoHome > 0 ? " (" + skippedNoHome + " without house root)" : "")
-                    + " (pieces seen: " + piecesSeen + ")";
+                string noHomePart = skippedNoHome > 0
+                    ? this.LF(" ({0} without house root)", skippedNoHome)
+                    : string.Empty;
+                status = this.LF(
+                    "no switchable light pieces of mine within {0} m{1} (pieces seen: {2})",
+                    (int)radius,
+                    noHomePart,
+                    piecesSeen);
                 return false;
             }
 
@@ -425,10 +438,17 @@ namespace HeartopiaMod
                 sent++;
             }
 
-            status = (turnOn ? "ON" : "OFF") + ": sent " + sent
-                + (targets.Count > cap ? ", capped — closest " + cap + " sent, " + (targets.Count - cap) + " farther pieces not sent" : "")
-                + (failed > 0 ? ", failed " + failed + " (" + lastError + ")" : "")
-                + (skippedNoHome > 0 ? ", skipped " + skippedNoHome + " no house root" : "");
+            string onOff = turnOn ? this.L("ON") : this.L("OFF");
+            string capSuffix = targets.Count > cap
+                ? this.LF(", capped — closest {0} sent, {1} farther pieces not sent", cap, targets.Count - cap)
+                : string.Empty;
+            string failSuffix = failed > 0
+                ? this.LF(", failed {0} ({1})", failed, lastError ?? string.Empty)
+                : string.Empty;
+            string skipSuffix = skippedNoHome > 0
+                ? this.LF(", skipped {0} no house root", skippedNoHome)
+                : string.Empty;
+            status = this.LF("{0}: sent {1}{2}{3}{4}", onOff, sent, capSuffix, failSuffix, skipSuffix);
             if (MasterLogFurnitureLightRadius)
             {
                 ModLogger.Msg("[FurnitureLights] " + (turnOn ? "ON" : "OFF") + " radius=" + radius
@@ -448,7 +468,7 @@ namespace HeartopiaMod
             IntPtr method = this.furnitureLightSwitchStateMethod;
             if (method == IntPtr.Zero || auraMonoRuntimeInvoke == null)
             {
-                error = "SwitchState unresolved";
+                error = this.L("SwitchState unresolved");
                 return false;
             }
 
