@@ -1189,10 +1189,9 @@ namespace HeartopiaMod
                 // read drops us to the rotation-only path instead of writing a position we do not trust.
                 bool monoPosOk = this.TryGetCastFacingSelfPositionMono(out Vector3 monoPos, out string monoPosStatus);
 
-                GameObject skeleton = HeartopiaComplete.GetLocalPlayer();
-                GameObject positionSource = skeleton != null ? skeleton : this.FindPlayerRoot();
-                bool goPosOk = positionSource != null;
-                Vector3 goPos = goPosOk ? positionSource.transform.position : Vector3.zero;
+                GameObject skeleton = this.GetVerifiedLocalPlayerSkeleton();
+                bool goPosOk = skeleton != null;
+                Vector3 goPos = goPosOk ? skeleton.transform.position : Vector3.zero;
                 if (!monoPosOk && !goPosOk)
                 {
                     return false;
@@ -1258,14 +1257,7 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                if (skeleton != null)
-                {
-                    skeleton.transform.rotation = faceRot;
-                }
-                else if (!onFishingShip)
-                {
-                    positionSource.transform.rotation = faceRot;
-                }
+                skeleton.transform.rotation = faceRot;
 
                 status = onFishingShip
                     ? "visual-only ship-safe yaw=" + targetYaw.ToString("F1")
