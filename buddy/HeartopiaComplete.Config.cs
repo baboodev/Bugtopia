@@ -348,6 +348,8 @@ namespace HeartopiaMod
             data.MasterLogHomeLike = MasterLogHomeLike;
             data.MasterLogMusicPlayer = MasterLogMusicPlayer;
             data.MasterLogRepairThrowTrim = MasterLogRepairThrowTrim;
+            data.MasterLogFurnitureAutoRepair = MasterLogFurnitureAutoRepair;
+            data.MasterLogFurnitureLightRadius = MasterLogFurnitureLightRadius;
             data.MasterLogTutorialBlock = MasterLogTutorialBlock;
             // chatTranslateVerboseLog is deliberately NOT persisted — it is a diagnostic that
             // floods the log, so it always starts OFF and must be re-armed per session.
@@ -797,6 +799,8 @@ namespace HeartopiaMod
             MasterLogHomeLike = data.MasterLogHomeLike;
             MasterLogMusicPlayer = data.MasterLogMusicPlayer;
             MasterLogRepairThrowTrim = data.MasterLogRepairThrowTrim;
+            MasterLogFurnitureAutoRepair = data.MasterLogFurnitureAutoRepair;
+            MasterLogFurnitureLightRadius = data.MasterLogFurnitureLightRadius;
             MasterLogTutorialBlock = data.MasterLogTutorialBlock;
             this.chatTranslateVerboseLog = false; // session-only diagnostic; never restored from config
             this.autoIceSkatingEnabled = data.autoIceSkatingEnabled;
