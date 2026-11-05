@@ -405,6 +405,7 @@ namespace HeartopiaMod
             data.homelandFarmWaterRadius = this.homelandFarmWaterRadius;
             data.homelandFarmAutoFertilizeEnabled = this.homelandFarmAutoFertilizeEnabled;
             data.homelandFarmPrivacyRadius = this.homelandFarmPrivacyRadius;
+            data.homelandFarmAutoSyncDelaySeconds = this.homelandFarmAutoSyncDelaySeconds;
             data.autoFishScanTimeout = -1f;
             data.autoFishTeleportDelay = -1f;
             // While a fishing route is active the live range/toggles are the route's forced
@@ -868,6 +869,8 @@ namespace HeartopiaMod
             this.homelandFarmWaterRadius = Mathf.Clamp(data.homelandFarmWaterRadius > 0f ? data.homelandFarmWaterRadius : HomelandFarmDefaultWaterRadius, HomelandFarmMinWaterRadius, HomelandFarmMaxWaterRadius);
             this.homelandFarmAutoFertilizeEnabled = data.homelandFarmAutoFertilizeEnabled;
             this.homelandFarmPrivacyRadius = Mathf.Clamp(data.homelandFarmPrivacyRadius, HomelandFarmPrivacyMinRadius, HomelandFarmPrivacyMaxRadius);
+            this.homelandFarmAutoSyncDelaySeconds = HomelandFarmAutoWave.ClampSyncDelaySeconds(
+                data.homelandFarmAutoSyncDelaySeconds);
             this.saved_autoFishScanTimeout = data.autoFishScanTimeout;
             this.saved_autoFishTeleportDelay = data.autoFishTeleportDelay;
             this.saved_autoFishFishShadowDetectRange = data.autoFishFishShadowDetectRange;

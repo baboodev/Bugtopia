@@ -265,6 +265,9 @@ namespace HeartopiaMod
         // Realtime stamp of the first ripe crop in the current burst. Negative means no burst is open.
         private float homelandFarmAutoWaveFirstRipeAt = -1f;
         private int homelandFarmAutoSyncDelaySeconds = HomelandFarmAutoWave.SyncDelayDefaultSeconds;
+        private int homelandFarmAutoSyncDelayLastSeen = -1;
+        private bool homelandFarmAutoSyncDelaySavePending;
+        private float homelandFarmAutoSyncDelaySaveAt;
         // Field owner captured at "Capture planters", used as a SCAN-FREE presence gate: the auto loop
         // only runs scans/sow while the player is standing in THIS field (current in-field owner ==
         // captured owner). Never call TryHomelandFarmIsInHomeland(allowVisitingFarmArea:true) per tick —
@@ -18286,6 +18289,21 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 this.HomelandFarmLog("Failed to save farm radius: " + ex.Message);
+            }
+        }
+
+        private void PersistHomelandFarmAutoSyncDelay()
+        {
+            try
+            {
+                UnifiedConfigData data = this.LoadOrCreateUnifiedConfig();
+                this.PopulateAllConfigSections(data);
+                this.SaveUnifiedConfig(data);
+                this.HomelandFarmLog("Saved harvest debounce=" + this.homelandFarmAutoSyncDelaySeconds + "s to config.");
+            }
+            catch (Exception ex)
+            {
+                FeatureLog.Fail(HomelandFarmTag, "failed to save harvest debounce: " + ex.Message);
             }
         }
 

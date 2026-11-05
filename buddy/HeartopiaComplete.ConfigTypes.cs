@@ -422,6 +422,9 @@ namespace HeartopiaMod
             // Privacy pause radius in metres, 0 = off. A missing element deserializes to 0, which
             // is exactly the off state — no sentinel needed.
             public float homelandFarmPrivacyRadius;
+            // Seconds to wait after the first ripe crop of a burst before harvesting that burst.
+            // 1..5. A missing element deserializes to 0 and loads as the default.
+            public int homelandFarmAutoSyncDelaySeconds;
             public float autoFishScanTimeout = -1f;
             public float autoFishTeleportDelay = -1f;
             public float autoFishFishShadowDetectRange = -1f;
