@@ -2083,7 +2083,7 @@ Crop-box (planter) farming inside your homeland. All operations are **radius-bas
 
 Tab layout (top → bottom):
 
-1. **Auto Farming** — Capture planters + Reset capture + Start / Stop.
+1. **Auto Farming** — Capture planters + Reset capture + Start / Stop + **Harvest delay** (1–5 s, default 3).
 2. **Farm Radius** — single slider (1–80 m) driving every operation below; **persisted to config**.
 3. **Privacy Pause** — single slider (0–100 m, **0 = off**, default off); **persisted to config**.
 4. **Crops** — seed source (Backpack / Warehouse / Both), Refresh seeds, seed selector.
@@ -2110,8 +2110,8 @@ Item names in the seed/fertilizer selectors resolve through the same game-table 
 **Capture planters** snapshots the crop boxes in radius (like Mass Cook "Capture Stoves") and pins the working-zone center. **Reset capture** undoes that snapshot without any world scan: it stops a running auto farm / operation first, then clears the captured planters, sow points, crop and field caches and the field-owner gate — a stale "Captured N planter(s)" from another field or world can therefore be dropped explicitly. The button appears only while a capture exists (hidden when there is nothing to reset) and never touches settings: radius, seed/fertilizer selection and keybinds survive a reset. A capture left idle across a **world change** (entering or leaving any level) is cleared automatically too — netIds are per world instance, and re-entering the same farm regenerates every planter's netId, so the old snapshot is provably dead ids; the status card then reads "Capture cleared — the world changed". A *running* auto farm is exempt and keeps its snapshot until it ends on its own (remote weed/harvest from another world is a deliberate feature). **Start auto farm** then runs an autonomous loop (disabled until seeds are selected):
 
 1. **Discovery first** — one radius scan builds a crop-netId cache (so it never re-sows already-occupied planters on restart).
-2. **Poll** the cached crops directly (no re-scan): remove weeds, harvest ripe crops, drop them from the cache.
-3. **Sow** a new generation **only when the zone holds no crops** (start, or after the whole generation is harvested) and a post-sow cooldown has elapsed — prevents re-sowing boxes the server hasn't registered yet (`MaxPlantCountLimit`).
+2. **Poll** — on each wake the cached crops are read directly (no re-scan): remove weeds and read **`stage`**. Crossing ripe does not trigger harvest or sow on that same wake.
+3. **Ripe burst** — the first time any tracked crop reads **`stage >= 4`**, harvest and sow **do not** run yet; the loop sleeps the **Harvest delay** (1–5 s, default 3; persisted as `homelandFarmAutoSyncDelaySeconds`, slider **Harvest delay** on the Homeland Farm tab). When the delay elapses, every tracked crop that is **then** `stage >= 4` is harvested in one burst, harvested crops drop from the cache, and the usual sow pass fills whichever planter boxes were freed (subject to the post-sow cooldown that prevents re-sowing boxes the server hasn't registered yet — `MaxPlantCountLimit`). A crop still growing when the burst runs stays tracked for its own later burst; plots sown hours apart are not held for each other.
 4. **Time-scheduled weeding** — sleep is driven by the crops' exact maturity (`mature = sowTime + ripeGrowTime − growTime`, read from `CropItemData`; "now" via the game clock `GameTimeUtility.GetUnixTime()`). Coarse weeding while far from ripe; **weed every second in the final minute** before harvest.
 
 **Stop:** manual (Stop button / Stop auto farm), or automatic once the selected seed runs out **and** the last harvest is collected.
