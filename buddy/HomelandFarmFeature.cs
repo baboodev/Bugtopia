@@ -262,6 +262,9 @@ namespace HeartopiaMod
         // proven always-rescan behaviour if the event path ever misbehaves in-game.
         private bool homelandFarmAutoEventDriven = true;
         private float homelandFarmAutoNextFullFieldSowSweepAt = 0f;
+        // Realtime stamp of the first ripe crop in the current burst. Negative means no burst is open.
+        private float homelandFarmAutoWaveFirstRipeAt = -1f;
+        private int homelandFarmAutoSyncDelaySeconds = HomelandFarmAutoWave.SyncDelayDefaultSeconds;
         // Field owner captured at "Capture planters", used as a SCAN-FREE presence gate: the auto loop
         // only runs scans/sow while the player is standing in THIS field (current in-field owner ==
         // captured owner). Never call TryHomelandFarmIsInHomeland(allowVisitingFarmArea:true) per tick —
@@ -12550,6 +12553,7 @@ namespace HeartopiaMod
             this.homelandFarmAutoRunning = true;
             this.homelandFarmScanCenterOverride = this.homelandFarmAutoCenter;
             this.homelandFarmAutoCropNetIds.Clear();
+            this.homelandFarmAutoWaveFirstRipeAt = -1f;
             this.homelandFarmAutoHarvestedNetIds.Clear();
             this.homelandFarmAutoPendingSowBoxNetIds.Clear();
             // Seed the tracked crops from the capture snapshot so a start made AWAY from the field (where
@@ -12709,14 +12713,13 @@ namespace HeartopiaMod
                         }
                     }
 
-                    // 2. Directed poll of cached crops: weed flagged, harvest ripe (drop from cache),
-                    //    and track the soonest maturity. Harvest does NOT immediately re-trigger sow —
-                    //    we re-sow only once the whole generation is collected (cache empty), so we
-                    //    never re-sow boxes the server hasn't freed/registered yet.
+                    // 2. Directed poll of cached crops: weed flagged, count ripe (harvest waits
+                    //    for the burst pad below), and track the soonest maturity of growing crops.
                     long minRemaining = long.MaxValue;
                     int weededThisTick = 0;
                     int harvestedThisTick = 0;
                     int prunedThisTick = 0;
+                    int ripeCount = 0;
                     HashSet<uint> occupiedPlanters = null;
                     HashSet<uint> pollScanNetIds = null;
                     // The occupied-planter cross-check is a full radius scan (proximity over thousands
@@ -12788,14 +12791,12 @@ namespace HeartopiaMod
 
                         if (stage >= 4)
                         {
-                            if (this.TryHomelandFarmHarvestCrop(cropNetId, out _))
+                            ripeCount++;
+                            if (i % HomelandFarmHarvestFramePaceBatch == 0)
                             {
-                                totalHarvested++;
-                                harvestedThisTick++;
+                                yield return null;
                             }
 
-                            this.homelandFarmAutoHarvestedNetIds.Add(cropNetId);
-                            this.homelandFarmAutoCropNetIds.RemoveAt(i);
                             continue;
                         }
 
@@ -12820,6 +12821,79 @@ namespace HeartopiaMod
                     {
                         this.HomelandFarmLog("Auto poll: weeded=" + weededThisTick + " harvested=" + harvestedThisTick
                             + " pruned=" + prunedThisTick + " remaining=" + this.homelandFarmAutoCropNetIds.Count);
+                    }
+
+                    if (ripeCount > 0)
+                    {
+                        if (this.homelandFarmAutoWaveFirstRipeAt < 0f)
+                        {
+                            this.homelandFarmAutoWaveFirstRipeAt = Time.realtimeSinceStartup;
+                        }
+                    }
+                    else
+                    {
+                        this.homelandFarmAutoWaveFirstRipeAt = -1f;
+                    }
+
+                    float secondsSinceFirstRipe = this.homelandFarmAutoWaveFirstRipeAt < 0f
+                        ? -1f
+                        : Time.realtimeSinceStartup - this.homelandFarmAutoWaveFirstRipeAt;
+                    HomelandFarmAutoWaveAction burstAction = HomelandFarmAutoWave.Decide(
+                        ripeCount,
+                        secondsSinceFirstRipe,
+                        this.homelandFarmAutoSyncDelaySeconds);
+
+                    if (burstAction == HomelandFarmAutoWaveAction.Hold)
+                    {
+                        int delay = HomelandFarmAutoWave.ClampSyncDelaySeconds(this.homelandFarmAutoSyncDelaySeconds);
+                        // The tick's later idle sleep is also named sleep in this method, so the pad wait uses its own local.
+                        float burstSleep = Mathf.Max(0.05f, delay - secondsSinceFirstRipe);
+                        this.homelandFarmLastStatus = "Auto: waiting " + burstSleep.ToString("F0")
+                            + "s so " + ripeCount + " ripe plot(s) can be harvested together.";
+                        this.HomelandFarmLog("Auto ripe debounce: ripe=" + ripeCount
+                            + " waited=" + secondsSinceFirstRipe.ToString("F1") + "s/" + delay
+                            + "s, sleeping " + burstSleep.ToString("F1") + "s.");
+                        IEnumerator burstWait = this.HomelandFarmAutoPrivacyAwareSleepRoutine(burstSleep, inHomeland);
+                        while (burstWait.MoveNext())
+                        {
+                            yield return burstWait.Current;
+                        }
+
+                        continue;
+                    }
+
+                    if (burstAction == HomelandFarmAutoWaveAction.HarvestAndSow)
+                    {
+                        for (int i = this.homelandFarmAutoCropNetIds.Count - 1; i >= 0; i--)
+                        {
+                            uint cropNetId = this.homelandFarmAutoCropNetIds[i];
+                            if (!this.TryHomelandFarmReadCropState(cropNetId, out int stage, out _, out _) || stage < 4)
+                            {
+                                continue;
+                            }
+
+                            if (this.TryHomelandFarmHarvestCrop(cropNetId, out _))
+                            {
+                                totalHarvested++;
+                                harvestedThisTick++;
+                            }
+
+                            this.homelandFarmAutoHarvestedNetIds.Add(cropNetId);
+                            this.homelandFarmAutoCropNetIds.RemoveAt(i);
+                            if (i % HomelandFarmHarvestFramePaceBatch == 0)
+                            {
+                                yield return null;
+                            }
+                        }
+
+                        this.homelandFarmAutoWaveFirstRipeAt = -1f;
+                        if (harvestedThisTick > 0 && this.homelandFarmAutoCropNetIds.Count == 0)
+                        {
+                            this.homelandFarmAutoPendingSowBoxNetIds.Clear();
+                        }
+
+                        this.HomelandFarmLog("Auto ripe debounce harvest: harvested=" + harvestedThisTick
+                            + " remaining=" + this.homelandFarmAutoCropNetIds.Count);
                     }
 
                     // 3. SOW free planters — always top up genuinely-empty boxes, even while other
@@ -13063,6 +13137,7 @@ namespace HeartopiaMod
                 // A stopped farm must never leave the event-driven weeder gated off.
                 this.ResetHomelandFarmPrivacyState();
                 this.homelandFarmAutoCropNetIds.Clear();
+                this.homelandFarmAutoWaveFirstRipeAt = -1f;
                 this.homelandFarmAutoHarvestedNetIds.Clear();
                 this.homelandFarmAutoPendingSowBoxNetIds.Clear();
                 this.homelandFarmCoroutine = null;
