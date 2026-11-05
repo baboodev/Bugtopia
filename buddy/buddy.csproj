@@ -478,6 +478,7 @@
     <Compile Include="InstrumentHotkeyGuardFeature.cs" />
     <Compile Include="MusicPlayerFeature.cs" />
     <Compile Include="HomelandFarmFeature.cs" />
+    <Compile Include="HomelandFarmAutoWave.cs" />
     <Compile Include="HomelandFarmEventDiagFeature.cs" />
     <Compile Include="HomelandFarmPrivacyPauseFeature.cs" />
     <Compile Include="IceSkatingSequenceFeature.cs" />
