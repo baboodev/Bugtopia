@@ -5690,7 +5690,7 @@ namespace HeartopiaMod
             { "homeland_farm.reset_capture", "รีเซ็ตการจับ" },
             { "homeland_farm.status_reset", "ปลดการจับแล้ว — กดจับแปลงปลูกอีกครั้ง" },
             { "homeland_farm.status_reset_world", "ล้างการจับแล้ว — โลกเปลี่ยนไป กดจับแปลงปลูกอีกครั้ง" },
-            { "homeland_farm.auto_hint", "ห่ว่านเมล็ดที่เลือกและถอนวัชพืช หลังแปลงแรกของชุดสุกจะรอ แล้วเก็บเกี่ยวชุดนั้นพร้อมกัน" },
+            { "homeland_farm.auto_hint", "หว่านเมล็ดที่เลือกและถอนวัชพืช หลังแปลงแรกของชุดสุกจะรอ แล้วเก็บเกี่ยวชุดนั้นพร้อมกัน" },
             { "homeland_farm.sync_section", "หน่วงการเก็บเกี่ยว" },
             { "homeland_farm.sync_slider_label", "รอก่อนเก็บเกี่ยว" },
             { "homeland_farm.sync_value", "{0} วิ" },
