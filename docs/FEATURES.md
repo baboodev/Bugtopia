@@ -1402,6 +1402,7 @@ is not available at all (a boss run) or every spot refused in a row.
 
 - Opens bag UI programmatically, finds repair kit (standard or crafty), clicks Use, closes bag.
 - Trigger modes: manual hotkey, toast notification, **durability percentage threshold** (default 10%).
+- Equipped-tool wear follows `DataUpdated<ToolComponent>` for the id selected by `DataUpdated<TakenToolComponent>` (cleared by `DataRemoved<TakenToolComponent>`). One `TryGetCurrentToolDurability` seeds the world, and another runs only when a newly equipped id has no stored cap. The timed read and the empty `HandHoldUpdatedEvent` flag remain while those hooks are not installed.
 - **Never throws while the player's own kit is still standing** (since 2026-11-03). The server caps how
   many repair-kit devices one player may have placed at once: another throw answers the CanPut check
   with "no" and the game pops **"Unable to place more! Clear existing Repair Kits and place new

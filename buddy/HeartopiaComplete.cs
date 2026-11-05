@@ -1363,10 +1363,12 @@ namespace HeartopiaMod
                 this.EnsureRepairAuraEventHooks();
             }
             float autoRepairPollInterval = this.GetEffectiveAutoRepairTriggerCheckInterval();
+            bool toolDurabilityLive = this.AreToolDurabilityHooksLive();
             if (this.autoRepairOnToastEnabled
                 && !bagAutomationBusy
                 && (this.durabilityCheckRequestedByEvent
-                    || autoEatRepairNow - this.lastAutoRepairTriggerCheckAt >= autoRepairPollInterval))
+                    || (!toolDurabilityLive
+                        && autoEatRepairNow - this.lastAutoRepairTriggerCheckAt >= autoRepairPollInterval)))
             {
                 if (this.durabilityCheckRequestedByEvent)
                 {

@@ -98,6 +98,13 @@ namespace HeartopiaMod
 
             this.lastToolDurabilityPollAt = now;
 
+            if (this.AreToolDurabilityHooksLive()
+                && this.TryGetCachedEquippedDurability(out int cachedToolId, out int cachedDurability, out int cachedMax))
+            {
+                this.ApplyEquippedToolDurability(cachedToolId, cachedDurability, cachedMax, now);
+                return;
+            }
+
             if (!this.IsAutoRepairWorldReady(out string readinessStatus))
             {
                 bool statusChanged = !string.Equals(this.lastLoggedAutoRepairNetStatus, readinessStatus ?? string.Empty, StringComparison.Ordinal);
@@ -169,6 +176,18 @@ namespace HeartopiaMod
                 }
             }
 
+            if (toolId > 0 && maxDurability > 0)
+            {
+                this.toolDurabilityById[toolId] = durability;
+                this.toolDurabilityCapById[toolId] = maxDurability;
+                this.toolDurabilityCapPendingId = 0;
+            }
+
+            this.ApplyEquippedToolDurability(toolId, durability, maxDurability, now);
+        }
+
+        private void ApplyEquippedToolDurability(int toolId, int durability, int maxDurability, float now)
+        {
             string toolName = this.GetAutoRepairSupportedToolName(toolId);
             if (string.IsNullOrEmpty(toolName))
             {
@@ -1653,6 +1672,24 @@ namespace HeartopiaMod
             }
         }
 
+        private const string ToolDurabilityHookName = "DataUpdated<ToolComponent>";
+        private const string TakenToolHookName = "DataUpdated<TakenToolComponent>";
+        private const string TakenToolRemovedHookName = "DataRemoved<TakenToolComponent>";
+
+        private IntPtr toolDurabilityClass;
+        private IntPtr takenToolUpdatedClass;
+        private IntPtr takenToolRemovedClass;
+        private bool toolDurabilityHooksRegistered;
+        private bool toolDurabilityNameTakenLogged;
+        private bool toolDurabilityLayoutRejectedLogged;
+        private bool toolDurabilitySeeded;
+
+        private readonly Dictionary<int, int> toolDurabilityById = new Dictionary<int, int>();
+        private readonly Dictionary<int, int> toolDurabilityCapById = new Dictionary<int, int>();
+        private int equippedToolId;
+        private int toolDurabilityEpoch;
+        private int toolDurabilityCapPendingId;
+
         // --- Event-driven Auto Eat / Auto Repair triggers ---
         // Replaces the poll-only detection (energy = UI-text parse of the energy panel;
         // durability = timed AuraMono read):
@@ -1698,14 +1735,338 @@ namespace HeartopiaMod
             {
                 float now = Time.unscaledTime;
                 this.handholdEventSeenAt = now;
-                // Bursts (durability + skin + handhold updates land together) coalesce into one
-                // durability check per debounce window.
+                if (this.AreToolDurabilityHooksLive())
+                {
+                    return;
+                }
+
                 if (now >= this.nextEventDurabilityCheckAllowedAt)
                 {
                     this.nextEventDurabilityCheckAllowedAt = now + 0.25f;
                     this.durabilityCheckRequestedByEvent = true;
                 }
             });
+            this.RegisterWorldReadyCallback("auto-repair-tool-durability", this.TryRegisterToolDurabilityHooks);
+        }
+
+        private bool TryRegisterToolDurabilityHooks()
+        {
+            this.ClearToolDurabilityCacheIfEpochChanged();
+            if (this.toolDurabilityHooksRegistered)
+            {
+                return this.toolDurabilitySeeded || this.TrySeedToolDurability();
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                return false;
+            }
+
+            const string dataUpdatedOpen = "ScriptsRefactory.DataAndProtocol.Events.DataUpdated`1";
+            const string dataRemovedOpen = "ScriptsRefactory.DataAndProtocol.Events.DataRemoved`1";
+            const string toolComponentArg = "EcsClient.XDT.Scene.Shared.Modules.Tools.ToolComponent";
+            const string takenToolArg = "EcsClient.XDT.Scene.Shared.Modules.Tools.TakenToolComponent";
+
+            if (!this.TryBindClosedDataEvent(dataUpdatedOpen, toolComponentArg, "Id", "Durability", 16, out IntPtr toolClosed, out int idRaw, out int durabilityRaw)
+                || idRaw != 0
+                || durabilityRaw != 4)
+            {
+                if (toolClosed != IntPtr.Zero && (idRaw != 0 || durabilityRaw != 4))
+                {
+                    this.LogToolDurabilityLayoutOnce(toolComponentArg + " idRaw=" + idRaw + " durabilityRaw=" + durabilityRaw);
+                }
+
+                return false;
+            }
+
+            if (!this.TryBindClosedDataEvent(dataUpdatedOpen, takenToolArg, "ToolId", null, 8, out IntPtr takenClosed, out int takenUpdatedToolIdRaw, out _)
+                || takenUpdatedToolIdRaw != 0)
+            {
+                if (takenClosed != IntPtr.Zero && takenUpdatedToolIdRaw != 0)
+                {
+                    this.LogToolDurabilityLayoutOnce(takenToolArg + " toolIdRaw=" + takenUpdatedToolIdRaw);
+                }
+
+                return false;
+            }
+
+            if (!this.TryBindClosedDataEvent(dataRemovedOpen, takenToolArg, "ToolId", null, 8, out IntPtr removedClosed, out int takenRemovedToolIdRaw, out _)
+                || takenRemovedToolIdRaw != 0)
+            {
+                if (removedClosed != IntPtr.Zero && takenRemovedToolIdRaw != 0)
+                {
+                    this.LogToolDurabilityLayoutOnce(takenToolArg + " toolIdRaw=" + takenRemovedToolIdRaw);
+                }
+
+                return false;
+            }
+
+            if (this.gameEventHooksByName.ContainsKey(ToolDurabilityHookName)
+                || this.gameEventHooksByName.ContainsKey(TakenToolHookName)
+                || this.gameEventHooksByName.ContainsKey(TakenToolRemovedHookName))
+            {
+                if (!this.toolDurabilityNameTakenLogged)
+                {
+                    this.toolDurabilityNameTakenLogged = true;
+                    ModLogger.Msg("[AutoRepair] tool durability hook name already registered");
+                }
+
+                return false;
+            }
+
+            this.toolDurabilityClass = toolClosed;
+            this.takenToolUpdatedClass = takenClosed;
+            this.takenToolRemovedClass = removedClosed;
+
+            bool toolHook = this.RegisterGameEventHook(toolClosed, ToolDurabilityHookName, 16, this.OnToolDurabilityUpdated);
+            bool takenHook = this.RegisterGameEventHook(takenClosed, TakenToolHookName, 8, this.OnTakenToolUpdated);
+            bool removedHook = this.RegisterGameEventHook(removedClosed, TakenToolRemovedHookName, 0, this.OnTakenToolRemoved);
+            this.toolDurabilityHooksRegistered = toolHook && takenHook && removedHook;
+            if (!this.toolDurabilityHooksRegistered)
+            {
+                return false;
+            }
+
+            ModLogger.Msg("[AutoRepair] tool durability hooks registered payload=16 taken=8");
+            return this.TrySeedToolDurability();
+        }
+
+        private bool TrySeedToolDurability()
+        {
+            if (!this.TryGetCurrentToolDurability(out int toolId, out int durability, out int maxDurability, out string status))
+            {
+                if (string.Equals(status, "Taken tool unavailable", StringComparison.Ordinal)
+                    || string.Equals(status, "Taken tool id unavailable", StringComparison.Ordinal))
+                {
+                    this.equippedToolId = 0;
+                    this.toolDurabilitySeeded = true;
+                    return true;
+                }
+
+                return false;
+            }
+
+            this.equippedToolId = toolId;
+            this.toolDurabilityById[toolId] = durability;
+            if (maxDurability > 0)
+            {
+                this.toolDurabilityCapById[toolId] = maxDurability;
+            }
+
+            this.toolDurabilitySeeded = true;
+            if (this.autoRepairOnToastEnabled)
+            {
+                this.durabilityCheckRequestedByEvent = true;
+            }
+
+            return true;
+        }
+
+        private bool AreToolDurabilityHooksLive()
+        {
+            return this.toolDurabilityHooksRegistered
+                && this.toolDurabilitySeeded
+                && this.toolDurabilityEpoch == auraMonoWorldEpoch
+                && this.IsGameEventHookInstalled(ToolDurabilityHookName)
+                && this.IsGameEventHookInstalled(TakenToolHookName)
+                && this.IsGameEventHookInstalled(TakenToolRemovedHookName);
+        }
+
+        private bool TryGetCachedEquippedDurability(out int toolId, out int durability, out int maxDurability)
+        {
+            toolId = this.equippedToolId;
+            durability = 0;
+            maxDurability = 0;
+            if (toolId <= 0)
+            {
+                return false;
+            }
+
+            if (!this.toolDurabilityById.TryGetValue(toolId, out durability))
+            {
+                return false;
+            }
+
+            if (this.toolDurabilityCapById.TryGetValue(toolId, out maxDurability) && maxDurability > 0)
+            {
+                return true;
+            }
+
+            if (this.toolDurabilityCapPendingId != toolId)
+            {
+                return false;
+            }
+
+            if (!this.TryGetCurrentToolDurability(out int readId, out int readDurability, out int readMax, out _))
+            {
+                return false;
+            }
+
+            if (readId != toolId || readMax <= 0)
+            {
+                return false;
+            }
+
+            this.toolDurabilityCapById[toolId] = readMax;
+            this.toolDurabilityCapPendingId = 0;
+            durability = this.toolDurabilityById.TryGetValue(toolId, out int eventDurability)
+                ? eventDurability
+                : readDurability;
+            maxDurability = readMax;
+            return true;
+        }
+
+        private void RequestEquippedDurabilityCheck()
+        {
+            if (!this.autoRepairOnToastEnabled || this.equippedToolId <= 0)
+            {
+                return;
+            }
+
+            if (!this.toolDurabilityCapById.ContainsKey(this.equippedToolId))
+            {
+                this.toolDurabilityCapPendingId = this.equippedToolId;
+            }
+
+            this.durabilityCheckRequestedByEvent = true;
+        }
+
+        private bool TryBindClosedDataEvent(
+            string openName,
+            string argName,
+            string firstField,
+            string secondField,
+            int expectBytes,
+            out IntPtr closed,
+            out int firstRaw,
+            out int secondRaw)
+        {
+            closed = IntPtr.Zero;
+            firstRaw = -1;
+            secondRaw = -1;
+
+            IntPtr open = this.FindAuraMonoClassByFullName(openName);
+            IntPtr arg = this.FindAuraMonoClassByFullName(argName);
+            if (open == IntPtr.Zero || arg == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryBindAuraMonoGenericClass(open, new[] { arg }, out closed) || closed == IntPtr.Zero)
+            {
+                closed = IntPtr.Zero;
+                return false;
+            }
+
+            int bytes = 0;
+            int valueRaw = -1;
+            if (!this.TryMeasureAuraMonoBlittableSize(arg, false, out bytes)
+                || bytes != expectBytes
+                || !this.TryGetAuraMonoFieldRawOffset(closed, "Value", out valueRaw)
+                || valueRaw != 0)
+            {
+                this.LogToolDurabilityLayoutOnce(argName + " bytes=" + bytes + " valueRaw=" + valueRaw);
+                closed = IntPtr.Zero;
+                return false;
+            }
+
+            if (!this.TryGetAuraMonoFieldRawOffset(arg, firstField, out int firstFieldRaw))
+            {
+                this.LogToolDurabilityLayoutOnce(argName + " bytes=" + bytes + " valueRaw=" + valueRaw);
+                closed = IntPtr.Zero;
+                return false;
+            }
+
+            firstRaw = valueRaw + firstFieldRaw;
+
+            if (secondField != null)
+            {
+                if (!this.TryGetAuraMonoFieldRawOffset(arg, secondField, out int secondFieldRaw))
+                {
+                    this.LogToolDurabilityLayoutOnce(argName + " bytes=" + bytes + " valueRaw=" + valueRaw);
+                    closed = IntPtr.Zero;
+                    return false;
+                }
+
+                secondRaw = valueRaw + secondFieldRaw;
+            }
+
+            return true;
+        }
+
+        private void LogToolDurabilityLayoutOnce(string detail)
+        {
+            if (this.toolDurabilityLayoutRejectedLogged)
+            {
+                return;
+            }
+
+            this.toolDurabilityLayoutRejectedLogged = true;
+            ModLogger.Msg("[AutoRepair] tool durability layout rejected " + detail);
+        }
+
+        private void ClearToolDurabilityCacheIfEpochChanged()
+        {
+            if (this.toolDurabilityEpoch == auraMonoWorldEpoch)
+            {
+                return;
+            }
+
+            this.toolDurabilityEpoch = auraMonoWorldEpoch;
+            this.toolDurabilityById.Clear();
+            this.toolDurabilityCapById.Clear();
+            this.equippedToolId = 0;
+            this.toolDurabilitySeeded = false;
+            this.toolDurabilityCapPendingId = 0;
+        }
+
+        private void OnToolDurabilityUpdated(GameEventSnapshot snapshot)
+        {
+            this.ClearToolDurabilityCacheIfEpochChanged();
+            if (!this.autoRepairOnToastEnabled || snapshot.Length < 8)
+            {
+                return;
+            }
+
+            int toolId = snapshot.ReadInt32(0);
+            int durability = snapshot.ReadInt32(4);
+            if (toolId <= 0)
+            {
+                return;
+            }
+
+            this.toolDurabilityById[toolId] = durability;
+            if (toolId == this.equippedToolId)
+            {
+                this.RequestEquippedDurabilityCheck();
+            }
+        }
+
+        private void OnTakenToolUpdated(GameEventSnapshot snapshot)
+        {
+            this.ClearToolDurabilityCacheIfEpochChanged();
+            if (!this.autoRepairOnToastEnabled || snapshot.Length < 4)
+            {
+                return;
+            }
+
+            int toolId = snapshot.ReadInt32(0);
+            this.equippedToolId = toolId > 0 ? toolId : 0;
+            if (this.equippedToolId > 0)
+            {
+                this.RequestEquippedDurabilityCheck();
+            }
+        }
+
+        private void OnTakenToolRemoved(GameEventSnapshot snapshot)
+        {
+            this.ClearToolDurabilityCacheIfEpochChanged();
+            if (!this.autoRepairOnToastEnabled)
+            {
+                return;
+            }
+
+            this.equippedToolId = 0;
         }
 
         // --- Silent eat (no animation) ---
