@@ -387,15 +387,38 @@ leave; `SendRejectActivityEventCommand(uint eventNetId, long inviterShortId, Act
 `mono_runtime_invoke`, i.e. the stack-corruption trap. The mod therefore suppresses instead of
 rejecting, which the server sees as an unanswered call.
 
-#### Per-component events (`DataCreated<T>` / `DataRemoved<T>`)
+#### Per-component events (`DataUpdated<T>` / `DataCreated<T>` / `DataRemoved<T>`)
 
-`ScriptsRefactory.DataAndProtocol.Events.DataCreated<T>` (`struct DataCreated<T> { T Value; }`) is
-dispatched **per component type** by the various `ClientSystem.*SyncSystem`s
-(`DataCreated<BlockComponent>`, `DataCreated<PetEntityData>`, …) via
-`EventCenter.DispatchEvent<DataCreated<TComp>>`. More precise than `EntityCreateEvent`, **but** it is
-a nested generic — to hook it you must build the `DataCreated<TComp>` instantiation via
-`mono_class_bind_generic_parameters` (`auraMonoClassBindGenericParameters`) rather than resolving by
-name. Deferred until a feature needs the precision.
+`ScriptsRefactory.DataAndProtocol.Events.DataUpdated<T>` / `DataCreated<T>` / `DataRemoved<T>`
+(`struct { T Value; }`) are dispatched **per component type** by `EcsWorldData.DispatchDataEvent<T>`
+and the `ClientSystem.*SyncSystem`s, via the per-netId overload
+`EventCenter.DispatchEvent<DataUpdated<T>>(uint netId, in DataUpdated<T>)`. The image stores only
+the open `` `1 `` definition, so `ResolveGameEventClass` returns null for the closed name.
+
+Build the closed class with `TryBindAuraMonoGenericClass(open, new[] { argClass }, out closed)`.
+The per-netId overload registers with `RegisterGameEventHookByNetId(IntPtr, logName, payloadBytes, handler)`.
+The global overload registers with `RegisterGameEventHook(IntPtr, logName, payloadBytes, handler)`.
+`TryInstallGameEventDetour` uses `GameEventHookEntry.ResolvedEventClass` and does not look the log
+name up. `mono_class_bind_generic_parameters` is called only through that helper, as
+`(klass, type_argc, MonoType**, 0)`. The delegate's fourth argument is `is_dynamic` (`int`, not a
+count, not a C# `bool`). `Type.GetType` of a game-rooted name is not a fallback.
+
+`ComponentEvent<DataUpdated<T>>` is the same helper twice: bind `DataUpdated<T>` first, then bind
+`ComponentEvent`1` with that closed class as its type argument. It is dispatched globally
+(`DispatchEvent<T>(in T)`, no `uint` argument). `entityData.netId.value` is inside the struct.
+
+Proven in-world on one machine (`netId=10669616`), both lines in the same frame:
+
+- `DataUpdated<SnowMachineComponentData>` by-netId, 32 bytes (`state`@0, `ballCount`@4, `capacity`@8,
+  4 bytes of padding, `startTimestamp`@16, `duration`@24). Harvest logged `ballCount=0`, a later
+  update logged `ballCount=1`.
+- `ComponentEvent<DataUpdated<SnowMachineComponentData>>` global, 64 bytes (`entityData` 32 bytes with
+  `netId`@8, then `Value` at 32 so `ballCount`@36). The same update logged `ballCount=1`.
+
+The probe is `ProbeClosedSnowDataUpdated` / `ProbeClosedComponentEvent` in
+`plugins/ClosedGenericProbe`. Snow auto-collect still polls.
+
+`DataCreated<T>` / `DataRemoved<T>` use the same helper and are not registered.
 
 ---
 

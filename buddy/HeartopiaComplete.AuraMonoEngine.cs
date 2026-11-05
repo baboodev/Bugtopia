@@ -112,7 +112,11 @@ namespace HeartopiaMod
         private delegate IntPtr MonoClassGetTypeDelegate(IntPtr klass);
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate IntPtr MonoClassBindGenericParametersDelegate(IntPtr klass, int paramType, IntPtr types, int typesLen);
+        // Upstream: (MonoClass *klass, int type_argc, MonoType **types, gboolean is_dynamic).
+        // The last argument is a 32-bit int. A C# bool would change the ABI.
+        // The names used to read as a type token plus a count; nothing in the repo calls this.
+        private delegate IntPtr MonoClassBindGenericParametersDelegate(
+            IntPtr klass, int typeArgc, IntPtr types, int isDynamic);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MonoGenericContext
@@ -1339,6 +1343,141 @@ namespace HeartopiaMod
                 }
 
                 return *(ulong*)raw;
+            }
+        }
+
+        // Closed generic class. Does not allocate a mono object. is_dynamic is 0.
+        // The returned class pointer is image-lifetime and is not an object pointer.
+        private unsafe bool TryBindAuraMonoGenericClass(
+            IntPtr openClass, IntPtr[] typeArgClasses, out IntPtr closedClass)
+        {
+            closedClass = IntPtr.Zero;
+            if (openClass == IntPtr.Zero || typeArgClasses == null || typeArgClasses.Length == 0
+                || auraMonoClassBindGenericParameters == null || auraMonoClassGetType == null)
+            {
+                return false;
+            }
+
+            int n = typeArgClasses.Length;
+            IntPtr* types = stackalloc IntPtr[n];
+            for (int i = 0; i < n; i++)
+            {
+                if (typeArgClasses[i] == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                types[i] = auraMonoClassGetType(typeArgClasses[i]);
+                if (types[i] == IntPtr.Zero)
+                {
+                    return false;
+                }
+            }
+
+            closedClass = auraMonoClassBindGenericParameters(openClass, n, (IntPtr)types, 0);
+            return closedClass != IntPtr.Zero;
+        }
+
+        // mono_field_get_offset includes the two-pointer box header. Event payloads and unboxed
+        // structs do not, so the raw offset subtracts that header once.
+        private bool TryGetAuraMonoFieldRawOffset(IntPtr klass, string fieldName, out int rawOffset)
+        {
+            rawOffset = 0;
+            if (klass == IntPtr.Zero || string.IsNullOrEmpty(fieldName)
+                || auraMonoClassGetFieldFromName == null || auraMonoFieldGetOffset == null)
+            {
+                return false;
+            }
+
+            IntPtr field = auraMonoClassGetFieldFromName(klass, fieldName);
+            if (field == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            int raw = (int)auraMonoFieldGetOffset(field) - (2 * IntPtr.Size);
+            if (raw < 0)
+            {
+                return false;
+            }
+
+            rawOffset = raw;
+            return true;
+        }
+
+        // Declared instance fields only. Size is max(rawOffset + width). Do not round up:
+        // the offsets already include the runtime's padding.
+        // 0x11 VALUETYPE and 0x55 ENUM count as 4 only when allowIntEnum is true.
+        private bool TryMeasureAuraMonoBlittableSize(IntPtr klass, bool allowIntEnum, out int rawBytes)
+        {
+            rawBytes = 0;
+            if (klass == IntPtr.Zero || auraMonoClassGetFields == null || auraMonoFieldGetFlags == null
+                || auraMonoFieldGetOffset == null || auraMonoFieldGetType == null || auraMonoTypeGetType == null)
+            {
+                return false;
+            }
+
+            const uint FieldAttributeStatic = 0x0010;
+            int header = 2 * IntPtr.Size;
+            int size = 0;
+            int counted = 0;
+            IntPtr iter = IntPtr.Zero;
+            IntPtr field;
+            while ((field = auraMonoClassGetFields(klass, ref iter)) != IntPtr.Zero)
+            {
+                if ((auraMonoFieldGetFlags(field) & FieldAttributeStatic) != 0)
+                {
+                    continue;
+                }
+
+                int raw = (int)auraMonoFieldGetOffset(field) - header;
+                if (raw < 0)
+                {
+                    return false;
+                }
+
+                IntPtr type = auraMonoFieldGetType(field);
+                if (type == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                int width = AuraMonoBlittableWidth(auraMonoTypeGetType(type), allowIntEnum);
+                if (width <= 0)
+                {
+                    return false;
+                }
+
+                int end = raw + width;
+                if (end > size)
+                {
+                    size = end;
+                }
+
+                counted++;
+            }
+
+            if (counted == 0 || size <= 0)
+            {
+                return false;
+            }
+
+            rawBytes = size;
+            return true;
+        }
+
+        private static int AuraMonoBlittableWidth(int corElement, bool allowIntEnum)
+        {
+            switch (corElement)
+            {
+                case 0x02: return 1;                         // BOOLEAN
+                case 0x03: return 2;                         // CHAR
+                case 0x04: case 0x05: return 1;              // I1 U1
+                case 0x06: case 0x07: return 2;              // I2 U2
+                case 0x08: case 0x09: case 0x0C: return 4;   // I4 U4 R4
+                case 0x0A: case 0x0B: case 0x0D: return 8;   // I8 U8 R8
+                case 0x11: case 0x55: return allowIntEnum ? 4 : 0; // VALUETYPE / ENUM
+                default: return 0;
             }
         }
 
