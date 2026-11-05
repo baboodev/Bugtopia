@@ -141,6 +141,7 @@ namespace HeartopiaMod
         private int snowAutoCollectWorldEpoch;
         private bool snowAutoCollectSeeded;
         private bool snowAutoCollectUnseenScan;
+        private bool snowAutoCollectUnseenHadFar;
         private FeatureBreakerState snowAutoCollectBreaker;
 
         private const string SnowDataUpdatedHookName = "DataUpdated<SnowMachineComponentData>";
@@ -2326,8 +2327,10 @@ namespace HeartopiaMod
             this.snowAutoCollectRegistrationsDone = true;
 
             // Per-machine updates use DataUpdated<SnowMachineComponentData>, registered from TryResolveSnowAutoCollect.
-            // RefreshInHomelandEvent fires when inHomeland changes (own yard enter and leave). The
-            // handler scans only on enter, and only machines not already in snowAutoCollectSeen.
+            // RefreshInHomelandEvent fires when inHomeland changes (own yard enter and leave).
+            // Enter arms a scan. A seen machine is included when its live state or ball count
+            // differs from the stored snapshot. The scan repeats while an owned machine is still
+            // outside the radius, and leave clears it.
             // LocalPlayerBuildModeChangeEvent on exit clears snowAutoCollectSeen so the next scan can
             // send again after building mode; enter does not clear and sends are not suppressed in build mode.
             this.RegisterWorldReadyCallback("snowball-autocollect", this.TryResolveSnowAutoCollect);
@@ -2361,10 +2364,12 @@ namespace HeartopiaMod
 
             if (!this.TryHomelandFarmTryReadInHomelandAura(out bool inHomeland, out _) || !inHomeland)
             {
+                this.snowAutoCollectUnseenScan = false;
                 return;
             }
 
             this.snowAutoCollectUnseenScan = true;
+            this.snowAutoCollectNextScanAt = 0f;
         }
 
         // Resolved BY NAME on the world-ready gate, never from a live instance: the gate can run before
@@ -2820,7 +2825,16 @@ namespace HeartopiaMod
             {
                 if (this.SnowAutoCollectTick(now, unseenOnly: true))
                 {
-                    this.snowAutoCollectUnseenScan = false;
+                    if (this.snowAutoCollectUnseenHadFar)
+                    {
+                        this.snowAutoCollectNextScanAt = now + Mathf.Clamp(
+                            this.snowMachineScanSeconds, SnowMachineScanMin, SnowMachineScanMax);
+                    }
+                    else
+                    {
+                        this.snowAutoCollectUnseenScan = false;
+                    }
+
                     this.snowAutoCollectBreaker.Success();
                 }
             }
@@ -2864,6 +2878,7 @@ namespace HeartopiaMod
             }
 
             float radius = Mathf.Clamp(this.snowMachineScanRadius, SnowMachineRadiusMin, SnowMachineRadiusMax);
+            this.snowAutoCollectUnseenHadFar = false;
             List<uint> pins = new List<uint>();
             try
             {
@@ -2877,6 +2892,11 @@ namespace HeartopiaMod
                     this.SnowAutoCollectSetStatus(infrastructureOk
                         ? "no snow machine views"
                         : "GetComponents failed");
+                    if (unseenOnly && infrastructureOk)
+                    {
+                        this.snowAutoCollectUnseenHadFar = true;
+                    }
+
                     return infrastructureOk;
                 }
 
@@ -2939,7 +2959,10 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    if (unseenOnly && this.snowAutoCollectSeen.ContainsKey(view.NetId))
+                    if (unseenOnly
+                        && this.snowAutoCollectSeen.TryGetValue(view.NetId, out SnowAutoCollectSeen known)
+                        && known.State == view.State
+                        && known.BallCount == view.BallCount)
                     {
                         continue;
                     }
@@ -2948,7 +2971,11 @@ namespace HeartopiaMod
                     machines.Add(view);
                 }
 
-                if (!unseenOnly)
+                if (unseenOnly)
+                {
+                    this.snowAutoCollectUnseenHadFar = skippedFar > 0;
+                }
+                else
                 {
                     this.PruneSnowAutoCollectCooldowns(seenNetIds, now);
                 }
