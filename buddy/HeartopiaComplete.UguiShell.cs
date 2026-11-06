@@ -16,7 +16,7 @@ namespace HeartopiaMod
     // title/subtitle (IMGUI parity: logoRect and headerRect share the same y0..56 strip — there
     // is NO generic window title; the kit window is created with a null title and the shell owns
     // the strip, which doubles as the drag region), per-tab sub-tab bar, placeholder content
-    // areas. The configurable menu hotkey (keyToggleMenu, default Insert) toggles it — Phase 5
+    // areas. The configurable menu hotkey (keyToggleMenu, Insert, or Backslash on Darwin) toggles it — Phase 5
     // retired the IMGUI menu and the F10 dev shortcut with it. Actual tab CONTENT is Phase 3 —
     // this round only proves the navigation shape for the real 9×(0-9) structure.
     //

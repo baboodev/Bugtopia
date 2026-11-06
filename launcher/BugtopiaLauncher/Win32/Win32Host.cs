@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -1001,9 +1002,57 @@ namespace Bugtopia.Launcher.Win32
             return y + bannerH;
         }
 
-        private const string HintBefore = "In game, press ", HintKey = "Insert", HintAfter = " to open the mod menu.";
+        private const string HintBefore = "In game, press ", HintAfter = " to open the mod menu.";
+        // Same default as the mod: Insert on Windows, backslash when Wine reports Darwin.
+        private static readonly string HintKey = DarwinMenuHintKey();
 
         /// <summary>.launch-hint, centred: text, a key cap, text.</summary>
+        private static string DarwinMenuHintKey()
+        {
+            try
+            {
+                nint ntdll = GetModuleHandleA("ntdll.dll");
+                if (ntdll == 0)
+                {
+                    return "Insert";
+                }
+
+                nint proc = GetProcAddress(ntdll, "wine_get_host_version");
+                if (proc == 0)
+                {
+                    return "Insert";
+                }
+
+                var fn = Marshal.GetDelegateForFunctionPointer<WineGetHostVersion>(proc);
+                nint sysname = 0;
+                unsafe
+                {
+                    fn(&sysname, null);
+                }
+
+                if (sysname == 0)
+                {
+                    return "Insert";
+                }
+
+                string name = Marshal.PtrToStringAnsi(sysname);
+                return string.Equals(name, "Darwin", StringComparison.Ordinal) ? "\\" : "Insert";
+            }
+            catch
+            {
+                return "Insert";
+            }
+        }
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private unsafe delegate void WineGetHostVersion(nint* sysname, nint* release);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi)]
+        private static extern nint GetModuleHandleA(string lpModuleName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi)]
+        private static extern nint GetProcAddress(nint hModule, string procName);
+
         private float LayoutHint(float y, float padX, float width)
         {
             float border = MathF.Max(1, MathF.Round(S(1)));

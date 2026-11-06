@@ -34,8 +34,13 @@ namespace HeartopiaMod
     public partial class HeartopiaComplete
     {
 
-        // Keybinds Management
+        // Keybinds Management. Insert is the Windows default; LoadKeybinds swaps in
+        // HostOs.DefaultToggleMenuKey (Backslash) when the host is Darwin.
         private KeyCode keyToggleMenu = KeyCode.Insert;
+        // One-shot. A saved Insert on Darwin is the old default (that key does not exist on a
+        // Mac keyboard), so the first Darwin launch moves it to Backslash and sets this. A later
+        // rebind, including back to Insert, is stored with the flag already set and left alone.
+        private bool darwinMenuHotkeyMigrated;
         private KeyCode keyToggleRadar = KeyCode.None;
         private KeyCode keyActionPanel = KeyCode.None;
         private KeyCode keyAuraFarm = KeyCode.None;

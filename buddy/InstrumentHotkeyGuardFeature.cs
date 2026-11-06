@@ -81,6 +81,15 @@ namespace HeartopiaMod
         private bool textInputFocusedCached;
         private float textInputFocusLastSeenAt = -999f;
 
+        // Insert is not a character, so the menu key stays live inside a text field. Backslash
+        // is the Darwin default and would otherwise open the menu on every \ typed into chat.
+        private bool IsTypedMenuKeySwallowed(KeyCode key)
+        {
+            return key == KeyCode.Backslash
+                && key == this.keyToggleMenu
+                && this.IsGameTextInputFocused();
+        }
+
         private static bool IsMouseKeyCode(KeyCode key)
         {
             return key >= KeyCode.Mouse0 && key <= KeyCode.Mouse6;
@@ -93,7 +102,7 @@ namespace HeartopiaMod
 
         private bool TryGetModHotkeyDown(KeyCode key)
         {
-            if (key == KeyCode.None)
+            if (key == KeyCode.None || this.IsTypedMenuKeySwallowed(key))
             {
                 return false;
             }
@@ -129,7 +138,7 @@ namespace HeartopiaMod
         // Held (not just the down edge) — for key-repeat behaviour. Same guard/mouse handling.
         private bool TryGetModHotkeyHeld(KeyCode key)
         {
-            if (key == KeyCode.None)
+            if (key == KeyCode.None || this.IsTypedMenuKeySwallowed(key))
             {
                 return false;
             }

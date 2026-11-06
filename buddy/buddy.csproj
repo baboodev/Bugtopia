@@ -475,6 +475,7 @@
     <Compile Include="ActivityRewardAutoClaimFeature.cs" />
     <Compile Include="PersistentHudFeature.cs" />
     <Compile Include="StartupMenuHintFeature.cs" />
+    <Compile Include="HostOs.cs" />
     <Compile Include="InstrumentHotkeyGuardFeature.cs" />
     <Compile Include="MusicPlayerFeature.cs" />
     <Compile Include="HomelandFarmFeature.cs" />

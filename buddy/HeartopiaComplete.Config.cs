@@ -108,6 +108,7 @@ namespace HeartopiaMod
         private void PopulateKeybindConfig(KeybindConfigData data)
         {
             data.keyToggleMenu = (int)this.keyToggleMenu;
+            data.darwinMenuHotkeyMigrated = this.darwinMenuHotkeyMigrated;
             data.keyToggleRadar = (int)this.keyToggleRadar;
             data.keyActionPanel = (int)this.keyActionPanel;
             data.keyAuraFarm = (int)this.keyAuraFarm;
@@ -509,6 +510,7 @@ namespace HeartopiaMod
         {
             if (data == null) return;
             this.keyToggleMenu = (KeyCode)data.keyToggleMenu;
+            this.darwinMenuHotkeyMigrated = data.darwinMenuHotkeyMigrated;
             this.keyToggleRadar = (KeyCode)data.keyToggleRadar;
             this.keyActionPanel = (KeyCode)data.keyActionPanel;
             this.keyAuraFarm = (KeyCode)data.keyAuraFarm;
@@ -1113,10 +1115,15 @@ namespace HeartopiaMod
         {
             try
             {
+                // No file yet: this is the default the rest of the method keeps. A saved file
+                // overwrites it in ApplyKeybindConfig, then CommitDarwinMenuHotkeyDefault may
+                // move a still-default Insert.
+                this.keyToggleMenu = HostOs.DefaultToggleMenuKey;
                 UnifiedConfigData config = this.LoadUnifiedConfig();
                 if (config != null)
                 {
                     this.ApplyKeybindConfig(config.Keybinds);
+                    this.CommitDarwinMenuHotkeyDefault(config);
                     // Game-key overrides can't be applied here — the InputActionAsset does not
                     // exist until a world does, so this only parks them on the world-ready gate.
                     this.ImportGameKeyOverrides(config.GameKeyOverrides);
@@ -1333,8 +1340,13 @@ namespace HeartopiaMod
                     }
                     this.ResetNetCookDishLimitToDefault();
                     this.SyncLodOverrideAfterConfigLoad();
+                    this.ApplyDarwinMenuHotkeyDefault();
                     ModLogger.Msg("Keybinds Loaded.");
                     this.AddMenuNotification("Keybinds loaded", new Color(0.55f, 0.88f, 1f));
+                }
+                else
+                {
+                    this.ApplyDarwinMenuHotkeyDefault();
                 }
             }
             catch (Exception ex)
@@ -1342,6 +1354,54 @@ namespace HeartopiaMod
                 ModLogger.Msg("Error Loading Keybinds: " + ex.Message);
                 this.AddMenuNotification("Failed to load keybinds", new Color(1f, 0.4f, 0.4f));
             }
+        }
+
+        // Persists the one-shot Darwin move. Saves the object just loaded — not a full
+        // PopulateAllConfigSections — so a startup migration cannot write defaulted sections
+        // back over settings that have not been applied yet.
+        private void CommitDarwinMenuHotkeyDefault(UnifiedConfigData config)
+        {
+            if (!HostOs.IsDarwin || config == null || config.Keybinds == null || config.Keybinds.darwinMenuHotkeyMigrated)
+            {
+                return;
+            }
+
+            bool moved = this.ApplyDarwinMenuHotkeyDefault();
+            config.Keybinds.darwinMenuHotkeyMigrated = true;
+            config.Keybinds.keyToggleMenu = (int)this.keyToggleMenu;
+            try
+            {
+                this.SaveUnifiedConfig(config);
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[Host] Darwin menu-hotkey migration was not saved: " + ex.Message);
+            }
+
+            if (moved)
+            {
+                ModLogger.Msg("[Host] Darwin — Toggle Menu moved from Insert to Backslash.");
+            }
+        }
+
+        // Returns true when a stored Insert was the old default and is now Backslash.
+        // A key the player already chose (anything else, including None and a later Insert)
+        // is not touched. The flag is what makes the Insert choice stick after this once.
+        private bool ApplyDarwinMenuHotkeyDefault()
+        {
+            if (!HostOs.IsDarwin || this.darwinMenuHotkeyMigrated)
+            {
+                return false;
+            }
+
+            this.darwinMenuHotkeyMigrated = true;
+            if (this.keyToggleMenu != KeyCode.Insert)
+            {
+                return false;
+            }
+
+            this.keyToggleMenu = KeyCode.Backslash;
+            return true;
         }
 
 
@@ -1382,7 +1442,11 @@ namespace HeartopiaMod
         // inline block always did.
         private void ResetKeybindSettingsToDefaults()
         {
-            this.keyToggleMenu = KeyCode.Insert;
+            this.keyToggleMenu = HostOs.DefaultToggleMenuKey;
+            if (HostOs.IsDarwin)
+            {
+                this.darwinMenuHotkeyMigrated = true;
+            }
             this.keyToggleRadar = KeyCode.None;
             this.keyActionPanel = KeyCode.None;
             this.keyAuraFarm = KeyCode.None;
@@ -1486,7 +1550,9 @@ namespace HeartopiaMod
             this.statusOverlayY = 0f;
             this.statusOverlayHiddenLabels.Clear();
             this.SaveKeybinds(false);
-            this.AddMenuNotification(this.L("Defaults restored (Toggle Menu: Insert)"), new Color(1f, 0.75f, 0.75f));
+            this.AddMenuNotification(
+                this.LF("Defaults restored (Toggle Menu: {0})", FormatKeybindLabel(this.keyToggleMenu)),
+                new Color(1f, 0.75f, 0.75f));
         }
 
 
@@ -1496,6 +1562,8 @@ namespace HeartopiaMod
             {
                 case KeyCode.None:
                     return "None";
+                case KeyCode.Backslash:
+                    return "\\";
                 case KeyCode.Mouse0:
                     return "LMB";
                 case KeyCode.Mouse1:

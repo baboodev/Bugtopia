@@ -46,6 +46,8 @@ namespace HeartopiaMod
         public class KeybindConfigData
         {
             public int keyToggleMenu;
+            // Darwin-only one-shot. See HeartopiaComplete.darwinMenuHotkeyMigrated.
+            public bool darwinMenuHotkeyMigrated;
             public int keyToggleRadar;
             public int keyActionPanel;
             public int keyAuraFarm;
