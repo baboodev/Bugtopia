@@ -372,6 +372,7 @@ namespace HeartopiaMod
 
             this.worldReadyBuiltInWarmupsRegistered = true;
             this.RegisterWorldReadyCallback("BuiltInWarmups", this.OnWorldReadyRearmWarmups);
+            this.RegisterSteamDirectCheckout();
             // Chinese original for game strings with no translation (LocalizationFallbackFeature.cs).
             this.RegisterWorldReadyCallback(LocalizationFallbackWorldReadyCallbackName, this.ApplyLocalizationFallbackOnWorldReady);
             // Settings -> "Switch language", hidden by the China build (LanguageSwitchButtonFeature.cs).

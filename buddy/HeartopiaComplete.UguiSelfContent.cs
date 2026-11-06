@@ -194,6 +194,7 @@ namespace HeartopiaMod
             public Toggle SpamsToggle;
             public Toggle UploadCheatToggle;
             public Toggle FriendVisitToggle;
+            public Toggle SteamCheckoutToggle;
             public GameObject LogsCountLabel;
             public string LogsCountShown;
             public GameObject MergesCountLabel;
@@ -204,6 +205,8 @@ namespace HeartopiaMod
             public string UploadCheatCountShown;
             public GameObject FriendVisitCountLabel;
             public string FriendVisitCountShown;
+            public GameObject SteamCheckoutStatusLabel;
+            public string SteamCheckoutStatusShown;
             public Toggle PhotoSnapUiToggle;
             public Toggle PhotoSnapEspToggle;
             public Toggle PartyDeclineToggle;
@@ -2201,6 +2204,19 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.FriendVisitCountLabel, pad, yCur, rowW, 18f);
             yCur += 26f;
 
+            // Steam launch only (SteamCheckoutFeature.cs). The same exe started by hand already
+            // opens the web checkout; this sends WindowsPay there while `from=steam` is set.
+            handle.SteamCheckoutToggle = this.CreateUguiCheckbox(rowsContent, "SteamCheckoutToggle",
+                this.L("Direct checkout (Steam launch)"), this.privacySteamDirectCheckout,
+                new System.Action<bool>(this.OnUguiSelfPrivacySteamCheckoutToggled));
+            PlaceUguiTopLeft(handle.SteamCheckoutToggle.gameObject, pad, yCur, rowW, 24f);
+            yCur += 28f;
+            handle.SteamCheckoutStatusShown = this.GetSteamDirectCheckoutStatus();
+            handle.SteamCheckoutStatusLabel = this.CreateUguiLabel(rowsContent, "SteamCheckoutStatus",
+                handle.SteamCheckoutStatusShown, 11f, counterColor, false);
+            PlaceUguiTopLeft(handle.SteamCheckoutStatusLabel, pad, yCur, rowW, 18f);
+            yCur += 24f;
+
             // Clean Photos (HeartopiaComplete.PhotoSnapUi.cs). Two gates on one mechanism: the mod's
             // windows/toasts/readout, and the ESP surfaces (screen tags, crosshair, radar markers) —
             // some players want the radar framed in a photo, most do not want any mod UI in one.
@@ -2304,6 +2320,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.SpamsToggle, this.privacyBlockSpamReports);
                 this.SyncUguiToggleFromField(handle.UploadCheatToggle, this.privacyBlockUploadCheat);
                 this.SyncUguiToggleFromField(handle.FriendVisitToggle, this.privacyBlockFriendVisitNotify);
+                this.SyncUguiToggleFromField(handle.SteamCheckoutToggle, this.privacySteamDirectCheckout);
                 this.SyncUguiToggleFromField(handle.PhotoSnapUiToggle, this.hideModUiInPhotos);
                 this.SyncUguiToggleFromField(handle.PhotoSnapEspToggle, this.hideModEspInPhotos);
                 this.SyncUguiToggleFromField(handle.PartyDeclineToggle, this.partyAutoDeclineInvites);
@@ -2328,6 +2345,8 @@ namespace HeartopiaMod
                             privacyUploadCheatSeenCount, privacyBlockedUploadCheatCount));
                     this.SyncUguiSelfLabelText(handle.FriendVisitCountLabel, ref handle.FriendVisitCountShown,
                         this.LF("Visit notifies blocked: {0}", privacyBlockedFriendVisitCount));
+                    this.SyncUguiSelfLabelText(handle.SteamCheckoutStatusLabel, ref handle.SteamCheckoutStatusShown,
+                        this.GetSteamDirectCheckoutStatus());
                     this.SyncUguiSelfLabelText(handle.PartyCountLabel, ref handle.PartyCountShown,
                         this.GetActivityAutoDeclineCounters());
                     this.SyncUguiSelfLabelText(handle.PartyStatusLabel, ref handle.PartyStatusShown,
@@ -2396,6 +2415,18 @@ namespace HeartopiaMod
             }
             this.privacyBlockFriendVisitNotify = value;
             try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfPrivacySteamCheckoutToggled(bool value)
+        {
+            if (value == this.privacySteamDirectCheckout)
+            {
+                return;
+            }
+            this.privacySteamDirectCheckout = value;
+            try { this.SaveKeybinds(false); } catch { }
+            this.RegisterSteamDirectCheckout();
+            this.ResetWorldReadyCallback(SteamCheckoutCallbackName);
         }
 
         // Clean Photos gates (HeartopiaComplete.PhotoSnapUi.cs), moved here from Settings → Main →

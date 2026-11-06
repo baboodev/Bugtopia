@@ -486,6 +486,7 @@
     <Compile Include="IceSkatingSequenceFeature.cs" />
     <Compile Include="PadBuildHotkeyFeature.cs" />
     <Compile Include="PrivacyBlockFeature.cs" />
+    <Compile Include="SteamCheckoutFeature.cs" />
     <Compile Include="MapRevealBlockedFeature.cs" />
     <Compile Include="StealthBlockFeature.cs" />
     <Compile Include="StealthBlockFeature.Mono.cs" />

@@ -479,6 +479,8 @@ namespace HeartopiaMod
             public bool privacyBlockSpamReports;
             public bool privacyBlockUploadCheat;
             public bool privacyBlockFriendVisitNotify;
+            // Steam-launched process only. Off keeps the Steam overlay. On sends WindowsPay to PayWithWeb.
+            public bool privacySteamDirectCheckout;
             public bool mapRevealBlockedPlayers;
             public bool stealthBlockEnabled;
             public bool stealthBlockNotifyFriends;

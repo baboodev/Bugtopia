@@ -454,6 +454,7 @@ namespace HeartopiaMod
             data.privacyBlockSpamReports = this.privacyBlockSpamReports;
             data.privacyBlockUploadCheat = this.privacyBlockUploadCheat;
             data.privacyBlockFriendVisitNotify = this.privacyBlockFriendVisitNotify;
+            data.privacySteamDirectCheckout = this.privacySteamDirectCheckout;
             data.mapRevealBlockedPlayers = this.mapRevealBlockedPlayers;
             data.stealthBlockEnabled = this.stealthBlockEnabled;
             data.stealthBlockNotifyFriends = this.stealthBlockNotifyFriends;
@@ -968,6 +969,7 @@ namespace HeartopiaMod
             this.privacyBlockSpamReports = data.privacyBlockSpamReports;
             this.privacyBlockUploadCheat = data.privacyBlockUploadCheat;
             this.privacyBlockFriendVisitNotify = data.privacyBlockFriendVisitNotify;
+            this.privacySteamDirectCheckout = data.privacySteamDirectCheckout;
             this.mapRevealBlockedPlayers = data.mapRevealBlockedPlayers;
             this.stealthBlockEnabled = data.stealthBlockEnabled;
             this.stealthBlockNotifyFriends = data.stealthBlockNotifyFriends;
