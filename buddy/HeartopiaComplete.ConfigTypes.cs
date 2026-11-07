@@ -157,6 +157,8 @@ namespace HeartopiaMod
             public int keyFeedAllCats;
             public int keyFeedAllDogs;
             public int keySpawnBubble;
+            public int keyFurnitureLightsOn;
+            public int keyFurnitureLightsOff;
             public float noclipSpeed;
             public float noclipBoostMultiplier;
             public float areaLoadDelay;
@@ -356,6 +358,8 @@ namespace HeartopiaMod
             public bool MasterLogHomeLike;
             public bool MasterLogMusicPlayer;
             public bool MasterLogRepairThrowTrim;
+            public bool MasterLogFurnitureAutoRepair;
+            public bool MasterLogFurnitureLightRadius;
             // Defaults ON, like MasterLogGatherScan: the flag has shipped `true` and its output is
             // one register line plus a highlight-block line, so turning it silently off on upgrade
             // would be a regression. The initializer must live on the CONFIG field too — an old
@@ -421,6 +425,9 @@ namespace HeartopiaMod
             // Privacy pause radius in metres, 0 = off. A missing element deserializes to 0, which
             // is exactly the off state — no sentinel needed.
             public float homelandFarmPrivacyRadius;
+            // Seconds to wait after the first ripe crop of a burst before harvesting that burst.
+            // 1..5. A missing element deserializes to 0 and loads as the default.
+            public int homelandFarmAutoSyncDelaySeconds;
             public float autoFishScanTimeout = -1f;
             public float autoFishTeleportDelay = -1f;
             public float autoFishFishShadowDetectRange = -1f;

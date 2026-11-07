@@ -9794,8 +9794,10 @@ namespace HeartopiaMod
                 && !this.NetCookRecipeFiveStarKnown(this.netCookRecipeId);
         }
 
-        // Checkbox visibility (§4.1): hidden while the SELECTED recipe's record already shows 5★.
-        // Record-first per Q7 — inventory never re-opens it; unknown (0) shows.
+        // Checkbox visibility (§4.1): hidden while the selected recipe's combined record
+        // is already 5★. The reader is max(Collection, ledger) — the 2026-11-01
+        // re-confirmation of Q7, not Source A alone. Unknown (0) shows. A bag full of
+        // lower-star stacks does not re-open the checkbox once that max is 5.
         private bool IsNetCookFiveStarToggleVisible()
         {
             return !this.NetCookRecipeFiveStarKnown(this.netCookRecipeId);

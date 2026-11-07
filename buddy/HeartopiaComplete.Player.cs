@@ -115,27 +115,14 @@ namespace HeartopiaMod
         internal bool TryGetLocalPlayerPosition(out Vector3 playerPos)
         {
             playerPos = Vector3.zero;
-            try
+            if (this.TryGetNoclipSelfAnchorPose(out playerPos, out _, out _, out _)
+                && IsFiniteVector(playerPos)
+                && playerPos != Vector3.zero)
             {
-                // Prefer the skeleton itself: its transform.position stays world-space even when
-                // the game parents the player under a moving platform (sea-fishing ship, vehicles),
-                // where FindPlayerRoot() (= transform.root) is the platform and reports its pivot.
-                GameObject player = GetLocalPlayer();
-                if (player == null)
-                {
-                    player = this.FindPlayerRoot();
-                }
-
-                if (player != null)
-                {
-                    playerPos = player.transform.position;
-                    return true;
-                }
-            }
-            catch
-            {
+                return true;
             }
 
+            playerPos = Vector3.zero;
             Camera cam = Camera.main;
             if (cam != null)
             {
@@ -716,7 +703,7 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!this.TryEnsureNoclipPlayerDriveObjects(out IntPtr playerObj, out _) || playerObj == IntPtr.Zero)
+            if (!this.TryGetSelfPlayerObjectForIdentity(out IntPtr playerObj) || playerObj == IntPtr.Zero)
             {
                 return false;
             }
@@ -745,7 +732,20 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                // The proxy's own class — resolved from the live object, never by guessed name.
+                if (AuraMonoPinningAvailable)
+                {
+                    uint xformPin = AuraMonoPinNew(xformObj);
+                    if (xformPin != 0U)
+                    {
+                        pins.Add(xformPin);
+                        IntPtr pinnedXform = AuraMonoPinTarget(xformPin);
+                        if (pinnedXform != IntPtr.Zero)
+                        {
+                            xformObj = pinnedXform;
+                        }
+                    }
+                }
+
                 IntPtr xformCls = auraMonoObjectGetClass(xformObj);
                 IntPtr getId = this.FindAuraMonoMethodOnHierarchy(xformCls, "GetInstanceID", 0);
                 if (getId == IntPtr.Zero
@@ -755,8 +755,20 @@ namespace HeartopiaMod
                     return false;
                 }
 
-                // Unity instanceIDs are negative for scene objects: reinterpret as signed. A real
-                // instanceID is never 0, so TryUnboxMonoUInt32's reject-zero is not a concern here.
+                if (AuraMonoPinningAvailable)
+                {
+                    uint boxedPin = AuraMonoPinNew(boxedId);
+                    if (boxedPin != 0U)
+                    {
+                        pins.Add(boxedPin);
+                        IntPtr pinnedBox = AuraMonoPinTarget(boxedPin);
+                        if (pinnedBox != IntPtr.Zero)
+                        {
+                            boxedId = pinnedBox;
+                        }
+                    }
+                }
+
                 if (!this.TryUnboxMonoUInt32(boxedId, out uint rawId))
                 {
                     return false;
@@ -769,6 +781,15 @@ namespace HeartopiaMod
             {
                 FreeAuraMonoPins(pins);
             }
+        }
+
+        // Proven not-ours, or a transform read on the cached skeleton threw. Null the latch and
+        // refresh lastLocalPlayerCheckTime to now so GetLocalPlayer stays inside
+        // LOCAL_PLAYER_CACHE_INTERVAL and returns null instead of immediately Find-ing again.
+        private static void DropPoisonedLocalPlayerCache()
+        {
+            cachedLocalPlayer = null;
+            lastLocalPlayerCheckTime = Time.unscaledTime;
         }
 
         // The player skeleton ONLY once the self Mono entity proves it is ours. GetLocalPlayer() is a
@@ -797,7 +818,7 @@ namespace HeartopiaMod
                 }
                 catch
                 {
-                    cachedLocalPlayer = null;
+                    DropPoisonedLocalPlayerCache();
                     return null;
                 }
 
@@ -822,6 +843,7 @@ namespace HeartopiaMod
                         + " (every remote/GUI player shares the object name) — skeleton-based writes skipped.");
                 }
 
+                DropPoisonedLocalPlayerCache();
                 return null;
             }
 
@@ -841,7 +863,7 @@ namespace HeartopiaMod
             }
             catch
             {
-                cachedLocalPlayer = null;
+                DropPoisonedLocalPlayerCache();
                 return null;
             }
 
@@ -856,6 +878,7 @@ namespace HeartopiaMod
                         + ", self entity " + selfPos.ToString("F1") + ") — skeleton-based writes skipped.");
                 }
 
+                DropPoisonedLocalPlayerCache();
                 return null;
             }
 

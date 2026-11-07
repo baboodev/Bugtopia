@@ -243,6 +243,12 @@ namespace HeartopiaMod
         private Vector3 homelandFarmAutoCenter = Vector3.zero;
         private float homelandFarmAutoCaptureRadius = 0f;
         private int homelandFarmAutoPlanterCount = 0;
+        // WorldReadyEpoch at the moment the planters were captured (0 = no stamp). Lazy-epoch idiom
+        // (PetPoopFeature.RefreshPetPoopEntries): when the epoch moved on while the snapshot idled,
+        // the capture belongs to a torn-down world instance — measured on the live build (plan
+        // 2026-11-04 §8.8) that re-entering the SAME farm regenerates every box/crop netId, so the
+        // stale snapshot is 100% dead ids. UpdateHomelandFarmBackground auto-clears it.
+        private int homelandFarmCaptureWorldEpoch = 0;
         // Last reported sow outcome, so ReportHomelandFarmAutoSowOutcome logs on CHANGE only.
         private string homelandFarmAutoSowReportSignature = string.Empty;
         private int homelandFarmAutoCaptureExcludedOutsideRadius = 0;
@@ -256,6 +262,12 @@ namespace HeartopiaMod
         // proven always-rescan behaviour if the event path ever misbehaves in-game.
         private bool homelandFarmAutoEventDriven = true;
         private float homelandFarmAutoNextFullFieldSowSweepAt = 0f;
+        // Realtime stamp of the first ripe crop in the current burst. Negative means no burst is open.
+        private float homelandFarmAutoWaveFirstRipeAt = -1f;
+        private int homelandFarmAutoSyncDelaySeconds = HomelandFarmAutoWave.SyncDelayDefaultSeconds;
+        private int homelandFarmAutoSyncDelayLastSeen = -1;
+        private bool homelandFarmAutoSyncDelaySavePending;
+        private float homelandFarmAutoSyncDelaySaveAt;
         // Field owner captured at "Capture planters", used as a SCAN-FREE presence gate: the auto loop
         // only runs scans/sow while the player is standing in THIS field (current in-field owner ==
         // captured owner). Never call TryHomelandFarmIsInHomeland(allowVisitingFarmArea:true) per tick —
@@ -1000,6 +1012,25 @@ namespace HeartopiaMod
             if (this.CurrentWorldStage < WorldStage.LevelBuilt || !this.IsHomelandFarmSceneLoadFinished())
             {
                 return;
+            }
+
+            // Auto-reset a planter snapshot that belongs to a torn-down world (lazy-epoch idiom,
+            // PetPoopFeature.RefreshPetPoopEntries — netIds are per instance; measured live
+            // 2026-11-04, plan §8.8: re-entering the SAME farm returns ZERO intersection with the
+            // captured box netIds, so the snapshot is dead ids even when the field looks identical).
+            // A RUNNING loop is deliberately exempt: remote weed/harvest across worlds is a shipped
+            // feature and stopping a coroutine mid-AuraMono pass is its own crash class — the
+            // snapshot dies on the loop's own end instead (plan §8.4). epoch is monotonic, so this
+            // fires at most once per world arrival; stamp 0 after the drop keeps it idempotent.
+            if (this.homelandFarmAutoCaptured
+                && this.homelandFarmCaptureWorldEpoch != 0
+                && this.homelandFarmCaptureWorldEpoch != this.WorldReadyEpoch
+                && !this.homelandFarmAutoRunning
+                && this.homelandFarmCoroutine == null)
+            {
+                this.ClearHomelandFarmCaptureState(
+                    "world epoch " + this.homelandFarmCaptureWorldEpoch + " -> " + this.WorldReadyEpoch,
+                    true);
             }
 
             // Kick the one-time warmup as soon as the world is ready instead of on the first Farm-tab
@@ -11580,6 +11611,76 @@ namespace HeartopiaMod
             this.homelandFarmBusyUntil = Time.realtimeSinceStartup + HomelandFarmActionCooldownSeconds;
         }
 
+        // "Reset capture" button handler: drop a stale planter capture WITHOUT scanning the world.
+        // The capture flags are otherwise only ever cleared by the capture-failure path, so a
+        // snapshot taken on another field / in another world keeps feeding the auto loop's
+        // presence gate (AutoFieldOwnerNetId), the captured-field scan shortcut
+        // (TryHomelandFarmIsOnCapturedOwnField) and the away re-sow data. Mirrors the Mass Cook
+        // precedent (NetCook.cs ResetNetCookCaptureContext): stop first, then clear. Pure managed
+        // field state — no reflection / AuraMono / game calls, so no world-ready gate needed.
+        private void ResetHomelandFarmAutoCapture()
+        {
+            // Stop first (Mass Cook reset semantics). StopHomelandFarmCoroutine is the canonical
+            // teardown: it clears autoRunning, the scan-center override and the auto caches, and
+            // sets the action cooldown. The weed+water hotkey coroutine is deliberately NOT
+            // killed — stopping it mid-AuraMono pass is its own crash class, and its in-flight
+            // scan holds its netIds in locals, so clearing these lookup caches under it is safe.
+            if (this.homelandFarmAutoRunning || this.homelandFarmCoroutine != null
+                || Time.realtimeSinceStartup < this.homelandFarmBusyUntil)
+            {
+                this.StopHomelandFarmCoroutine();
+            }
+
+            this.ClearHomelandFarmCaptureState("manual", false);
+
+            // The toast belongs to the button press only — the automatic world-change path stays
+            // silent (it lands minutes after a loading screen and would only confuse; the status
+            // card + the sync pass's "Not captured…" label explain it at tab open instead).
+            this.AddMenuNotification(this.L("homeland_farm.status_reset"), new Color(1f, 0.75f, 0.45f));
+        }
+
+        // Shared capture-drop core (manual reset + world-change auto-reset): pure managed field
+        // state, no scan / reflection / AuraMono / game calls, so it needs no world-ready gate.
+        // `reason` goes into the Tier-1 log ("manual", "world epoch 7 -> 8"); `worldChanged` only
+        // picks the status-card key. Idempotent: after a drop the stamp is 0 and the auto condition
+        // never re-fires until the next capture.
+        private void ClearHomelandFarmCaptureState(string reason, bool worldChanged)
+        {
+            int wasPlanterCount = this.homelandFarmAutoPlanterCount;
+            bool wasCaptured = this.homelandFarmAutoCaptured;
+
+            this.homelandFarmAutoCaptured = false;
+            this.homelandFarmAutoPlanterCount = 0;
+            this.homelandFarmAutoCenter = Vector3.zero;
+            this.homelandFarmAutoCaptureRadius = 0f;
+            this.homelandFarmAutoCaptureExcludedOutsideRadius = 0;
+            this.homelandFarmAutoFieldOwnerNetId = 0U;
+            this.homelandFarmCaptureWorldEpoch = 0;
+
+            // The existing cleanup mechanism (shared with re-capture and stop): captured sow
+            // points / crops / farm-netId sets, field freshness, run caches, event-fed state.
+            this.ClearHomelandFarmAutoCaches();
+
+            // The one capture-scoped cache ClearHomelandFarmAutoCaches does NOT cover: stale
+            // putZone entries for now-dead planter netIds would outlive the reset and could be
+            // hit by a netId collision on a later field (read in TryHomelandFarmResolveBoxField-
+            // Placement). Cleared here only — re-capture/stop keep their current cache scope.
+            this.homelandFarmResolvedPutZoneByPlanterNetId.Clear();
+
+            // Status stores a translation KEY (the UGUI status card localizes it, status_stopped
+            // idiom) — not raw English.
+            this.homelandFarmLastStatus = worldChanged
+                ? "homeland_farm.status_reset_world"
+                : "homeland_farm.status_reset";
+
+            FeatureLog.Life(HomelandFarmTag, (worldChanged ? "capture auto-reset: " : "capture reset: ")
+                + reason + " (was captured=" + wasCaptured + " planters=" + wasPlanterCount
+                + ") — cleared the planter snapshot and all capture caches.");
+            this.HomelandFarmLog("Auto capture " + (worldChanged ? "auto-reset" : "reset")
+                + " (" + reason + ", was captured=" + wasCaptured
+                + " planters=" + wasPlanterCount + ").");
+        }
+
         // Drops every auto-farm-only entity cache. Called when (re)capturing planters and when auto
         // farm stops, so a fresh run never reuses targets registered on a previous run / another
         // player's field (stale RegisteredCache netIds were the source of the immediate Capture crash:
@@ -11749,6 +11850,15 @@ namespace HeartopiaMod
             this.homelandFarmAutoCaptureRadius = radius;
             this.homelandFarmAutoPlanterCount = planterCount;
             this.homelandFarmAutoCaptured = true;
+            // Stamp the world this snapshot belongs to; written in the same commit block as the
+            // flags (capture is synchronous in one OnUpdate frame), read lazily in
+            // UpdateHomelandFarmBackground. Tier-1 line: the stamp must be visible in logs without
+            // MasterLogHomelandFarm, so a later auto-reset's "epoch X -> Y" is verifiable (plan
+            // §8.7.1). Button press only — never per-frame.
+            this.homelandFarmCaptureWorldEpoch = this.WorldReadyEpoch;
+            FeatureLog.Life(HomelandFarmTag, "capture: planters=" + planterCount
+                + " world epoch=" + this.homelandFarmCaptureWorldEpoch
+                + " — snapshot stamped to this world.");
             // Remember which field this is (scan-free presence gate for the auto loop). 0 = unknown →
             // the loop falls back to the scan-free own-homeland flag.
             this.homelandFarmAutoFieldOwnerNetId =
@@ -12481,6 +12591,7 @@ namespace HeartopiaMod
             this.homelandFarmAutoRunning = true;
             this.homelandFarmScanCenterOverride = this.homelandFarmAutoCenter;
             this.homelandFarmAutoCropNetIds.Clear();
+            this.homelandFarmAutoWaveFirstRipeAt = -1f;
             this.homelandFarmAutoHarvestedNetIds.Clear();
             this.homelandFarmAutoPendingSowBoxNetIds.Clear();
             // Seed the tracked crops from the capture snapshot so a start made AWAY from the field (where
@@ -12647,14 +12758,13 @@ namespace HeartopiaMod
                         }
                     }
 
-                    // 2. Directed poll of cached crops: weed flagged, harvest ripe (drop from cache),
-                    //    and track the soonest maturity. Harvest does NOT immediately re-trigger sow —
-                    //    we re-sow only once the whole generation is collected (cache empty), so we
-                    //    never re-sow boxes the server hasn't freed/registered yet.
+                    // 2. Directed poll of cached crops: weed flagged, count ripe (harvest waits
+                    //    for the burst pad below), and track the soonest maturity of growing crops.
                     long minRemaining = long.MaxValue;
                     int weededThisTick = 0;
                     int harvestedThisTick = 0;
                     int prunedThisTick = 0;
+                    int ripeCount = 0;
                     HashSet<uint> occupiedPlanters = null;
                     HashSet<uint> pollScanNetIds = null;
                     // The occupied-planter cross-check is a full radius scan (proximity over thousands
@@ -12726,14 +12836,12 @@ namespace HeartopiaMod
 
                         if (stage >= 4)
                         {
-                            if (this.TryHomelandFarmHarvestCrop(cropNetId, out _))
+                            ripeCount++;
+                            if (i % HomelandFarmHarvestFramePaceBatch == 0)
                             {
-                                totalHarvested++;
-                                harvestedThisTick++;
+                                yield return null;
                             }
 
-                            this.homelandFarmAutoHarvestedNetIds.Add(cropNetId);
-                            this.homelandFarmAutoCropNetIds.RemoveAt(i);
                             continue;
                         }
 
@@ -12758,6 +12866,79 @@ namespace HeartopiaMod
                     {
                         this.HomelandFarmLog("Auto poll: weeded=" + weededThisTick + " harvested=" + harvestedThisTick
                             + " pruned=" + prunedThisTick + " remaining=" + this.homelandFarmAutoCropNetIds.Count);
+                    }
+
+                    if (ripeCount > 0)
+                    {
+                        if (this.homelandFarmAutoWaveFirstRipeAt < 0f)
+                        {
+                            this.homelandFarmAutoWaveFirstRipeAt = Time.realtimeSinceStartup;
+                        }
+                    }
+                    else
+                    {
+                        this.homelandFarmAutoWaveFirstRipeAt = -1f;
+                    }
+
+                    float secondsSinceFirstRipe = this.homelandFarmAutoWaveFirstRipeAt < 0f
+                        ? -1f
+                        : Time.realtimeSinceStartup - this.homelandFarmAutoWaveFirstRipeAt;
+                    HomelandFarmAutoWaveAction burstAction = HomelandFarmAutoWave.Decide(
+                        ripeCount,
+                        secondsSinceFirstRipe,
+                        this.homelandFarmAutoSyncDelaySeconds);
+
+                    if (burstAction == HomelandFarmAutoWaveAction.Hold)
+                    {
+                        int delay = HomelandFarmAutoWave.ClampSyncDelaySeconds(this.homelandFarmAutoSyncDelaySeconds);
+                        // The tick's later idle sleep is also named sleep in this method, so the pad wait uses its own local.
+                        float burstSleep = Mathf.Max(0.05f, delay - secondsSinceFirstRipe);
+                        this.homelandFarmLastStatus = "Auto: waiting " + burstSleep.ToString("F0")
+                            + "s so " + ripeCount + " ripe plot(s) can be harvested together.";
+                        this.HomelandFarmLog("Auto ripe debounce: ripe=" + ripeCount
+                            + " waited=" + secondsSinceFirstRipe.ToString("F1") + "s/" + delay
+                            + "s, sleeping " + burstSleep.ToString("F1") + "s.");
+                        IEnumerator burstWait = this.HomelandFarmAutoPrivacyAwareSleepRoutine(burstSleep, inHomeland);
+                        while (burstWait.MoveNext())
+                        {
+                            yield return burstWait.Current;
+                        }
+
+                        continue;
+                    }
+
+                    if (burstAction == HomelandFarmAutoWaveAction.HarvestAndSow)
+                    {
+                        for (int i = this.homelandFarmAutoCropNetIds.Count - 1; i >= 0; i--)
+                        {
+                            uint cropNetId = this.homelandFarmAutoCropNetIds[i];
+                            if (!this.TryHomelandFarmReadCropState(cropNetId, out int stage, out _, out _) || stage < 4)
+                            {
+                                continue;
+                            }
+
+                            if (this.TryHomelandFarmHarvestCrop(cropNetId, out _))
+                            {
+                                totalHarvested++;
+                                harvestedThisTick++;
+                            }
+
+                            this.homelandFarmAutoHarvestedNetIds.Add(cropNetId);
+                            this.homelandFarmAutoCropNetIds.RemoveAt(i);
+                            if (i % HomelandFarmHarvestFramePaceBatch == 0)
+                            {
+                                yield return null;
+                            }
+                        }
+
+                        this.homelandFarmAutoWaveFirstRipeAt = -1f;
+                        if (harvestedThisTick > 0 && this.homelandFarmAutoCropNetIds.Count == 0)
+                        {
+                            this.homelandFarmAutoPendingSowBoxNetIds.Clear();
+                        }
+
+                        this.HomelandFarmLog("Auto ripe debounce harvest: harvested=" + harvestedThisTick
+                            + " remaining=" + this.homelandFarmAutoCropNetIds.Count);
                     }
 
                     // 3. SOW free planters — always top up genuinely-empty boxes, even while other
@@ -13001,6 +13182,7 @@ namespace HeartopiaMod
                 // A stopped farm must never leave the event-driven weeder gated off.
                 this.ResetHomelandFarmPrivacyState();
                 this.homelandFarmAutoCropNetIds.Clear();
+                this.homelandFarmAutoWaveFirstRipeAt = -1f;
                 this.homelandFarmAutoHarvestedNetIds.Clear();
                 this.homelandFarmAutoPendingSowBoxNetIds.Clear();
                 this.homelandFarmCoroutine = null;
@@ -18192,6 +18374,21 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 this.HomelandFarmLog("Failed to save farm radius: " + ex.Message);
+            }
+        }
+
+        private void PersistHomelandFarmAutoSyncDelay()
+        {
+            try
+            {
+                UnifiedConfigData data = this.LoadOrCreateUnifiedConfig();
+                this.PopulateAllConfigSections(data);
+                this.SaveUnifiedConfig(data);
+                this.HomelandFarmLog("Saved harvest debounce=" + this.homelandFarmAutoSyncDelaySeconds + "s to config.");
+            }
+            catch (Exception ex)
+            {
+                FeatureLog.Fail(HomelandFarmTag, "failed to save harvest debounce: " + ex.Message);
             }
         }
 

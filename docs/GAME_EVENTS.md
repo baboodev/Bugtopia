@@ -284,7 +284,7 @@ re-resolved from `staticId` at capture (`TryAddSynthesizedNetCookBurnerTargets`)
 | `RefreshBackPackEvent` | `XDTDataAndProtocol.Events` | 4 | `storageType`(EStorageType=int)@0 | bag changed (any mutation); `EStorageType.Backpack=1`. Used by **AutoSell** as a "bag dirty" signal — the periodic scan/sell is skipped when no backpack event arrived since the last scan (hook registered on enable; falls back to always-scan until installed) |
 | `RefreshBackPackGridEvent` | `XDTDataAndProtocol.Events` | 16 | `storageType`(int)@0, `isRemove`(bool)@4, `isAdd`(bool)@5, `gridId`(long)@8 | precise per-slot add/remove (`StorageBase.AddItem` sets `isAdd=true`, `gridId=0`); `DataCreated<BackpackItem>` (nested generic) carries the full added item |
 | `PlayerStaminaUpdatedEvent` | `XDTDataAndProtocol.Events` | 12 | `CurrentValue`(int)@0, `BaseMaxValue`(int)@4, `BoostedMaxValue`(int)@8 | self energy change (PropertySyncSystem; the game's EnergyModule renders the panel off it). Hooked by **Auto Eat**: feeds the energy cache + requests an immediate trigger check — replaces the UI-text parse of the energy panel (parse stays as pre-first-event fallback) |
-| `HandHoldUpdatedEvent` | `XDTDataAndProtocol.Events.Player` | 0 | *(empty)* | dispatched by ToolSystem on every `ToolComponent` update (**durability**), skin change and handhold change. Hooked by **Auto Repair** as a tool-data dirty flag: triggers one AuraMono durability read instead of the 0.5-1s timed poll (poll stretches to a 45s safety net once the event is proven; toast scan skipped while channel healthy) |
+| `HandHoldUpdatedEvent` | `XDTDataAndProtocol.Events.Player` | 0 | *(empty)* | dispatched by ToolSystem on every `ToolComponent` update (**durability**), skin change and handhold change. Hooked by **Auto Repair** as a tool-data dirty flag: triggers one AuraMono durability read instead of the 0.5-1s timed poll (poll stretches to a 45s safety net once the event is proven; toast scan skipped while channel healthy). While `DataUpdated<ToolComponent>`, `DataUpdated<TakenToolComponent>`, and `DataRemoved<TakenToolComponent>` are installed and the per-world seed has succeeded, this empty event does not request a durability read. The equipped id comes from the TakenTool pair. Durability for that id comes from `DataUpdated<ToolComponent>` (`Id` at 0, `Durability` at 4). The cap is `GetToolDurabilityUpperLimit`, stored on the seed and on the first check for a newly equipped id. `DurabilityLimit` in the packet is not the ratio denominator. |
 | `ToolRestorerEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 8 | `itemNetId`(uint)@0, `staticId`(int)@4 | repair-kit throw approved by server (`CanPutRestorerResult`; fires for auto AND manual use). Opens the **repair-aura window** (see AutoEatRepair `EnsureRepairAuraEventHooks`) |
 | `ToolRestoreDestroyEvent` | `ScriptsRefactory.DataAndProtocol.Events` | 4 | `ownerNetId`(uint)@0 | **misleading name**: dispatched from `ToolRestorerComponent.OnSpawned` when a restorer entity LANDS (tells the old one / throw action to clean up). Filter `ownerNetId == self`; refreshes the repair-aura window |
 | `UpdateBuffUiEvent` | `XDTDataAndProtocol.Events` | 4 | `buffId`(int)@0 | self buff add/UPDATE/remove — identical payload for all three, so no toggle-tracking; the game's SkillWidget (and our repair state) re-query `ToolSystem.HasToolRestoreBuff()` on it instead. Tool-restore buff ids are hardcoded **701-706** in that method |
@@ -387,15 +387,133 @@ leave; `SendRejectActivityEventCommand(uint eventNetId, long inviterShortId, Act
 `mono_runtime_invoke`, i.e. the stack-corruption trap. The mod therefore suppresses instead of
 rejecting, which the server sees as an unanswered call.
 
-#### Per-component events (`DataCreated<T>` / `DataRemoved<T>`)
+#### Per-component events (`DataUpdated<T>` / `DataCreated<T>` / `DataRemoved<T>`)
 
-`ScriptsRefactory.DataAndProtocol.Events.DataCreated<T>` (`struct DataCreated<T> { T Value; }`) is
-dispatched **per component type** by the various `ClientSystem.*SyncSystem`s
-(`DataCreated<BlockComponent>`, `DataCreated<PetEntityData>`, …) via
-`EventCenter.DispatchEvent<DataCreated<TComp>>`. More precise than `EntityCreateEvent`, **but** it is
-a nested generic — to hook it you must build the `DataCreated<TComp>` instantiation via
-`mono_class_bind_generic_parameters` (`auraMonoClassBindGenericParameters`) rather than resolving by
-name. Deferred until a feature needs the precision.
+`ScriptsRefactory.DataAndProtocol.Events.DataUpdated<T>` / `DataCreated<T>` / `DataRemoved<T>`
+(`struct { T Value; }`) are dispatched **per component type** by `EcsWorldData.DispatchDataEvent<T>`
+and the `ClientSystem.*SyncSystem`s, via the per-netId overload
+`EventCenter.DispatchEvent<DataUpdated<T>>(uint netId, in DataUpdated<T>)`. The image stores only
+the open `` `1 `` definition, so `ResolveGameEventClass` returns null for the closed name.
+
+Build the closed class with `TryBindAuraMonoGenericClass(open, new[] { argClass }, out closed)`.
+The per-netId overload registers with `RegisterGameEventHookByNetId(IntPtr, logName, payloadBytes, handler)`.
+The global overload registers with `RegisterGameEventHook(IntPtr, logName, payloadBytes, handler)`.
+`TryInstallGameEventDetour` uses `GameEventHookEntry.ResolvedEventClass` and does not look the log
+name up. `mono_class_bind_generic_parameters` is called only through that helper, as
+`(klass, type_argc, MonoType**, 0)`. The delegate's fourth argument is `is_dynamic` (`int`, not a
+count, not a C# `bool`). `Type.GetType` of a game-rooted name is not a fallback.
+
+`ComponentEvent<DataUpdated<T>>` is the same helper twice: bind `DataUpdated<T>` first, then bind
+`ComponentEvent`1` with that closed class as its type argument. It is dispatched globally
+(`DispatchEvent<T>(in T)`, no `uint` argument). `entityData.netId.value` is inside the struct.
+
+Proven in-world on one machine (`netId=10669616`), both lines in the same frame:
+
+- `DataUpdated<SnowMachineComponentData>` by-netId, 32 bytes (`state`@0, `ballCount`@4, `capacity`@8,
+  4 bytes of padding, `startTimestamp`@16, `duration`@24). Harvest logged `ballCount=0`, a later
+  update logged `ballCount=1`.
+- `ComponentEvent<DataUpdated<SnowMachineComponentData>>` global, 64 bytes (`entityData` 32 bytes with
+  `netId`@8, then `Value` at 32 so `ballCount`@36). The same update logged `ballCount=1`.
+
+Snow auto-collect sends from the by-netId `DataUpdated<SnowMachineComponentData>` hook.
+`SnowMachineComponentData` is not in the hand-written list below: the ECS writer emits it.
+One seed scan covers machines already in the world. The 2 s scan runs only while that hook is
+not installed. `RefreshInHomelandEvent` (empty, global) is the `inHomeland` edge from
+`LocalPlayerComponent.EnterHomeField`; on enter the collector scans machines not yet in
+`snowAutoCollectSeen`. The same change also dispatches global
+`ComponentEvent<DataUpdated<SnowMachineComponentData>>`. The collector does not hook that one:
+both fire for the same write, and a second handler would send twice.
+
+`DataCreated<T>` and `DataRemoved<T>` use the same helper. Nothing in the mod registers them yet.
+
+#### Which dispatch the hook has to match
+
+`EcsWorldData.DispatchDataEvent<T>` and `UnitWorldData.DispatchDataEvent<T>`
+([EcsWorldData.cs](../ilspy-dumps/XDTDataAndProtocol/XDGame.Ecs/EcsWorldData.cs),
+[UnitWorldData.cs](../ilspy-dumps/XDTDataAndProtocol/XDGame.Ecs/UnitWorldData.cs)) run on every
+`UpdateData<T>` / metadata write:
+
+- by-netId `DataUpdated<T>`, the `uint` is `entityData.entityId.value`
+- global `ComponentEvent<DataUpdated<T>>` (`entityData`, then `DataUpdated<T>` whose `Value` is `T`)
+
+A by-netId hook does not see a one-argument `DispatchEvent(new DataUpdated<T> { ... })`, and a
+global hook does not see the writer. `DispatchDataEvent` does not emit `DataCreated` or `DataRemoved`.
+
+`EventPayloadCap` is 64. A `T` larger than 64 is truncated. Measure with
+`TryMeasureAuraMonoBlittableSize` (pass `allowIntEnum: true` when a field is an int enum) and
+`TryGetAuraMonoFieldRawOffset` (header subtracted once). One closed class, one detour. A second
+`RegisterGameEventHookByNetId` on the same log name does not add a handler.
+
+#### Hand-written global `DataUpdated<T>`
+
+These call sites pass one argument. They are not the ECS writer.
+
+`ActivityExclusiveItemsComponent`, `AvatarImageComponent`, `BackgroundPhotoComponent`,
+`BackpackItem`, `BackpackItemData`, `BadgeComponent`, `BattlePassDailyNewsComponent`,
+`BattlePassTaskComponent`, `BattlePassTaskItemComponent`, `BuffInfo`, `CanvassPlayerComponent`,
+`CeilingColorSetComponent`, `CommunityApplyComponent`, `CommunityComponent`,
+`CommunityInviteComponent`, `CommunityMemberComponent`, `CommunityWorkIdComponent`,
+`ContestWorkEntranceComponent`, `CookingRecipeComponent`, `CraftRecipeData`, `CustomItemData`,
+`DanceRuntimeStateComponent`, `DrawManualData`, `DrawManualFavoriteData`, `DrawManualShowData`,
+`FeatureOpenData`, `FieldPlayerInfoComponent`, `FireAssistBuyComponent`,
+`FloorColorSetComponent`, `FriendComponent`, `FriendDuoActionStateComponent`,
+`GachaPoolRecordComponent`, `GachaPoolTimesComponent`, `GachaTimesRewardsComponent`,
+`GachaWeightPoolRecordComponent`, `GameTaskItem`, `HideAndSeekPrepareModeComponent`,
+`HouseUpgradeComponent`, `LatestUsedDayColorComponent`, `LevelObjectDynamicData`,
+`LittlePonySaveTreeComponent`, `MaxMapPlayerBaseInfoComponent`, `NameComponent`,
+`NotebookInSharingComponent`, `OperationActivityComponent`, `OperationActivityConfigComponent`,
+`OperationActivityOrderComponent`, `PeriodStallRecordComponent`, `PictorialPointComponent`,
+`PictorialRewardComponent`, `PictorialSuitRewardComponent`, `PlayerAppearanceData`,
+`PlayerBattlePassActivityComponent`, `PlayerBattlePassComponent`,
+`PlayerBattlePassRewardComponent`, `PlayerBirdCamouflageData`, `PlayerBreakTheIceData`,
+`PlayerBuildModeData`, `PlayerBusinessCardBadgeData`, `PlayerBusinessCardComponent`,
+`PlayerBusinessCardFrameComponent`, `PlayerCatOnHeadData`, `PlayerCurOprGameLevelComponentData`,
+`PlayerFloatData`, `PlayerGamePlayInfoData`, `PlayerHideSeekModeData`, `PlayerImmersionInfoData`,
+`PlayerOccupiedDataComponent`, `PlayerPetWalkingData`, `PlayerUgcContestDataComponent`,
+`PlayerUgcStatusData`, `PlayerVehicleData`, `PostCardComponent`, `RawUgcStoreItemData`,
+`ResearchInstrumentComponentData`, `ResearchPlatformComponentData`, `RoomUsedField`,
+`SelfRoomInfoComponent`, `SelfRoomMemberInfoComponent`, `SeriesRewardTriggerComponent`,
+`SocialLevelComponent`, `SocialRecommendTimeComponent`,
+`StickerOperationActivityThemeNodeStateComponent`, `StoreItemData`, `StoreSlotSelectorComponent`,
+`TakenToolComponent`, `ThemeItemComponent`, `TitleComponent`, `TitleExtraComponent`,
+`ToolComponent`, `ToolSkinComponent`, `TransformComponentData`, `UnmannedStallComponent`,
+`WallColorSetComponent`, `WeatherAuroraComponent`, `XiYangYangActivityComponent`.
+
+`FriendDuoActionStateComponent` in `PlayerSyncSystem` is one of these one-argument calls, not the
+writer path.
+
+#### Hand-written global `DataCreated<T>`
+
+`BackpackItem` (`StorageBase.AddItem`, together with `RefreshBackPackEvent`), `BackpackItemData`,
+`BeBlockComponent`, `BlockComponent`, `EntityData`, `FriendComponent`, `GameTaskItem`,
+`JigsawPuzzlePieceItemData`, `LittlePonySaveTreeComponent`, `MapSpotAddData`,
+`OperationActivityComponent`, `OperationActivityConfigComponent`, `SelfRoomMemberInfoComponent`,
+`WeatherAuroraComponent`.
+
+#### Hand-written global `DataRemoved<T>`
+
+`BackpackItemData`, `BattlePassTaskItemComponent`, `BeBlockComponent`, `BlockComponent`,
+`BuffInfo`, `CommunityApplyComponent`, `CommunityComponent`, `CommunityInviteComponent`,
+`CommunityMemberComponent`, `CommunityWorkIdComponent`, `CustomItemData`,
+`DanceRuntimeStateComponent`, `DrawManualData`, `DrawManualFavoriteData`, `DrawManualShowData`,
+`EntityData`, `FeatureOpenData`, `FriendComponent`, `FriendDuoActionStateComponent`,
+`GameTaskItem`, `HouseUpgradeComponent`, `JigsawPuzzlePieceItemData`, `MapSpotAddData`,
+`MaxMapPlayerBaseInfoComponent`, `NotebookInSharingComponent`, `OperationActivityComponent`,
+`OperationActivityOrderComponent`, `RawUgcStoreItemData`, `SelfRoomInfoComponent`,
+`SelfRoomMemberInfoComponent`, `StoreItemData`, `SubscriptionComponent`, `TakenToolComponent`,
+`WallColorSetComponent`, `WeatherAuroraComponent`.
+
+#### `Event<T>` and one explicit `ComponentEvent<T>`
+
+`Event<T>` is `{ T Value }`, dispatched globally (`DispatchEvent(in @event)`). The dump has 167
+such wrappers. They are hookable as closed `Event<Inner>`. Many inners are also dispatched as
+themselves; hook the wrapper only when the call site does not also dispatch the inner struct.
+Wrappers next to mod features: `AnimalGiftTakeNetworkEvent`, `PetGrowthGiftTakeNetworkEvent`,
+`PetFeedBeginNetworkEvent`, `PetFeedEndNetworkEvent`, `TakeGiftFromGiftPileNetworkEvent`.
+`QuickLearnEvent` is not in this wrapper list; auto-learn already hooks that named event.
+
+`new ComponentEvent<CraftingItemStatus>` is a separate global closed `ComponentEvent<T>`, not the
+ECS `ComponentEvent<DataUpdated<T>>` pair.
 
 ---
 

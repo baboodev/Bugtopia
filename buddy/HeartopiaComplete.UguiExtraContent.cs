@@ -16,6 +16,12 @@ namespace HeartopiaMod
     //      the feature postdates the migration, so it is authored here rather than mirrored.
     //      Header / hint / one primary button / status line — Carpet Stamp's shape, deliberately,
     //      and fixed-height, so it costs the relayout nothing;
+    //   2b. FurnitureLightRadiusFeature.cs — Furniture Lights, inserted between Missed Calls and
+    //      Carpet Stamp: header / hint / value-label + radius slider / ON+OFF pair / status line.
+    //      No IMGUI ancestor (authored here directly, Missed Calls' precedent); fixed-height
+    //      156px, so it only shifts the carpet block's constant + chrome positions. The action
+    //      (resolution, pinned scan, sends, breaker, toast) lives entirely in the feature
+    //      partial — this page mirrors its status field on the slow tick.
     //   3. CarpetStampFeature.cs:466-555 — DrawCarpetStampSection (scan/step controls + the
     //      scan-result list with per-row CONDITIONAL tails).
     //
@@ -69,11 +75,16 @@ namespace HeartopiaMod
     //   missed-calls hint y=112 (panelW x20)                   (+24)
     //   Clear Missed Calls y=136 (200x30 PRIMARY)              (+36)
     //   missed-calls status y=172 (panelW x20)                 (+26)
-    //   carpet header y=198 (460x24 bold 14)                   (+28)
-    //   carpet hint y=226 (panelW x20)                         (+24)
-    //   Scan y=250 (200x30 PRIMARY) | Step On Nearest x=218 (200x30 Secondary)   (+36)
-    //   carpet status y=286 (panelW x20)                       (+26)
-    //   carpet rows top y=312 — FIXED (rows h=22, pitch 24, ≤ CarpetStampMaxRowsShown=12)
+    //   lights header y=198 (460x24 bold 14)                   (+28)
+    //   lights hint y=226 (panelW x20)                         (+28)
+    //   radius label x=8 y=254 (150x20) | slider x=166 (panelW-158 x30)  (+38)
+    //   Lights On y=292 (200x30 PRIMARY) | Lights Off x=218 (200x30 Secondary)  (+36)
+    //   lights status y=328 (panelW x20)                       (+26)
+    //   carpet header y=354 (460x24 bold 14)                   (+28)
+    //   carpet hint y=382 (panelW x20)                         (+24)
+    //   Scan y=406 (200x30 PRIMARY) | Step On Nearest x=218 (200x30 Secondary)  (+36)
+    //   carpet status y=442 (panelW x20)                       (+26)
+    //   carpet rows top y=468 — FIXED (rows h=22, pitch 24, ≤ CarpetStampMaxRowsShown=12)
     //   [overflow +22]  → +8 (section return)
     //   content height = final cursor + 20 (DrawExtraFeaturesTab:93; DrawNewFeaturesTab adds 0).
     // Everything through the carpet status line is static (built-once positions); the carpet
@@ -100,6 +111,11 @@ namespace HeartopiaMod
             // -------- Missed Calls --------
             public GameObject MissedCallsStatusLabel;
             public string MissedCallsStatusShown;  // composed label text last written
+
+            // -------- Furniture Lights --------
+            public GameObject LightsRadiusLabel;   // "Radius: N m" — rewritten by the slider
+            public GameObject LightsStatusLabel;
+            public string LightsStatusShown;       // composed label text last written
 
             // -------- Carpet Stamp --------
             public GameObject CarpetStatusLabel;
@@ -128,9 +144,11 @@ namespace HeartopiaMod
         private static readonly Color UguiExtraFailColor = new Color(1f, 0.5f, 0.4f);
 
         // Carpet rows' fixed region top (everything above it is static — file header cursor).
-        // 198 before the Missed Calls section was inserted above it; that block is fixed-height,
-        // so the only layout consequence is this constant and the four carpet chrome positions.
-        private const float UguiExtraCarpetRowsTopY = 312f;
+        // 198 before the Missed Calls section was inserted above it, 312 before the Furniture
+        // Lights section was inserted above the carpet block (a fixed-height 156px block:
+        // header/hint/slider-row/buttons/status). Every fixed-height insert only shifts this
+        // constant and the four carpet chrome positions; the relayout never moves the regions.
+        private const float UguiExtraCarpetRowsTopY = 468f;
 
         // ----------------------------------------------------------------------------------------
         // Builder
@@ -220,32 +238,76 @@ namespace HeartopiaMod
                 handle.MissedCallsStatusShown, 13f);
             PlaceUguiTopLeft(handle.MissedCallsStatusLabel, 8f, 172f, panelW, 20f);
 
+            // ==================== Part 2b — Furniture Lights ====================
+            // FurnitureLightRadiusFeature.cs — one-shot radius set of every light piece in
+            // this house (campfires/lanterns/braziers), whoever placed it. Fixed-height block (like Missed Calls
+            // above), so the carpet block below simply starts 156px lower; the relayout is
+            // untouched. Feedback: the feature writes furnitureLightStatus + toasts on its own
+            // (RunFurnitureLightsAction); this page only mirrors the status line.
+
+            GameObject lightsHeader = this.CreateUguiLabel(scrollContent, "LightsHeader",
+                this.L("Furniture Lights"), 14f, headerColor, false);
+            this.TrySetUguiLabelBold(lightsHeader);
+            PlaceUguiTopLeft(lightsHeader, 8f, 198f, 460f, 24f);
+
+            GameObject lightsHint = this.CreateUguiBodyLabel(scrollContent, "LightsHint",
+                this.L("Turn every campfire/lantern in this house within the radius on or off at once (server-synced, flames included)."), 13f);
+            PlaceUguiTopLeft(lightsHint, 8f, 226f, panelW, 20f);
+
+            // Value label left of the slider; the slider's onChanged rewrites it immediately.
+            handle.LightsRadiusLabel = this.CreateUguiBodyLabel(scrollContent, "LightsRadiusLabel",
+                this.LF("Radius: {0} m", (int)this.GetFurnitureLightRadiusMeters()), 13f);
+            PlaceUguiTopLeft(handle.LightsRadiusLabel, 8f, 254f, 150f, 20f);
+
+            Slider lightsRadiusSlider = this.CreateUguiSlider(scrollContent, "LightsRadiusSlider",
+                FurnitureLightMinRadiusMeters, FurnitureLightMaxRadiusMeters,
+                this.GetFurnitureLightRadiusMeters(), true,
+                new System.Action<float>(value =>
+                {
+                    this.SetFurnitureLightRadiusMeters(value);
+                    this.SetUguiLabelText(handle.LightsRadiusLabel,
+                        this.LF("Radius: {0} m", (int)this.GetFurnitureLightRadiusMeters()));
+                }));
+            PlaceUguiTopLeft(lightsRadiusSlider.gameObject, 166f, 254f, panelW - 158f, 30f);
+
+            GameObject lightsOnButton = this.CreateUguiPrimaryButton(scrollContent, "LightsOnButton",
+                this.L("Turn ON"), new System.Action(() => this.RunFurnitureLightsAction(true)));
+            PlaceUguiTopLeft(lightsOnButton, 8f, 292f, 200f, 30f);
+            GameObject lightsOffButton = this.CreateUguiSecondaryButton(scrollContent, "LightsOffButton",
+                this.L("Turn OFF"), new System.Action(() => this.RunFurnitureLightsAction(false)));
+            PlaceUguiTopLeft(lightsOffButton, 218f, 292f, 200f, 30f);
+
+            handle.LightsStatusShown = this.LF("Status: {0}", this.GetFurnitureLightStatus());
+            handle.LightsStatusLabel = this.CreateUguiBodyLabel(scrollContent, "LightsStatus",
+                handle.LightsStatusShown, 13f);
+            PlaceUguiTopLeft(handle.LightsStatusLabel, 8f, 328f, panelW, 20f);
+
             // ==================== Part 3 — Carpet Stamp ====================
 
             // CarpetStampFeature.cs:470-472.
             GameObject carpetHeader = this.CreateUguiLabel(scrollContent, "CarpetHeader",
                 this.L("Carpet Stamp (Slippery Rug)"), 14f, headerColor, false);
             this.TrySetUguiLabelBold(carpetHeader);
-            PlaceUguiTopLeft(carpetHeader, 8f, 198f, 460f, 24f);
+            PlaceUguiTopLeft(carpetHeader, 8f, 354f, 460f, 24f);
 
             // :475 — a plain default GUI.Label → kit body label (the Radar credits mapping).
             GameObject carpetHint = this.CreateUguiBodyLabel(scrollContent, "CarpetHint",
                 this.L("Scan party carpets on the map, send a single step-on (server speed buff)."), 13f);
-            PlaceUguiTopLeft(carpetHint, 8f, 226f, panelW, 20f);
+            PlaceUguiTopLeft(carpetHint, 8f, 382f, panelW, 20f);
 
             // :478-483 primary Scan / :485 plain-button Step On Nearest → Secondary tier.
             GameObject scanButton = this.CreateUguiPrimaryButton(scrollContent, "ScanCarpetsButton",
                 this.L("Scan Carpets"), new System.Action(this.OnUguiExtraCarpetScanClicked));
-            PlaceUguiTopLeft(scanButton, 8f, 250f, 200f, 30f);
+            PlaceUguiTopLeft(scanButton, 8f, 406f, 200f, 30f);
             GameObject stepNearestButton = this.CreateUguiSecondaryButton(scrollContent, "StepOnNearestButton",
                 this.L("Step On Nearest"), new System.Action(this.OnUguiExtraCarpetStepOnNearestClicked));
-            PlaceUguiTopLeft(stepNearestButton, 218f, 250f, 200f, 30f);
+            PlaceUguiTopLeft(stepNearestButton, 218f, 406f, 200f, 30f);
 
             // :514 — live status line ("Status: " prefix is a source literal).
             handle.CarpetStatusRaw = this.carpetStampStatus;
             handle.CarpetStatusLabel = this.CreateUguiBodyLabel(scrollContent, "CarpetStatus",
                 "Status: " + this.carpetStampStatus, 13f);
-            PlaceUguiTopLeft(handle.CarpetStatusLabel, 8f, 286f, panelW, 20f);
+            PlaceUguiTopLeft(handle.CarpetStatusLabel, 8f, 442f, panelW, 20f);
 
             // :548-551 — overflow label (position/visibility owned by the relayout).
             handle.CarpetOverflowLabel = this.CreateUguiBodyLabel(scrollContent, "CarpetOverflow", "", 13f);
@@ -435,6 +497,17 @@ namespace HeartopiaMod
                     {
                         handle.MissedCallsStatusShown = missedStatus;
                         this.SetUguiLabelText(handle.MissedCallsStatusLabel, missedStatus);
+                    }
+
+                    // Furniture-lights status — same composed-label value compare on the slow
+                    // tick. The click path (RunFurnitureLightsAction → FurnitureLightSetStatus)
+                    // writes the backend field immediately; this carries external changes
+                    // (resolve-failure log lines, language switches) onto the page.
+                    string lightsStatus = this.LF("Status: {0}", this.GetFurnitureLightStatus());
+                    if (!string.Equals(lightsStatus, handle.LightsStatusShown, StringComparison.Ordinal))
+                    {
+                        handle.LightsStatusShown = lightsStatus;
+                        this.SetUguiLabelText(handle.LightsStatusLabel, lightsStatus);
                     }
                 }
 

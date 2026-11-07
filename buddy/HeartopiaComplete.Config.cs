@@ -182,6 +182,8 @@ namespace HeartopiaMod
             data.keyFeedAllCats = (int)this.keyFeedAllCats;
             data.keyFeedAllDogs = (int)this.keyFeedAllDogs;
             data.keySpawnBubble = (int)this.keySpawnBubble;
+            data.keyFurnitureLightsOn = (int)this.keyFurnitureLightsOn;
+            data.keyFurnitureLightsOff = (int)this.keyFurnitureLightsOff;
             data.noclipSpeed = this.noclipSpeed;
             data.noclipBoostMultiplier = this.noclipBoostMultiplier;
             data.areaLoadDelay = this.areaLoadDelay;
@@ -348,6 +350,8 @@ namespace HeartopiaMod
             data.MasterLogHomeLike = MasterLogHomeLike;
             data.MasterLogMusicPlayer = MasterLogMusicPlayer;
             data.MasterLogRepairThrowTrim = MasterLogRepairThrowTrim;
+            data.MasterLogFurnitureAutoRepair = MasterLogFurnitureAutoRepair;
+            data.MasterLogFurnitureLightRadius = MasterLogFurnitureLightRadius;
             data.MasterLogTutorialBlock = MasterLogTutorialBlock;
             // chatTranslateVerboseLog is deliberately NOT persisted — it is a diagnostic that
             // floods the log, so it always starts OFF and must be re-armed per session.
@@ -402,6 +406,7 @@ namespace HeartopiaMod
             data.homelandFarmAutoFertilizeEnabled = this.homelandFarmAutoFertilizeEnabled;
             data.homelandFarmWholePlotEnabled = this.homelandFarmWholePlotEnabled;
             data.homelandFarmPrivacyRadius = this.homelandFarmPrivacyRadius;
+            data.homelandFarmAutoSyncDelaySeconds = this.homelandFarmAutoSyncDelaySeconds;
             data.autoFishScanTimeout = -1f;
             data.autoFishTeleportDelay = -1f;
             // While a fishing route is active the live range/toggles are the route's forced
@@ -593,6 +598,8 @@ namespace HeartopiaMod
             this.keyFeedAllCats = (KeyCode)data.keyFeedAllCats;
             this.keyFeedAllDogs = (KeyCode)data.keyFeedAllDogs;
             this.keySpawnBubble = (KeyCode)data.keySpawnBubble;
+            this.keyFurnitureLightsOn = (KeyCode)data.keyFurnitureLightsOn;
+            this.keyFurnitureLightsOff = (KeyCode)data.keyFurnitureLightsOff;
             this.noclipSpeed = data.noclipSpeed;
             this.noclipBoostMultiplier = data.noclipBoostMultiplier;
             this.areaLoadDelay = data.areaLoadDelay;
@@ -798,6 +805,8 @@ namespace HeartopiaMod
             MasterLogHomeLike = data.MasterLogHomeLike;
             MasterLogMusicPlayer = data.MasterLogMusicPlayer;
             MasterLogRepairThrowTrim = data.MasterLogRepairThrowTrim;
+            MasterLogFurnitureAutoRepair = data.MasterLogFurnitureAutoRepair;
+            MasterLogFurnitureLightRadius = data.MasterLogFurnitureLightRadius;
             MasterLogTutorialBlock = data.MasterLogTutorialBlock;
             this.chatTranslateVerboseLog = false; // session-only diagnostic; never restored from config
             this.autoIceSkatingEnabled = data.autoIceSkatingEnabled;
@@ -862,6 +871,8 @@ namespace HeartopiaMod
             this.homelandFarmAutoFertilizeEnabled = data.homelandFarmAutoFertilizeEnabled;
             this.homelandFarmWholePlotEnabled = data.homelandFarmWholePlotEnabled;
             this.homelandFarmPrivacyRadius = Mathf.Clamp(data.homelandFarmPrivacyRadius, HomelandFarmPrivacyMinRadius, HomelandFarmPrivacyMaxRadius);
+            this.homelandFarmAutoSyncDelaySeconds = HomelandFarmAutoWave.ClampSyncDelaySeconds(
+                data.homelandFarmAutoSyncDelaySeconds);
             this.saved_autoFishScanTimeout = data.autoFishScanTimeout;
             this.saved_autoFishTeleportDelay = data.autoFishTeleportDelay;
             this.saved_autoFishFishShadowDetectRange = data.autoFishFishShadowDetectRange;
@@ -1153,6 +1164,8 @@ namespace HeartopiaMod
                         else if (line.Contains("keyAutoPetWash")) this.keyAutoPetWash = (KeyCode)GetJsonInt(line, "\"keyAutoPetWash\":");
                         else if (line.Contains("keyFeedAllCats")) this.keyFeedAllCats = (KeyCode)GetJsonInt(line, "\"keyFeedAllCats\":");
                         else if (line.Contains("keyFeedAllDogs")) this.keyFeedAllDogs = (KeyCode)GetJsonInt(line, "\"keyFeedAllDogs\":");
+                        else if (line.Contains("keyFurnitureLightsOn")) this.keyFurnitureLightsOn = (KeyCode)GetJsonInt(line, "\"keyFurnitureLightsOn\":");
+                        else if (line.Contains("keyFurnitureLightsOff")) this.keyFurnitureLightsOff = (KeyCode)GetJsonInt(line, "\"keyFurnitureLightsOff\":");
                         else if (line.Contains("keySpawnBubble")) this.keySpawnBubble = (KeyCode)GetJsonInt(line, "\"keySpawnBubble\":");
                         else if (line.Contains("keyCameraToggle")) this.keyCameraToggle = (KeyCode)GetJsonInt(line, "\"keyCameraToggle\":");
                         else if (line.Contains("keyAutoIceSkating")) this.keyAutoIceSkating = (KeyCode)GetJsonInt(line, "\"keyAutoIceSkating\":");
@@ -1424,6 +1437,8 @@ namespace HeartopiaMod
             this.keyFeedAllCats = KeyCode.None;
             this.keyFeedAllDogs = KeyCode.None;
             this.keySpawnBubble = KeyCode.None;
+            this.keyFurnitureLightsOn = KeyCode.None;
+            this.keyFurnitureLightsOff = KeyCode.None;
             this.notificationsEnabled = true;
             this.notificationPosition = 5;
             this.hideIdEnabled = false;
@@ -1568,6 +1583,8 @@ namespace HeartopiaMod
                 case "Feed All Cats": this.keyFeedAllCats = newKey; break;
                 case "Feed All Dogs": this.keyFeedAllDogs = newKey; break;
                 case "Spawn Bubble": this.keySpawnBubble = newKey; break;
+                case "Furniture Lights ON": this.keyFurnitureLightsOn = newKey; break;
+                case "Furniture Lights OFF": this.keyFurnitureLightsOff = newKey; break;
             }
 
             this.keyBindingActive = "";

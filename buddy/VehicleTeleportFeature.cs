@@ -60,10 +60,14 @@ namespace HeartopiaMod
             {
                 yAxis = targetRot.Value.eulerAngles.y;
             }
+            else if (this.TryGetNoclipSelfAnchorPose(out _, out Quaternion selfRot, out bool hasSelfRot, out _) && hasSelfRot)
+            {
+                yAxis = selfRot.eulerAngles.y;
+            }
             else
             {
-                GameObject player = GetPlayer();
-                yAxis = player != null ? player.transform.rotation.eulerAngles.y : 0f;
+                GameObject facingSkeleton = this.GetVerifiedLocalPlayerSkeleton();
+                yAxis = facingSkeleton != null ? facingSkeleton.transform.eulerAngles.y : 0f;
             }
 
             this.ActivateNoclipVehicleDrivingOverride(vehicleComponentObj, vehicleControllerObj);

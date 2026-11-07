@@ -88,10 +88,6 @@ namespace HeartopiaMod
         private float noclipFootHoldSeedLogAt;
         private float noclipPassengerProbeRetryAt;
 
-        // How far the p_player_skeleton(Clone) GameObject may sit from the self entity before we
-        // treat it as somebody else's skeleton. Same threshold the auto-fishing cast facing uses.
-        private const float NoclipSelfAnchorAgreementMeters = 2.5f;
-
         private void EnsureNoclipVehicleAuraMono(bool logIfPending = false)
         {
             if (this.noclipVehicleAuraReady)
@@ -467,24 +463,18 @@ namespace HeartopiaMod
                 return false;
             }
 
-            GameObject skeleton = GetPlayer();
-            float drift = -1f;
-            bool skeletonIsOurs = false;
+            GameObject skeleton = this.GetVerifiedLocalPlayerSkeleton();
+            this.noclipFootHoldPosition = selfPos;
+            string yawLog = "yaw left unchanged";
             if (skeleton != null)
             {
-                Vector3 skeletonPos = skeleton.transform.position;
-                drift = new Vector2(skeletonPos.x - selfPos.x, skeletonPos.z - selfPos.z).magnitude;
-                skeletonIsOurs = drift <= NoclipSelfAnchorAgreementMeters;
-            }
-
-            this.noclipFootHoldPosition = selfPos;
-            if (skeletonIsOurs)
-            {
                 this.noclipFootHoldRotation = Quaternion.Euler(0f, skeleton.transform.eulerAngles.y, 0f);
+                yawLog = "yaw from verified skeleton";
             }
             else if (hasSelfRot)
             {
                 this.noclipFootHoldRotation = Quaternion.Euler(0f, selfRot.eulerAngles.y, 0f);
+                yawLog = "yaw from self entity";
             }
             else
             {
@@ -492,28 +482,17 @@ namespace HeartopiaMod
                 if (facingCamera != null)
                 {
                     this.noclipFootHoldRotation = Quaternion.Euler(0f, facingCamera.transform.eulerAngles.y, 0f);
+                    yawLog = "yaw from camera";
                 }
             }
 
             this.noclipFootHoldValid = true;
 
-            if (skeleton != null && !skeletonIsOurs)
-            {
-                // This is the exact condition that used to teleport us onto a stranger, so it goes
-                // to the log every time it is seen (throttled to one line per 5 s).
-                if (Time.unscaledTime >= this.noclipSelfAnchorWarnAt)
-                {
-                    this.noclipSelfAnchorWarnAt = Time.unscaledTime + 5f;
-                    ModLogger.Warning("[Noclip] p_player_skeleton(Clone) is NOT ours: " + drift.ToString("F1")
-                        + "m from the self entity (skeleton " + skeleton.transform.position.ToString("F1")
-                        + ", self " + selfPos.ToString("F1") + " via " + source + "). Seeded the hover from the self entity.");
-                }
-            }
-            else if (Time.unscaledTime >= this.noclipFootHoldSeedLogAt)
+            if (Time.unscaledTime >= this.noclipFootHoldSeedLogAt)
             {
                 this.noclipFootHoldSeedLogAt = Time.unscaledTime + 5f;
                 ModLogger.Msg("[Noclip] foot hover seeded at " + selfPos.ToString("F1") + " via " + source
-                    + (drift >= 0f ? " (skeleton drift " + drift.ToString("F2") + "m)" : " (no skeleton object)"));
+                    + " (" + yawLog + ")");
             }
 
             return true;
@@ -780,6 +759,40 @@ namespace HeartopiaMod
             flatDir.Normalize();
             Quaternion faceRot = Quaternion.LookRotation(flatDir, Vector3.up);
             this.ApplyNoclipVehicleFacing(vehicleComponentObj, anchorPosition, faceRot, flatDir);
+        }
+
+        // Transform-id proof only. Character.Player is the self object. PlayerMoveComponent is a
+        // noclip-drive concern; requiring it here, or arming noclipPlayerResolveRetryAt on its
+        // failure, blanks skeleton identity for a second and forces the 2.5 m fallback.
+        private bool TryGetSelfPlayerObjectForIdentity(out IntPtr playerObj)
+        {
+            playerObj = IntPtr.Zero;
+            if (IsSelfPlayerAwaitingSpawn)
+            {
+                return false;
+            }
+
+            if (!this.EnsureAuraMonoApiReady()
+                || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null
+                || auraMonoObjectGetClass == null)
+            {
+                return false;
+            }
+
+            if (this.cachedNoclipPlayerObj.TryGet(out playerObj) && playerObj != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            playerObj = IntPtr.Zero;
+            if (!this.TryGetAuraMonoLocalPlayerObject(out playerObj) || playerObj == IntPtr.Zero)
+            {
+                playerObj = IntPtr.Zero;
+                return false;
+            }
+
+            return true;
         }
 
         // Resolves (and caches) the self BasePlayerComponent plus its PlayerMoveComponent — the

@@ -478,6 +478,7 @@
     <Compile Include="InstrumentHotkeyGuardFeature.cs" />
     <Compile Include="MusicPlayerFeature.cs" />
     <Compile Include="HomelandFarmFeature.cs" />
+    <Compile Include="HomelandFarmAutoWave.cs" />
     <Compile Include="HomelandFarmEventDiagFeature.cs" />
     <Compile Include="HomelandFarmPrivacyPauseFeature.cs" />
     <Compile Include="HomelandFarmPlotRegionFeature.cs" />
@@ -498,6 +499,7 @@
     <Compile Include="SandSculptureFeature.cs" />
     <Compile Include="PumpkinCarvingFeature.cs" />
     <Compile Include="FurnitureAutoRepairFeature.cs" />
+    <Compile Include="FurnitureLightRadiusFeature.cs" />
     <Compile Include="SandRoughSelectHook.cs" />
     <Compile Include="SeaCleanQteFeature.cs" />
     <Compile Include="CleanupBossFeature.cs" />

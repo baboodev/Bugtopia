@@ -40,6 +40,11 @@ namespace HeartopiaMod
     //    HomelandFarmRadiusSaveDebounceSeconds, and PersistHomelandFarmRadius() fires only when
     //    the timer lapses. Both surfaces run the identical idempotent machine, exactly like the
     //    IMGUI twin re-running it every repaint.
+    //  - Harvest-delay slider → the same debounce machine over
+    //    homelandFarmAutoSyncDelayLastSeen/SavePending/SaveAt. LastSeen is an int; the
+    //    first-draw sentinel is LastSeen < 0 (adopts without scheduling). A change re-arms
+    //    SaveAt = now + HomelandFarmRadiusSaveDebounceSeconds, and
+    //    PersistHomelandFarmAutoSyncDelay() fires only when the timer lapses. Whole seconds.
     //  - Seed/fert storage pickers + inventory selectors → NO persistence at all: picking just
     //    writes the in-memory field (:22351-22354 / :22388-22391 — a guarded plain assignment,
     //    zero side effects). Do not add a save.
@@ -88,15 +93,20 @@ namespace HeartopiaMod
     //
     // Layout replays the source y-cursor chain (content top margin 8 standing in for startY,
     // the Foraging convention), with the two documented height deviations noted below:
-    //   auto card      y=8    h=176  (capture 38, status 43, hint 74, checkbox 98, start/stop 126)
-    //   y += 188   →   radius card  y=196 h=114 (labels 34, slider 54, whole-homeland checkbox 80)
-    //   y += 126   →   privacy card y=322 h=88  (labels 34, slider 54)
-    //   y += 100   →   crops card   y=422 h=160 (storage lbl 36, picker 58, refresh 90, sel 122)
-    //   y += 172   →   fert card    y=594 h=160 (same rows; refresh 140w, count lbl at 166)
-    //   y += 172   →   ops card     y=766 h=274 (rows 40/78/116/154 two-col + 192/230 full-width)
-    //   y += 286   →   event diag   y=1052 (h28); y += 34 → event-driven y=1086 (h28)
-    //   y += 38    →   status card  y=1124 h=52 (label 16,10, wrapped 11pt @ .82)
-    //   y += 62    →   stop button  y=1186 (160x30); + 40 → content height 1226.
+
+    //   auto card      y=8    h=176  (capture+reset 38, status 43, hint 74, checkbox 98, start/stop 126)
+    //                  while auto farm is running the card grows to h=222 and the harvest-delay
+    //                  row (local y=166) is shown; every sibling below shifts +46 for that time
+    //   y += 188   →   radius card  y=196 h=88  (labels 34, slider 54)
+    //   y += 100   →   privacy card y=296 h=88  (labels 34, slider 54)
+    //   y += 100   →   crops card   y=396 h=160 (storage lbl 36, picker 58, refresh 90, sel 122)
+    //   y += 172   →   fert card    y=568 h=160 (same rows; refresh 140w, count lbl at 166)
+    //   y += 172   →   ops card     y=740 h=274 (rows 40/78/116/154 two-col + 192/230 full-width)
+    //   y += 286   →   event diag   y=1026 (h28); y += 34 → event-driven y=1060 (h28)
+    //   y += 38    →   status card  y=1098 h=52 (label 16,10, wrapped 11pt @ .82)
+    //   y += 62    →   stop button  y=1160 (160x30); + 40 → content height 1200.
+    //                  running content height is 1246 (1200 + the 46px card growth)
+
     // NOTE (2026-07-22): the radius card is 88, not the source's 70 — its slider runs y=54..74 and
     // was overflowing the card. Everything from the crops card down is therefore +18 off the IMGUI
     // y-cursor; the 12px inter-card gap is unchanged. Don't "restore" these to source parity.
@@ -110,16 +120,28 @@ namespace HeartopiaMod
     // NOTE (2026-09-04): the PRIVACY PAUSE card was inserted after the radius card, so everything
     // from the crops card down is a further +100 (its 88 height + the uniform 12px gap). It has no
     // IMGUI twin — the feature is UGUI-only.
-    // NOTE (2026-10-31): the WHOLE HOMELAND checkbox row (y=80..102) was added to the radius card,
-    // so that card is 114 and everything from the privacy card down is a further +26. UGUI-only;
-    // backend in HomelandFarmPlotRegionFeature.cs (field write + eager resolve + bespoke persist).
+
+    // NOTE (2026-11-04): Reset capture joined the auto card's y=38 row — CaptureButton shrank
+    // 200→140px, Reset (danger) sits at 164/130x28. The card height (176) and every y below it
+    // are UNCHANGED. Reset is SetActive-gated on homelandFarmAutoCaptured in the Sync pass
+    // (visible only when there is something to reset; user call same day, supersedes the "never
+    // gated" Mass Cook precedent from the plan); the CapturedLabel x is RELATIVE to its row
+    // neighbour and slides on the visibility flip: 166 (Capture.right+10 — the original 226=16+
+    // 200+10 gap preserved over the narrower button) while hidden, 302 (Reset.right+8) while
+    // shown. No IMGUI twin exists for this either (the drawer was removed repo-wide).
+    // NOTE (2026-11-05): Harvest delay is a row inside the auto card, not its own card.
+    // The row is SetActive only while auto farm is running; the card then grows 176 → 222
+    // and every sibling below shifts +46. The collapsed chain above is the resting layout
+    // (radius y=196, content height 1200). The wait still saves through the radius debounce
+    // machine (int compare, PersistHomelandFarmAutoSyncDelay). No IMGUI twin.
+
     //
     // Per-gated-frame cadence (shell visible + New Features tab + Homeland Farm sub, matching
     // the source running these on every IMGUI repaint of the tab):
     //  - this.EnsureHomelandFarmWarmupStarted() (source top-of-draw, :22218 — idempotent kick).
     //  - The eager fertilizer auto-refresh-if-empty (:22256-22259 — source re-checks every
     //    repaint; the per-gated-frame check is the correct equivalent).
-    //  - The radius debounce state machine (above).
+    //  - The radius, privacy, and harvest-delay debounce state machines (above).
     //  - Control re-syncs: button interactables recomputed live (IsHomelandFarmBusy +
     //    IsHomelandFarmWarmupReady + TryHomelandFarmGetSelectedFertilizer change from background
     //    activity — the Animal Care live-gate lesson), checkbox re-syncs via
@@ -170,25 +192,41 @@ namespace HeartopiaMod
 
             // AUTO FARMING card
             public GameObject CaptureButton;      // farmInteractive && !running
+            public GameObject ResetButton;        // SetActive on homelandFarmAutoCaptured (visible only when there is something to reset)
             public GameObject CapturedLabel;
             public string CapturedShown;
+            // CapturedLabel x follows Reset visibility (166 hidden / 302 shown) — cached so the
+            // reposition runs only on state change. true = built state (button active, label at 302).
+            public bool ResetShown = true;
+            public float PanelW;                  // stored at build, same idiom as DailyQuests/Extra
             public Toggle AutoFertilizeToggle;    // live-gated AND write-guarded (file header)
             public GameObject AutoStartButton;    // primary — shown while NOT running
             public GameObject AutoStopButton;     // danger — shown while running (same rect)
+            public GameObject AutoPanel;
+            public GameObject HarvestDelayRow;    // SetActive only while auto farm is running
+            public bool HarvestDelayShown;
 
             // FARM RADIUS card
+            public GameObject RadiusPanel;
             public Slider RadiusSlider;
             public GameObject RadiusValueLabel;
             public string RadiusValueShown;
             public Toggle WholePlotToggle;        // own-plot rectangle instead of the sphere; disables the slider
 
             // PRIVACY PAUSE card — same three-field shape; 0 shows as "Off".
+            public GameObject PrivacyPanel;
             public Slider PrivacySlider;
             public GameObject PrivacyValueLabel;
             public UguiLabelRiskMark PrivacyRiskMark; // trails the card title while the radius is under 10 m
             public string PrivacyValueShown;
 
+            // HARVEST DELAY row inside the auto card — whole seconds; the value label is "{n}s".
+            public Slider SyncDelaySlider;
+            public GameObject SyncDelayValueLabel;
+            public string SyncDelayValueShown;
+
             // CROPS card
+            public GameObject CropsPanel;
             public UguiHomelandFarmSegmentHandle[] SeedSegments;   // Backpack/Warehouse/Both
             public GameObject RefreshSeedsButton;
             public GameObject SeedsCachedLabel;
@@ -196,6 +234,7 @@ namespace HeartopiaMod
             public UguiHomelandFarmSelectorHandle SeedSelector;
 
             // FERTILIZER card
+            public GameObject FertPanel;
             public UguiHomelandFarmSegmentHandle[] FertSegments;
             public GameObject RefreshFertilizersButton;
             public GameObject FertCachedLabel;
@@ -203,19 +242,38 @@ namespace HeartopiaMod
             public UguiHomelandFarmSelectorHandle FertSelector;
 
             // OPERATIONS card — all 9 gated on farmInteractive alone
+            public GameObject OpsPanel;
             public GameObject[] OpsButtons;
 
             // Trailing toggles + status + stop
             public Toggle EventDiagToggle;
             public Toggle EventDrivenToggle;
+            public GameObject StatusPanel;
             public GameObject StatusLabel;
             public string StatusShown;
             public GameObject StopButton;         // homelandFarmCoroutine != null
+            public Transform ScrollContent;
 
             public int ErrorCount;                // per-frame sync disabled at 3 (LIVE rail idiom)
         }
 
         private UguiShellNewFeaturesHomelandFarmHandle uguiShellNewFeaturesHomelandFarm;
+
+        // Resting layout (auto farm stopped). While it is running the auto card grows by
+        // UguiHomelandFarmRunningShift and every sibling below it moves down by the same amount.
+        private const float UguiHomelandFarmAutoCardCollapsedH = 176f;
+        private const float UguiHomelandFarmAutoCardExpandedH = 222f;
+        private const float UguiHomelandFarmRunningShift = 46f;
+        private const float UguiHomelandFarmRadiusY = 196f;
+        private const float UguiHomelandFarmPrivacyY = 296f;
+        private const float UguiHomelandFarmCropsY = 396f;
+        private const float UguiHomelandFarmFertY = 568f;
+        private const float UguiHomelandFarmOpsY = 740f;
+        private const float UguiHomelandFarmEventDiagY = 1026f;
+        private const float UguiHomelandFarmEventDrivenY = 1060f;
+        private const float UguiHomelandFarmStatusY = 1098f;
+        private const float UguiHomelandFarmStopY = 1160f;
+        private const float UguiHomelandFarmContentH = 1200f;
 
         // ----------------------------------------------------------------------------------------
         // Small local helpers
@@ -469,10 +527,9 @@ namespace HeartopiaMod
         // ----------------------------------------------------------------------------------------
 
         // UGUI mirror of DrawHomelandFarmTab: six always-visible cards + two free toggle rows +
-        // a status card + a stop button in a transparent scroll view, every position replaying
-        // the IMGUI cursor chain ONCE at build time (all card heights fixed — the only dynamic
-        // visibility is the Start/Stop same-rect swap and the selectors' empty-state swap, both
-        // owned by the sync pass). Handle assigned LAST (Research idiom).
+        // a status card + a stop button in a transparent scroll view. Positions are the collapsed
+        // chain; while auto farm is running the sync pass grows the auto card and shifts every
+        // sibling below it. Handle assigned LAST (Research idiom).
         private GameObject BuildUguiShellNewFeaturesHomelandFarmContent(Transform parent, float x, float y, float w, float h)
         {
             this.uguiShellNewFeaturesHomelandFarm = null;
@@ -505,24 +562,39 @@ namespace HeartopiaMod
             }
             catch { }
 
+            handle.ScrollContent = scrollContent;
+
             float contentWidth = w - 22f;   // viewport insets: 4 left + 18 right
             float panelW = contentWidth - 16f; // panels at x=8, 8px right margin
             float rowW = panelW - 32f;      // the source's width-32 inner width
+            handle.PanelW = panelW;         // sync pass re-lays the CapturedLabel off this
 
             // -------- 1. AUTO FARMING card (y=8, h=176 — :22232-22298) --------
             GameObject autoCard = this.CreateUguiSettingsMainPanel(scrollContent, "AutoPanel",
                 this.L("homeland_farm.auto_section"));
-            PlaceUguiTopLeft(autoCard, 8f, 8f, panelW, 176f);
+            handle.AutoPanel = autoCard;
+            PlaceUguiTopLeft(autoCard, 8f, 8f, panelW, UguiHomelandFarmAutoCardCollapsedH);
 
             handle.CaptureButton = this.CreateUguiPrimaryButton(autoCard.transform, "CaptureButton",
                 this.L("homeland_farm.auto_capture"),
                 new System.Action(this.OnUguiHomelandFarmCaptureClicked));
-            PlaceUguiTopLeft(handle.CaptureButton, 16f, 38f, 200f, 28f);
+            PlaceUguiTopLeft(handle.CaptureButton, 16f, 38f, 140f, 28f);
+            this.TrySetUguiButtonLabelSize(handle.CaptureButton, 12f);
+
+            // 2026-11-04: Reset capture — destructive twin of the Capture row (plan
+            // docs/plans/2026-11-04-homeland-farm-reset-button.md). Danger style; the Sync pass
+            // SetActives it on homelandFarmAutoCaptured (nothing to reset → hidden), while the
+            // backend stays stop + clear / idempotent no-op.
+            handle.ResetButton = this.CreateUguiDangerButton(autoCard.transform, "ResetButton",
+                this.L("homeland_farm.reset_capture"),
+                new System.Action(this.OnUguiHomelandFarmResetClicked));
+            PlaceUguiTopLeft(handle.ResetButton, 164f, 38f, 130f, 28f);
+            this.TrySetUguiButtonLabelSize(handle.ResetButton, 12f);
 
             handle.CapturedShown = string.Empty; // sync pass below paints the real text
             handle.CapturedLabel = this.CreateUguiHomelandFarmSectionLabel(autoCard.transform,
                 "CapturedLabel", string.Empty);
-            PlaceUguiTopLeft(handle.CapturedLabel, 226f, 43f, panelW - 242f, 18f);
+            PlaceUguiTopLeft(handle.CapturedLabel, 302f, 43f, panelW - 318f, 18f);
 
             GameObject hint = this.CreateUguiHomelandFarmSectionLabel(autoCard.transform, "HintLabel",
                 this.L("homeland_farm.auto_hint"));
@@ -544,6 +616,33 @@ namespace HeartopiaMod
                 new System.Action(this.OnUguiHomelandFarmAutoStartClicked));
             PlaceUguiTopLeft(handle.AutoStartButton, 16f, 126f, rowW, 32f);
 
+            // Harvest delay lives in the auto card, under Start/Stop. Hidden until the farm is
+            // running; the sync pass then grows the card and shifts every sibling down.
+            Color textColor = this.UguiKitTextColor();
+            GameObject delayRow = this.CreateUguiGo("HarvestDelay", autoCard.transform);
+            PlaceUguiTopLeft(delayRow, 16f, 166f, rowW, 42f);
+            SetUguiGoActive(delayRow, false);
+            handle.HarvestDelayRow = delayRow;
+
+            GameObject syncName = this.CreateUguiLabel(delayRow.transform, "SliderLabel",
+                this.L("homeland_farm.sync_slider_label"), 11f,
+                new Color(textColor.r, textColor.g, textColor.b, 0.78f), false);
+            this.TrySetUguiLabelBold(syncName);
+            PlaceUguiTopLeft(syncName, 0f, 0f, rowW * 0.55f, 18f);
+
+            handle.SyncDelayValueShown = string.Empty;
+            handle.SyncDelayValueLabel = this.CreateUguiLabel(delayRow.transform, "SliderValue",
+                string.Empty, 12f, textColor, false);
+            this.TrySetUguiLabelRightAligned(handle.SyncDelayValueLabel);
+            PlaceUguiTopLeft(handle.SyncDelayValueLabel, rowW * 0.55f, 0f, rowW * 0.45f, 18f);
+
+            handle.SyncDelaySlider = this.CreateUguiSlider(delayRow.transform, "SyncDelaySlider",
+                (float)HomelandFarmAutoWave.SyncDelayMinSeconds,
+                (float)HomelandFarmAutoWave.SyncDelayMaxSeconds,
+                this.homelandFarmAutoSyncDelaySeconds,
+                true, new System.Action<float>(this.OnUguiHomelandFarmSyncDelayChanged));
+            PlaceUguiTopLeft(handle.SyncDelaySlider.gameObject, 0f, 22f, rowW, 20f);
+
             // -------- 2. FARM RADIUS card (y=196 — :22300-22337) --------
             // 2026-07-22: h was 70, but the slider inside runs y=54..74 — it OVERFLOWED the card by
             // 4px and sat visually welded to its bottom edge. 88 clears the slider and leaves the
@@ -553,10 +652,12 @@ namespace HeartopiaMod
             // card is 114 and everything below it is a further +26.
             GameObject radiusCard = this.CreateUguiSettingsMainPanel(scrollContent, "RadiusPanel",
                 this.L("homeland_farm.radius_section"));
-            PlaceUguiTopLeft(radiusCard, 8f, 196f, panelW, 114f);
+
+            handle.RadiusPanel = radiusCard;
+            PlaceUguiTopLeft(radiusCard, 8f, UguiHomelandFarmRadiusY, panelW, 88f);
+
 
             // sliderLabelStyle: bold 11 @ 0.78 (:22303-22304).
-            Color textColor = this.UguiKitTextColor();
             GameObject sliderName = this.CreateUguiLabel(radiusCard.transform, "SliderLabel",
                 this.L("homeland_farm.radius_slider_label"), 11f,
                 new Color(textColor.r, textColor.g, textColor.b, 0.78f), false);
@@ -591,7 +692,10 @@ namespace HeartopiaMod
             // +100 (88 card + the file's uniform 12px gap).
             GameObject privacyCard = this.CreateUguiSettingsMainPanel(scrollContent, "PrivacyPanel",
                 this.L("homeland_farm.privacy_section"));
-            PlaceUguiTopLeft(privacyCard, 8f, 322f, panelW, 88f);
+
+            handle.PrivacyPanel = privacyCard;
+            PlaceUguiTopLeft(privacyCard, 8f, UguiHomelandFarmPrivacyY, panelW, 88f);
+
             // Under 10 m (0 = off) the farm keeps running with a player practically on the plot.
             Transform privacyHeader = privacyCard.transform.Find("Header");
             handle.PrivacyRiskMark = privacyHeader != null
@@ -620,7 +724,8 @@ namespace HeartopiaMod
             // -------- 3. CROPS card (y=278, h=160 — :22340-22375) --------
             GameObject cropsCard = this.CreateUguiSettingsMainPanel(scrollContent, "CropsPanel",
                 this.L("homeland_farm.sow_section"));
-            PlaceUguiTopLeft(cropsCard, 8f, 422f, panelW, 160f);
+            handle.CropsPanel = cropsCard;
+            PlaceUguiTopLeft(cropsCard, 8f, UguiHomelandFarmCropsY, panelW, 160f);
 
             GameObject seedStorageLabel = this.CreateUguiHomelandFarmSectionLabel(cropsCard.transform,
                 "SeedStorageLabel", this.L("homeland_farm.seed_storage"));
@@ -650,7 +755,8 @@ namespace HeartopiaMod
             // -------- 4. FERTILIZER card (y=450, h=160 — :22377-22412) --------
             GameObject fertCard = this.CreateUguiSettingsMainPanel(scrollContent, "FertPanel",
                 this.L("homeland_farm.fertilize_section"));
-            PlaceUguiTopLeft(fertCard, 8f, 594f, panelW, 160f);
+            handle.FertPanel = fertCard;
+            PlaceUguiTopLeft(fertCard, 8f, UguiHomelandFarmFertY, panelW, 160f);
 
             GameObject fertStorageLabel = this.CreateUguiHomelandFarmSectionLabel(fertCard.transform,
                 "FertStorageLabel", this.L("homeland_farm.fert_storage"));
@@ -687,7 +793,9 @@ namespace HeartopiaMod
             // 230+30 = 260, +14 bottom pad = 274. Everything below the card is +38 vs 07-29.
             GameObject opsCard = this.CreateUguiSettingsMainPanel(scrollContent, "OpsPanel",
                 this.L("homeland_farm.operations_section"));
-            PlaceUguiTopLeft(opsCard, 8f, 766f, panelW, 274f);
+
+            handle.OpsPanel = opsCard;
+            PlaceUguiTopLeft(opsCard, 8f, UguiHomelandFarmOpsY, panelW, 274f);
 
             float colW = (rowW - 12f) / 2f;
             float col1 = 16f;
@@ -737,18 +845,22 @@ namespace HeartopiaMod
             handle.EventDiagToggle = this.CreateUguiCheckbox(scrollContent, "EventDiagToggle",
                 this.L("Event Diagnostics (log)"), this.homelandFarmEventDiagEnabled,
                 new System.Action<bool>(this.OnUguiHomelandFarmEventDiagToggled));
-            PlaceUguiTopLeft(handle.EventDiagToggle.gameObject, 8f, 1052f, panelW, 28f);
+
+            PlaceUguiTopLeft(handle.EventDiagToggle.gameObject, 8f, UguiHomelandFarmEventDiagY, panelW, 28f);
 
             handle.EventDrivenToggle = this.CreateUguiCheckbox(scrollContent, "EventDrivenToggle",
                 this.L("Event-driven auto-farm (no rescan)"), this.homelandFarmAutoEventDriven,
                 new System.Action<bool>(this.OnUguiHomelandFarmEventDrivenToggled));
-            PlaceUguiTopLeft(handle.EventDrivenToggle.gameObject, 8f, 1086f, panelW, 28f);
 
+            PlaceUguiTopLeft(handle.EventDrivenToggle.gameObject, 8f, UguiHomelandFarmEventDrivenY, panelW, 28f);
+          
             // -------- 8. Status card (source y=978, h=52 — :22501-22508) --------
             // Headerless panel (the source box carries no label — Animal Care's "" precedent).
             GameObject statusCard = this.CreateUguiSettingsMainPanel(scrollContent, "StatusPanel",
                 string.Empty);
-            PlaceUguiTopLeft(statusCard, 8f, 1124f, panelW, 52f);
+
+            handle.StatusPanel = statusCard;
+            PlaceUguiTopLeft(statusCard, 8f, UguiHomelandFarmStatusY, panelW, 52f);
 
             // statusStyle: 11pt, wordWrap, uiText @ 0.82 (:22227-22228). Text painted by the
             // sync pass (key-then-localize — file header).
@@ -763,15 +875,18 @@ namespace HeartopiaMod
             handle.StopButton = this.CreateUguiPrimaryButton(scrollContent, "StopButton",
                 this.L("homeland_farm.stop"),
                 new System.Action(this.OnUguiHomelandFarmStopClicked));
-            PlaceUguiTopLeft(handle.StopButton, 8f, 1186f, 160f, 30f);
 
-            // Cursor chain end (file header): stop button 1186 + the source's trailing 40 = 1226.
-            this.SetUguiScrollContentHeight(scrollContent, 1226f);
+            PlaceUguiTopLeft(handle.StopButton, 8f, UguiHomelandFarmStopY, 160f, 30f);
+
+            // Cursor chain end (file header): stop button 1160 + the source's trailing 40 = 1200.
+            // A running auto farm adds UguiHomelandFarmRunningShift in the sync pass.
+            this.SetUguiScrollContentHeight(scrollContent, UguiHomelandFarmContentH);
 
             // Seed every dynamic state once (texts, interactables, segment styles, selector
             // rows, Start/Stop swap) via the same pass the processor runs. The warmup kick,
-            // eager fert refresh, and the radius debounce machine deliberately stay OUT of the
-            // builder — they are draw-cadence behaviors and belong to the gated processor only.
+            // eager fert refresh, and the radius / privacy / harvest-delay debounce machines
+            // deliberately stay OUT of the builder — they are draw-cadence behaviors and belong
+            // to the gated processor only.
             this.SyncUguiHomelandFarmDynamicState(handle);
 
             handle.Root = block;
@@ -848,6 +963,27 @@ namespace HeartopiaMod
                     this.PersistHomelandFarmPrivacyRadius();
                 }
 
+                // Harvest-delay debounce. Same machine as privacy, but the field and LastSeen
+                // are ints: the first-draw sentinel is LastSeen < 0, and the compare is integer.
+                if (this.homelandFarmAutoSyncDelayLastSeen < 0)
+                {
+                    this.homelandFarmAutoSyncDelayLastSeen = this.homelandFarmAutoSyncDelaySeconds;
+                }
+                else if (this.homelandFarmAutoSyncDelaySeconds != this.homelandFarmAutoSyncDelayLastSeen)
+                {
+                    this.homelandFarmAutoSyncDelayLastSeen = this.homelandFarmAutoSyncDelaySeconds;
+                    this.homelandFarmAutoSyncDelaySavePending = true;
+                    this.homelandFarmAutoSyncDelaySaveAt = Time.realtimeSinceStartup
+                        + HomelandFarmRadiusSaveDebounceSeconds;
+                }
+
+                if (this.homelandFarmAutoSyncDelaySavePending
+                    && Time.realtimeSinceStartup >= this.homelandFarmAutoSyncDelaySaveAt)
+                {
+                    this.homelandFarmAutoSyncDelaySavePending = false;
+                    this.PersistHomelandFarmAutoSyncDelay();
+                }
+
                 this.SyncUguiHomelandFarmDynamicState(handle);
             }
             catch (Exception ex)
@@ -877,6 +1013,26 @@ namespace HeartopiaMod
             // -------- AUTO FARMING --------
             this.SetUguiButtonInteractable(handle.CaptureButton,
                 farmInteractive && !this.homelandFarmAutoRunning); // :22239
+            // Reset capture is only shown while there is something to reset (user call
+            // 2026-11-04, supersedes the Mass Cook "never gated" precedent from the plan): the
+            // snapshot is its only subject — with none captured the danger-styled button just
+            // dangles a no-op. The handler stays an idempotent no-op regardless; a running loop
+            // always implies a snapshot, so the button never hides mid-run. The CapturedLabel
+            // slides into the freed slot (x=166 hidden / x=302 shown) so no gap is left behind —
+            // repositioned only when the visibility actually flips.
+            bool resetShown = this.homelandFarmAutoCaptured;
+            SetUguiGoActive(handle.ResetButton, resetShown);
+            if (resetShown != handle.ResetShown)
+            {
+                // Label x is RELATIVE to its row neighbour, not absolute: the pre-Reset design
+                // kept it 10px right of Capture's right edge (226 = 16 + 200 + 10). Capture is
+                // 140 wide now, so the hidden state keeps that same gap: 16 + 140 + 10 = 166.
+                // The shown state places it right of Reset: 164 + 130 + 8 = 302. Width keeps the
+                // source's 16px right margin (panelW - x - 16).
+                handle.ResetShown = resetShown;
+                PlaceUguiTopLeft(handle.CapturedLabel, resetShown ? 302f : 166f, 43f,
+                    handle.PanelW - (resetShown ? 318f : 182f), 18f);
+            }
             this.SyncUguiSelfLabelText(handle.CapturedLabel, ref handle.CapturedShown,
                 this.homelandFarmAutoCaptured
                     ? this.LF("homeland_farm.auto_captured", this.homelandFarmAutoPlanterCount)
@@ -900,6 +1056,9 @@ namespace HeartopiaMod
                     && this.homelandFarmScannedSeeds.Count > 0); // :22286-22289
             }
 
+            SetUguiGoActive(handle.HarvestDelayRow, running);
+            this.LayoutUguiHomelandFarmForRunning(handle, running);
+
             // -------- FARM RADIUS --------
             if (handle.RadiusSlider != null
                 && handle.RadiusSlider.value != this.homelandFarmWaterRadius)
@@ -918,6 +1077,16 @@ namespace HeartopiaMod
                 wholePlot
                     ? this.HomelandFarmPlotRegionStatusText()
                     : $"{this.homelandFarmWaterRadius:F0}m"); // :22313
+
+            // -------- HARVEST DELAY --------
+            if (handle.SyncDelaySlider != null
+                && handle.SyncDelaySlider.value != this.homelandFarmAutoSyncDelaySeconds)
+            {
+                handle.SyncDelaySlider.SetValueWithoutNotify(this.homelandFarmAutoSyncDelaySeconds);
+            }
+
+            this.SyncUguiSelfLabelText(handle.SyncDelayValueLabel, ref handle.SyncDelayValueShown,
+                this.LF("homeland_farm.sync_value", this.homelandFarmAutoSyncDelaySeconds));
 
             // -------- PRIVACY PAUSE --------
             // Always interactable: the slider IS the on/off control (0 = off), so there is no
@@ -1009,6 +1178,21 @@ namespace HeartopiaMod
             this.CaptureHomelandFarmAutoPlanters();
         }
 
+        // Reset capture (plan 2026-11-04): always clickable — the backend stops a running
+        // auto-farm/op first, then clears the snapshot + caches (idempotent). try/catch +
+        // ModLogger per the Mass Cook reset handler idiom (UguiFeaturesMassCookContent.cs:1957).
+        private void OnUguiHomelandFarmResetClicked()
+        {
+            try
+            {
+                this.ResetHomelandFarmAutoCapture();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiShell] Homeland Farm capture reset error: " + ex.Message);
+            }
+        }
+
         // :22261-22271 — the WRITE guard re-evaluates hasSelectedFertilizer at click time and
         // gates BOTH the field write and the bespoke persist on it (never SaveKeybinds). When the
         // guard fails, the field stays unchanged and the per-frame SyncUguiToggleFromField snaps
@@ -1058,6 +1242,47 @@ namespace HeartopiaMod
         private void OnUguiHomelandFarmPrivacyRadiusChanged(float value)
         {
             this.homelandFarmPrivacyRadius = Mathf.Round(value);
+        }
+
+        // Whole seconds, clamped to 1..5. The debounce machine in the processor observes the
+        // change; the value label follows via the per-frame cached diff.
+        // Grows the auto card and shifts every block under it while the harvest-delay row is shown.
+        // Resting positions are the builder's collapsed layout; the shift is applied only on change.
+        private void LayoutUguiHomelandFarmForRunning(UguiShellNewFeaturesHomelandFarmHandle handle, bool shown)
+        {
+            if (handle == null || shown == handle.HarvestDelayShown)
+            {
+                return;
+            }
+
+            handle.HarvestDelayShown = shown;
+            float shift = shown ? UguiHomelandFarmRunningShift : 0f;
+            float panelW = handle.PanelW;
+            float cardH = shown ? UguiHomelandFarmAutoCardExpandedH : UguiHomelandFarmAutoCardCollapsedH;
+            PlaceUguiTopLeft(handle.AutoPanel, 8f, 8f, panelW, cardH);
+            PlaceUguiTopLeft(handle.RadiusPanel, 8f, UguiHomelandFarmRadiusY + shift, panelW, 88f);
+            PlaceUguiTopLeft(handle.PrivacyPanel, 8f, UguiHomelandFarmPrivacyY + shift, panelW, 88f);
+            PlaceUguiTopLeft(handle.CropsPanel, 8f, UguiHomelandFarmCropsY + shift, panelW, 160f);
+            PlaceUguiTopLeft(handle.FertPanel, 8f, UguiHomelandFarmFertY + shift, panelW, 160f);
+            PlaceUguiTopLeft(handle.OpsPanel, 8f, UguiHomelandFarmOpsY + shift, panelW, 274f);
+            if (handle.EventDiagToggle != null)
+            {
+                PlaceUguiTopLeft(handle.EventDiagToggle.gameObject, 8f, UguiHomelandFarmEventDiagY + shift, panelW, 28f);
+            }
+
+            if (handle.EventDrivenToggle != null)
+            {
+                PlaceUguiTopLeft(handle.EventDrivenToggle.gameObject, 8f, UguiHomelandFarmEventDrivenY + shift, panelW, 28f);
+            }
+
+            PlaceUguiTopLeft(handle.StatusPanel, 8f, UguiHomelandFarmStatusY + shift, panelW, 52f);
+            PlaceUguiTopLeft(handle.StopButton, 8f, UguiHomelandFarmStopY + shift, 160f, 30f);
+            this.SetUguiScrollContentHeight(handle.ScrollContent, UguiHomelandFarmContentH + shift);
+        }
+
+        private void OnUguiHomelandFarmSyncDelayChanged(float value)
+        {
+            this.homelandFarmAutoSyncDelaySeconds = HomelandFarmAutoWave.ClampSyncDelaySeconds((int)Mathf.Round(value));
         }
 
         // :22349-22354 — a guarded plain field write, ZERO other side effects, NO persistence.

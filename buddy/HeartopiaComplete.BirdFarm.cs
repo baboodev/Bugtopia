@@ -4614,25 +4614,45 @@ namespace HeartopiaMod
         private void VacuumBirds()
         {
             Breadcrumbs.Tick("BirdFarm.vacuum");
-            GameObject gameObject = GameObject.Find("p_player_skeleton(Clone)");
-            bool flag = gameObject == null;
-            if (!flag)
+            Vector3 anchorPos;
+            Vector3 forward;
+            if (this.TryGetNoclipSelfAnchorPose(out anchorPos, out Quaternion selfRot, out bool hasSelfRot, out _))
             {
-                Transform transform = gameObject.transform;
-                Vector3 position = transform.position + transform.forward * 3f;
-                position.y = transform.position.y;
-                GameObject[] array = Object.FindObjectsOfType<GameObject>();
-                foreach (GameObject gameObject2 in array)
+                if (hasSelfRot)
                 {
-                    bool flag2 = gameObject2 == null || gameObject2.name == null;
-                    if (!flag2)
+                    forward = selfRot * Vector3.forward;
+                }
+                else
+                {
+                    GameObject ownSkeleton = this.GetVerifiedLocalPlayerSkeleton();
+                    forward = ownSkeleton != null ? ownSkeleton.transform.forward : Vector3.forward;
+                }
+            }
+            else
+            {
+                GameObject ownSkeleton = this.GetVerifiedLocalPlayerSkeleton();
+                if (ownSkeleton == null)
+                {
+                    return;
+                }
+
+                anchorPos = ownSkeleton.transform.position;
+                forward = ownSkeleton.transform.forward;
+            }
+
+            Vector3 position = anchorPos + forward * 3f;
+            position.y = anchorPos.y;
+            GameObject[] array = Object.FindObjectsOfType<GameObject>();
+            foreach (GameObject gameObject2 in array)
+            {
+                bool flag2 = gameObject2 == null || gameObject2.name == null;
+                if (!flag2)
+                {
+                    string text = gameObject2.name.ToLower();
+                    bool flag3 = text.Contains("p_bird") && !text.Contains("birdscanner");
+                    if (flag3)
                     {
-                        string text = gameObject2.name.ToLower();
-                        bool flag3 = text.Contains("p_bird") && !text.Contains("birdscanner");
-                        if (flag3)
-                        {
-                            gameObject2.transform.position = position;
-                        }
+                        gameObject2.transform.position = position;
                     }
                 }
             }

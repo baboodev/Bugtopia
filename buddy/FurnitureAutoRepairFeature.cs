@@ -454,15 +454,7 @@ namespace HeartopiaMod
         // unowned piece fails this read and is skipped — it is not the local player.
         private bool TryReadFurnitureRepairOwnerId(IntPtr obj, out uint ownerId)
         {
-            ownerId = 0U;
-            if (obj == IntPtr.Zero || this.furnitureRepairOwnerGetter == IntPtr.Zero || auraMonoRuntimeInvoke == null)
-            {
-                return false;
-            }
-
-            IntPtr exc = IntPtr.Zero;
-            IntPtr boxed = auraMonoRuntimeInvoke(this.furnitureRepairOwnerGetter, obj, IntPtr.Zero, ref exc);
-            return exc == IntPtr.Zero && boxed != IntPtr.Zero && this.TryUnboxMonoUInt32(boxed, out ownerId);
+            return this.TryInvokeAuraMonoUIntGetter(obj, this.furnitureRepairOwnerGetter, out ownerId);
         }
 
         // RepairResultEvent (HomelandSyncSystem, from the server's RepairBuildItemNetworkEvent):

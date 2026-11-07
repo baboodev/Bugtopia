@@ -98,6 +98,13 @@ namespace HeartopiaMod
 
             this.lastToolDurabilityPollAt = now;
 
+            if (this.AreToolDurabilityHooksLive()
+                && this.TryGetCachedEquippedDurability(out int cachedToolId, out int cachedDurability, out int cachedMax))
+            {
+                this.ApplyEquippedToolDurability(cachedToolId, cachedDurability, cachedMax, now);
+                return;
+            }
+
             if (!this.IsAutoRepairWorldReady(out string readinessStatus))
             {
                 bool statusChanged = !string.Equals(this.lastLoggedAutoRepairNetStatus, readinessStatus ?? string.Empty, StringComparison.Ordinal);
@@ -169,6 +176,18 @@ namespace HeartopiaMod
                 }
             }
 
+            if (toolId > 0 && maxDurability > 0)
+            {
+                this.toolDurabilityById[toolId] = durability;
+                this.toolDurabilityCapById[toolId] = maxDurability;
+                this.toolDurabilityCapPendingId = 0;
+            }
+
+            this.ApplyEquippedToolDurability(toolId, durability, maxDurability, now);
+        }
+
+        private void ApplyEquippedToolDurability(int toolId, int durability, int maxDurability, float now)
+        {
             string toolName = this.GetAutoRepairSupportedToolName(toolId);
             if (string.IsNullOrEmpty(toolName))
             {
@@ -235,13 +254,16 @@ namespace HeartopiaMod
                 // the kit was never consumed, or the player left the restore aura before it
                 // finished), durability stays pinned at/below the threshold and the latch would
                 // otherwise disable auto-repair forever. Once the repair machinery is fully idle
-                // (state machine AND restore aura) and the re-arm delay elapsed, drop the latch
-                // so the next poll can trigger a fresh repair.
+                // (state machine AND restore aura AND no own restorer device still standing - a
+                // device outlives the buff edge when the player walks out of the circle, and the
+                // next throw against it would pop "Unable to place more!") and the re-arm delay
+                // elapsed, drop the latch so the next poll can trigger a fresh repair.
                 if (this.liveDurabilityLowLatched
                     && liveDurabilityRatio <= repairTriggerRatio
                     && now >= this.liveDurabilityLatchRearmAt
                     && !this.IsAutoRepairActiveOrQueued()
-                    && !this.IsRepairAuraActive())
+                    && !this.IsRepairAuraActive()
+                    && !this.TryOwnPlacedRepairKitPresent(out _, out _))
                 {
                     this.liveDurabilityLowLatched = false;
                     this.AutoEatRepairLog($"[AutoRepair] Durability still low ({durability}/{maxDurability}) after a triggered repair went idle; latch re-armed.");
@@ -1315,6 +1337,358 @@ namespace HeartopiaMod
             });
         }
 
+        // --- Own placed repair-kit probe (prevents the "Unable to place more!" dialog) ---
+        // The server caps how many ToolRestorer devices one player may have standing: another
+        // CanPutRestorer while one is still up answers Result=false and the game pops
+        // UiAlertWithCancelEvent{contentText=81} ("Unable to place more! Clear existing Repair
+        // Kits and place new ones?") - ToolRestorerProtocolManager.CanPutRestorerResult via
+        // ToolRestorerSyncSystem. The repair-aura bookkeeping cannot cover this case: its
+        // precise OFF edge (buff 701-706 true->false) fires the moment the player steps out of
+        // the 5 m circle while the device KEEPS standing, and the 30 s fallback window is
+        // shorter than a tier-3 kit's buff (BuffConfig 703/706 _time = 40 s). So every throw
+        // decision must also ask the world: is an OWN restorer entity placed right now?
+        // Entity source: Entities.GetComponents<ToolRestorerComponent> (ViewComponent;
+        // ownerNetId inside the inline _componentData struct - boxed-copy read exactly like
+        // TryReadSandRoughComponentData). Probed only at decision points (durability trigger,
+        // StartRepair, USE step, latch re-arm, sea-cleaner contamination retry) behind a 2 s
+        // cache — worst case ~0.5 Hz for the life of a standing kit. The retry's verify window
+        // may call in on consecutive frames; those hits return the cached answer.
+        private static readonly string[] ToolRestorerKitViewImages = { "XDTLevelAndEntity", "XDTLevelAndEntity.dll" };
+        private const float OwnPlacedKitProbeCacheSeconds = 2f;
+        private const float OwnKitSkipLogIntervalSeconds = 30f;
+        // How stale the last probe result may be before the Repair Status row stops claiming
+        // "own kit standing". Must cover the trigger gate's own re-probe pacing: the gate
+        // short-circuits the durability polls on the 10 s toast cooldown BEFORE reaching the
+        // probe, and the live durability path is event-driven, so a freshness window shorter
+        // than that pacing makes the suffix flicker while nothing about the world changed.
+        private const float OwnPlacedKitProbeFreshDisplaySeconds = 20f;
+        private IntPtr cachedToolRestorerKitViewClass;
+        private bool ownPlacedKitProbePresent;
+        private uint ownPlacedKitProbeNetId;
+        private string ownPlacedKitProbeStatus = string.Empty;
+        private float nextOwnPlacedKitProbeAt = -999f;
+        private float ownPlacedKitProbeAt = -999f;
+        private float nextOwnKitSkipLogAt = -999f;
+        private int ownPlacedKitProbeStaticId;
+        private int cachedToolRestorerKitViewClassEpoch = -1;
+        private string ownKitProbeUnavailableKind = string.Empty;
+
+        private IntPtr ResolveToolRestorerKitViewClass()
+        {
+            if (this.cachedToolRestorerKitViewClass != IntPtr.Zero
+                && this.cachedToolRestorerKitViewClassEpoch == AuraMonoWorldEpoch)
+            {
+                return this.cachedToolRestorerKitViewClass;
+            }
+
+            // Epoch moved or the last resolve failed. A Zero result stays uncached so the
+            // next probe tries again; the probe's own throttle is what limits the lookup.
+            this.cachedToolRestorerKitViewClass = IntPtr.Zero;
+            this.cachedToolRestorerKitViewClassEpoch = AuraMonoWorldEpoch;
+
+            IntPtr cls = this.FindAuraMonoClassInImages(
+                "XDTLevelAndEntity.Gameplay.Component.DisplayItem", "ToolRestorerComponent", ToolRestorerKitViewImages);
+            if (cls == IntPtr.Zero)
+            {
+                cls = this.FindAuraMonoClassInImages(
+                    "XDTLevelAndEntity.GamePlay.Component.DisplayItem", "ToolRestorerComponent", ToolRestorerKitViewImages);
+            }
+
+            if (cls == IntPtr.Zero)
+            {
+                cls = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Gameplay.Component.DisplayItem.ToolRestorerComponent");
+            }
+
+            if (cls == IntPtr.Zero)
+            {
+                cls = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.GamePlay.Component.DisplayItem.ToolRestorerComponent");
+            }
+
+            if (cls != IntPtr.Zero)
+            {
+                this.cachedToolRestorerKitViewClass = cls;
+            }
+
+            return cls;
+        }
+
+        // ToolRestorerComponentData { int staticId; bool showEffect; uint parentNetId; uint ownerNetId; }
+        // is an INLINE field on the view component; TryGetMonoObjectMember returns a boxed copy, so
+        // the field offsets carry the 2-pointer box header (SandSculpture idiom). Pin the box around
+        // the reads - each getter-free member read can allocate and sgen moves what it collects.
+        private unsafe bool TryReadToolRestorerKitData(IntPtr componentObj, out uint ownerNetId, out int staticId)
+        {
+            ownerNetId = 0U;
+            staticId = 0;
+            if (componentObj == IntPtr.Zero || auraMonoObjectGetClass == null || auraMonoObjectUnbox == null
+                || auraMonoClassGetFieldFromName == null || auraMonoFieldGetOffset == null)
+            {
+                return false;
+            }
+
+            if (!this.TryGetMonoObjectMember(componentObj, "_componentData", out IntPtr boxedData) || boxedData == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            uint boxPin = AuraMonoPinNew(boxedData);
+            try
+            {
+                IntPtr dataClass = auraMonoObjectGetClass(boxedData);
+                if (dataClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr ownerField = auraMonoClassGetFieldFromName(dataClass, "ownerNetId");
+                IntPtr staticField = auraMonoClassGetFieldFromName(dataClass, "staticId");
+                if (ownerField == IntPtr.Zero || staticField == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr raw = auraMonoObjectUnbox(boxedData);
+                if (raw == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                int header = 2 * IntPtr.Size;
+                ownerNetId = (uint)Marshal.ReadInt32(raw, (int)auraMonoFieldGetOffset(ownerField) - header);
+                staticId = Marshal.ReadInt32(raw, (int)auraMonoFieldGetOffset(staticField) - header);
+                return true;
+            }
+            catch
+            {
+                // Silent per component - the probe loop counts failures and logs ONE summary;
+                // a patched-away field name would otherwise repeat this line per component,
+                // per probe, for the whole life of the standing kit.
+                return false;
+            }
+            finally
+            {
+                AuraMonoPinFree(boxPin);
+            }
+        }
+
+        // Drop the probe cache so the next query re-reads the world. The USE step calls this
+        // right after a successful throw: the cache would otherwise hand that same machine's
+        // VERIFY retries and early WAIT releases the stale PRE-throw "nothing standing" answer
+        // - exactly the second-throw-against-the-standing-kit case the gate exists to stop.
+        private void InvalidateOwnKitProbe()
+        {
+            this.nextOwnPlacedKitProbeAt = -999f;
+            this.ownPlacedKitProbePresent = false;
+            this.ownPlacedKitProbeNetId = 0U;
+            this.ownPlacedKitProbeStaticId = 0;
+        }
+
+        // TRUE only when a restorer entity OWNED BY THE LOCAL PLAYER is confirmed standing right now.
+        // A failed/unavailable scan returns false (fail-open) and says so in `status` - never report
+        // "kit standing" off a scan that could not run; the existing window/buff guards stay in
+        // charge in that case. The game's own Repair-button owner id (TryResolveSelfPlayerNetId) is
+        // the comparison, same as FurnitureAutoRepair.
+        private unsafe bool TryOwnPlacedRepairKitPresent(out uint restorerNetId, out string status)
+        {
+            float now = Time.unscaledTime;
+            if (now < this.nextOwnPlacedKitProbeAt)
+            {
+                restorerNetId = this.ownPlacedKitProbeNetId;
+                status = this.ownPlacedKitProbeStatus;
+                return this.ownPlacedKitProbePresent;
+            }
+
+            this.nextOwnPlacedKitProbeAt = now + OwnPlacedKitProbeCacheSeconds;
+            restorerNetId = 0U;
+            status = string.Empty;
+            bool present = false;
+            bool cacheable = true;
+            string unavailableKind = null;
+            int matchedStaticId = 0;
+
+            try
+            {
+                IntPtr cls = this.ResolveToolRestorerKitViewClass();
+                if (cls == IntPtr.Zero)
+                {
+                    status = "ToolRestorer view class unavailable";
+                    cacheable = false;
+                    unavailableKind = "class";
+                }
+                else if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null
+                         || !AuraMonoPinningAvailable)
+                {
+                    status = "AuraMono/pinning unavailable for own-kit probe";
+                    cacheable = false;
+                    unavailableKind = "runtime";
+                }
+                else if (!this.TryResolveSelfPlayerNetId(out uint selfNetId) || selfNetId == 0U)
+                {
+                    status = "self player netId unavailable";
+                    cacheable = false;
+                    unavailableKind = "self";
+                }
+                else
+                {
+                    // Pinned enumeration; the enumeration itself runs INSIDE the try so an
+                    // exception mid-way still frees the pins collected so far.
+                    List<uint> pins = new List<uint>();
+                    try
+                    {
+                        // infrastructureOk is a close proxy, not a perfect one: the helper sets
+                        // it once the inflated GetComponents invoke returns, so a failure while
+                        // ENUMERATING the result list (world change tearing the scan mid-way)
+                        // still reports true and is taken as the "no placed restorers" negative
+                        // below. Rare and self-healing on the next probe - accepted.
+                        if (!this.TryAuraMonoGetComponentObjects(cls, out List<IntPtr> components, out bool infrastructureOk, pins))
+                        {
+                            if (infrastructureOk)
+                            {
+                                status = "no placed restorers";
+                            }
+                            else
+                            {
+                                status = "restorer scan unavailable";
+                                cacheable = false;
+                                unavailableKind = "scan";
+                            }
+                        }
+                        else
+                        {
+                            int readFailures = 0;
+                            for (int i = 0; i < components.Count; i++)
+                            {
+                                if (!this.TryReadToolRestorerKitData(components[i], out uint ownerNetId, out int staticId))
+                                {
+                                    readFailures++;
+                                    continue; // unreadable instance - never treated as ours
+                                }
+
+                                if (ownerNetId == selfNetId)
+                                {
+                                    present = true;
+                                    matchedStaticId = staticId;
+                                    // The device entity's own netId (0 when unreadable - the
+                                    // ownerNetId must never be printed as if it were the device).
+                                    this.TryHomelandFarmTryReadAuraMonoComponentNetId(components[i], out restorerNetId);
+                                    status = "own repair kit standing (device=" + restorerNetId + " kitStaticId=" + staticId + ")";
+                                    break;
+                                }
+                            }
+
+                            if (present)
+                            {
+                                this.ownPlacedKitProbeStaticId = matchedStaticId;
+                                if (readFailures > 0)
+                                {
+                                    this.AutoEatRepairLog("[AutoRepair] own-kit probe: " + readFailures
+                                        + " restorer component(s) unreadable (own kit matched elsewhere).");
+                                }
+                            }
+                            else if (readFailures > 0)
+                            {
+                                // An unreadable component might be ours. Caching this as "no placed
+                                // restorers" for 2 s is what lets the dialog return with a dead reader.
+                                status = readFailures + " of " + components.Count + " restorer component(s) unreadable";
+                                cacheable = false;
+                                unavailableKind = "unreadable";
+                                present = false;
+                            }
+                            else
+                            {
+                                status = "no placed restorers";
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        FreeAuraMonoPins(pins);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                status = "own-kit probe exception: " + ex.Message;
+                present = false;
+                cacheable = false;
+                unavailableKind = "exception";
+            }
+
+            this.ownPlacedKitProbePresent = present;
+            this.ownPlacedKitProbeNetId = restorerNetId;
+            if (!present)
+            {
+                this.ownPlacedKitProbeStaticId = 0;
+            }
+
+            this.ownPlacedKitProbeStatus = status;
+            this.ownPlacedKitProbeAt = Time.unscaledTime;
+            if (!cacheable)
+            {
+                this.nextOwnPlacedKitProbeAt = Time.unscaledTime + 0.5f;
+                this.NoteOwnKitProbeUnavailable(unavailableKind ?? "unknown", status);
+            }
+            else
+            {
+                this.ClearOwnKitProbeUnavailable();
+            }
+
+            return present;
+        }
+
+        // Ship-visible. AutoEatRepairLog is gated by MasterLogAutoEatRepair (default
+        // false) and is not compiled out — a dead probe must not depend on that flag.
+        // One line per transition into a kind, not per probe. A later successful scan
+        // clears the kind so the next failure logs again.
+        private void NoteOwnKitProbeUnavailable(string kind, string detail)
+        {
+            if (string.Equals(this.ownKitProbeUnavailableKind, kind, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            this.ownKitProbeUnavailableKind = kind ?? string.Empty;
+            ModLogger.Msg("[AutoRepair] own-kit probe unavailable (" + this.ownKitProbeUnavailableKind + "): "
+                + detail + ". Throws stay allowed until the scan works.");
+        }
+
+        private void ClearOwnKitProbeUnavailable()
+        {
+            this.ownKitProbeUnavailableKind = string.Empty;
+        }
+
+        // Shared once-per-window skip line so the log shows why nothing was thrown.
+        // MasterLogAutoEatRepair defaults to false, so AutoEatRepairLog is not this line.
+        private void LogOwnKitSkip(string action, uint restorerNetId)
+        {
+            float now = Time.unscaledTime;
+            if (now >= this.nextOwnKitSkipLogAt)
+            {
+                this.nextOwnKitSkipLogAt = now + OwnKitSkipLogIntervalSeconds;
+                ModLogger.Msg("[AutoRepair] " + action + " skipped: own repair kit still placed (device=" + restorerNetId
+                    + " kitStaticId=" + this.ownPlacedKitProbeStaticId
+                    + ") - a new throw would pop the game's \"Unable to place more!\" dialog.");
+            }
+        }
+
+        private const string ToolDurabilityHookName = "DataUpdated<ToolComponent>";
+        private const string TakenToolHookName = "DataUpdated<TakenToolComponent>";
+        private const string TakenToolRemovedHookName = "DataRemoved<TakenToolComponent>";
+
+        private IntPtr toolDurabilityClass;
+        private IntPtr takenToolUpdatedClass;
+        private IntPtr takenToolRemovedClass;
+        private bool toolDurabilityHooksRegistered;
+        private bool toolDurabilityNameTakenLogged;
+        private bool toolDurabilityLayoutRejectedLogged;
+        private bool toolDurabilitySeeded;
+
+        private readonly Dictionary<int, int> toolDurabilityById = new Dictionary<int, int>();
+        private readonly Dictionary<int, int> toolDurabilityCapById = new Dictionary<int, int>();
+        private int equippedToolId;
+        private int toolDurabilityEpoch;
+        private int toolDurabilityCapPendingId;
+
         // --- Event-driven Auto Eat / Auto Repair triggers ---
         // Replaces the poll-only detection (energy = UI-text parse of the energy panel;
         // durability = timed AuraMono read):
@@ -1360,14 +1734,338 @@ namespace HeartopiaMod
             {
                 float now = Time.unscaledTime;
                 this.handholdEventSeenAt = now;
-                // Bursts (durability + skin + handhold updates land together) coalesce into one
-                // durability check per debounce window.
+                if (this.AreToolDurabilityHooksLive())
+                {
+                    return;
+                }
+
                 if (now >= this.nextEventDurabilityCheckAllowedAt)
                 {
                     this.nextEventDurabilityCheckAllowedAt = now + 0.25f;
                     this.durabilityCheckRequestedByEvent = true;
                 }
             });
+            this.RegisterWorldReadyCallback("auto-repair-tool-durability", this.TryRegisterToolDurabilityHooks);
+        }
+
+        private bool TryRegisterToolDurabilityHooks()
+        {
+            this.ClearToolDurabilityCacheIfEpochChanged();
+            if (this.toolDurabilityHooksRegistered)
+            {
+                return this.toolDurabilitySeeded || this.TrySeedToolDurability();
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                return false;
+            }
+
+            const string dataUpdatedOpen = "ScriptsRefactory.DataAndProtocol.Events.DataUpdated`1";
+            const string dataRemovedOpen = "ScriptsRefactory.DataAndProtocol.Events.DataRemoved`1";
+            const string toolComponentArg = "EcsClient.XDT.Scene.Shared.Modules.Tools.ToolComponent";
+            const string takenToolArg = "EcsClient.XDT.Scene.Shared.Modules.Tools.TakenToolComponent";
+
+            if (!this.TryBindClosedDataEvent(dataUpdatedOpen, toolComponentArg, "Id", "Durability", 16, out IntPtr toolClosed, out int idRaw, out int durabilityRaw)
+                || idRaw != 0
+                || durabilityRaw != 4)
+            {
+                if (toolClosed != IntPtr.Zero && (idRaw != 0 || durabilityRaw != 4))
+                {
+                    this.LogToolDurabilityLayoutOnce(toolComponentArg + " idRaw=" + idRaw + " durabilityRaw=" + durabilityRaw);
+                }
+
+                return false;
+            }
+
+            if (!this.TryBindClosedDataEvent(dataUpdatedOpen, takenToolArg, "ToolId", null, 8, out IntPtr takenClosed, out int takenUpdatedToolIdRaw, out _)
+                || takenUpdatedToolIdRaw != 0)
+            {
+                if (takenClosed != IntPtr.Zero && takenUpdatedToolIdRaw != 0)
+                {
+                    this.LogToolDurabilityLayoutOnce(takenToolArg + " toolIdRaw=" + takenUpdatedToolIdRaw);
+                }
+
+                return false;
+            }
+
+            if (!this.TryBindClosedDataEvent(dataRemovedOpen, takenToolArg, "ToolId", null, 8, out IntPtr removedClosed, out int takenRemovedToolIdRaw, out _)
+                || takenRemovedToolIdRaw != 0)
+            {
+                if (removedClosed != IntPtr.Zero && takenRemovedToolIdRaw != 0)
+                {
+                    this.LogToolDurabilityLayoutOnce(takenToolArg + " toolIdRaw=" + takenRemovedToolIdRaw);
+                }
+
+                return false;
+            }
+
+            if (this.gameEventHooksByName.ContainsKey(ToolDurabilityHookName)
+                || this.gameEventHooksByName.ContainsKey(TakenToolHookName)
+                || this.gameEventHooksByName.ContainsKey(TakenToolRemovedHookName))
+            {
+                if (!this.toolDurabilityNameTakenLogged)
+                {
+                    this.toolDurabilityNameTakenLogged = true;
+                    ModLogger.Msg("[AutoRepair] tool durability hook name already registered");
+                }
+
+                return false;
+            }
+
+            this.toolDurabilityClass = toolClosed;
+            this.takenToolUpdatedClass = takenClosed;
+            this.takenToolRemovedClass = removedClosed;
+
+            bool toolHook = this.RegisterGameEventHook(toolClosed, ToolDurabilityHookName, 16, this.OnToolDurabilityUpdated);
+            bool takenHook = this.RegisterGameEventHook(takenClosed, TakenToolHookName, 8, this.OnTakenToolUpdated);
+            bool removedHook = this.RegisterGameEventHook(removedClosed, TakenToolRemovedHookName, 0, this.OnTakenToolRemoved);
+            this.toolDurabilityHooksRegistered = toolHook && takenHook && removedHook;
+            if (!this.toolDurabilityHooksRegistered)
+            {
+                return false;
+            }
+
+            ModLogger.Msg("[AutoRepair] tool durability hooks registered payload=16 taken=8");
+            return this.TrySeedToolDurability();
+        }
+
+        private bool TrySeedToolDurability()
+        {
+            if (!this.TryGetCurrentToolDurability(out int toolId, out int durability, out int maxDurability, out string status))
+            {
+                if (string.Equals(status, "Taken tool unavailable", StringComparison.Ordinal)
+                    || string.Equals(status, "Taken tool id unavailable", StringComparison.Ordinal))
+                {
+                    this.equippedToolId = 0;
+                    this.toolDurabilitySeeded = true;
+                    return true;
+                }
+
+                return false;
+            }
+
+            this.equippedToolId = toolId;
+            this.toolDurabilityById[toolId] = durability;
+            if (maxDurability > 0)
+            {
+                this.toolDurabilityCapById[toolId] = maxDurability;
+            }
+
+            this.toolDurabilitySeeded = true;
+            if (this.autoRepairOnToastEnabled)
+            {
+                this.durabilityCheckRequestedByEvent = true;
+            }
+
+            return true;
+        }
+
+        private bool AreToolDurabilityHooksLive()
+        {
+            return this.toolDurabilityHooksRegistered
+                && this.toolDurabilitySeeded
+                && this.toolDurabilityEpoch == auraMonoWorldEpoch
+                && this.IsGameEventHookInstalled(ToolDurabilityHookName)
+                && this.IsGameEventHookInstalled(TakenToolHookName)
+                && this.IsGameEventHookInstalled(TakenToolRemovedHookName);
+        }
+
+        private bool TryGetCachedEquippedDurability(out int toolId, out int durability, out int maxDurability)
+        {
+            toolId = this.equippedToolId;
+            durability = 0;
+            maxDurability = 0;
+            if (toolId <= 0)
+            {
+                return false;
+            }
+
+            if (!this.toolDurabilityById.TryGetValue(toolId, out durability))
+            {
+                return false;
+            }
+
+            if (this.toolDurabilityCapById.TryGetValue(toolId, out maxDurability) && maxDurability > 0)
+            {
+                return true;
+            }
+
+            if (this.toolDurabilityCapPendingId != toolId)
+            {
+                return false;
+            }
+
+            if (!this.TryGetCurrentToolDurability(out int readId, out int readDurability, out int readMax, out _))
+            {
+                return false;
+            }
+
+            if (readId != toolId || readMax <= 0)
+            {
+                return false;
+            }
+
+            this.toolDurabilityCapById[toolId] = readMax;
+            this.toolDurabilityCapPendingId = 0;
+            durability = this.toolDurabilityById.TryGetValue(toolId, out int eventDurability)
+                ? eventDurability
+                : readDurability;
+            maxDurability = readMax;
+            return true;
+        }
+
+        private void RequestEquippedDurabilityCheck()
+        {
+            if (!this.autoRepairOnToastEnabled || this.equippedToolId <= 0)
+            {
+                return;
+            }
+
+            if (!this.toolDurabilityCapById.ContainsKey(this.equippedToolId))
+            {
+                this.toolDurabilityCapPendingId = this.equippedToolId;
+            }
+
+            this.durabilityCheckRequestedByEvent = true;
+        }
+
+        private bool TryBindClosedDataEvent(
+            string openName,
+            string argName,
+            string firstField,
+            string secondField,
+            int expectBytes,
+            out IntPtr closed,
+            out int firstRaw,
+            out int secondRaw)
+        {
+            closed = IntPtr.Zero;
+            firstRaw = -1;
+            secondRaw = -1;
+
+            IntPtr open = this.FindAuraMonoClassByFullName(openName);
+            IntPtr arg = this.FindAuraMonoClassByFullName(argName);
+            if (open == IntPtr.Zero || arg == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryBindAuraMonoGenericClass(open, new[] { arg }, out closed) || closed == IntPtr.Zero)
+            {
+                closed = IntPtr.Zero;
+                return false;
+            }
+
+            int bytes = 0;
+            int valueRaw = -1;
+            if (!this.TryMeasureAuraMonoBlittableSize(arg, false, out bytes)
+                || bytes != expectBytes
+                || !this.TryGetAuraMonoFieldRawOffset(closed, "Value", out valueRaw)
+                || valueRaw != 0)
+            {
+                this.LogToolDurabilityLayoutOnce(argName + " bytes=" + bytes + " valueRaw=" + valueRaw);
+                closed = IntPtr.Zero;
+                return false;
+            }
+
+            if (!this.TryGetAuraMonoFieldRawOffset(arg, firstField, out int firstFieldRaw))
+            {
+                this.LogToolDurabilityLayoutOnce(argName + " bytes=" + bytes + " valueRaw=" + valueRaw);
+                closed = IntPtr.Zero;
+                return false;
+            }
+
+            firstRaw = valueRaw + firstFieldRaw;
+
+            if (secondField != null)
+            {
+                if (!this.TryGetAuraMonoFieldRawOffset(arg, secondField, out int secondFieldRaw))
+                {
+                    this.LogToolDurabilityLayoutOnce(argName + " bytes=" + bytes + " valueRaw=" + valueRaw);
+                    closed = IntPtr.Zero;
+                    return false;
+                }
+
+                secondRaw = valueRaw + secondFieldRaw;
+            }
+
+            return true;
+        }
+
+        private void LogToolDurabilityLayoutOnce(string detail)
+        {
+            if (this.toolDurabilityLayoutRejectedLogged)
+            {
+                return;
+            }
+
+            this.toolDurabilityLayoutRejectedLogged = true;
+            ModLogger.Msg("[AutoRepair] tool durability layout rejected " + detail);
+        }
+
+        private void ClearToolDurabilityCacheIfEpochChanged()
+        {
+            if (this.toolDurabilityEpoch == auraMonoWorldEpoch)
+            {
+                return;
+            }
+
+            this.toolDurabilityEpoch = auraMonoWorldEpoch;
+            this.toolDurabilityById.Clear();
+            this.toolDurabilityCapById.Clear();
+            this.equippedToolId = 0;
+            this.toolDurabilitySeeded = false;
+            this.toolDurabilityCapPendingId = 0;
+        }
+
+        private void OnToolDurabilityUpdated(GameEventSnapshot snapshot)
+        {
+            this.ClearToolDurabilityCacheIfEpochChanged();
+            if (!this.autoRepairOnToastEnabled || snapshot.Length < 8)
+            {
+                return;
+            }
+
+            int toolId = snapshot.ReadInt32(0);
+            int durability = snapshot.ReadInt32(4);
+            if (toolId <= 0)
+            {
+                return;
+            }
+
+            this.toolDurabilityById[toolId] = durability;
+            if (toolId == this.equippedToolId)
+            {
+                this.RequestEquippedDurabilityCheck();
+            }
+        }
+
+        private void OnTakenToolUpdated(GameEventSnapshot snapshot)
+        {
+            this.ClearToolDurabilityCacheIfEpochChanged();
+            if (!this.autoRepairOnToastEnabled || snapshot.Length < 4)
+            {
+                return;
+            }
+
+            int toolId = snapshot.ReadInt32(0);
+            this.equippedToolId = toolId > 0 ? toolId : 0;
+            if (this.equippedToolId > 0)
+            {
+                this.RequestEquippedDurabilityCheck();
+            }
+        }
+
+        private void OnTakenToolRemoved(GameEventSnapshot snapshot)
+        {
+            this.ClearToolDurabilityCacheIfEpochChanged();
+            if (!this.autoRepairOnToastEnabled)
+            {
+                return;
+            }
+
+            this.equippedToolId = 0;
         }
 
         // --- Silent eat (no animation) ---
@@ -1747,6 +2445,17 @@ namespace HeartopiaMod
             {
                 this.nextAutoRepairToastAllowedAt = now + Mathf.Max(2f, this.resourceAutoRepairPauseSeconds);
                 this.AutoEatRepairLog("[AutoRepair] Durability trigger ignored from " + source + " because repair is already queued.");
+                return false;
+            }
+
+            // The player's own restorer device is still standing server-side: a fresh throw
+            // would hit the CanPut cap and pop the game's "Unable to place more!" dialog.
+            // Pace the retry instead of starting a doomed machine.
+            if (this.TryOwnPlacedRepairKitPresent(out uint standingKitNetId, out string kitProbeStatus))
+            {
+                this.nextAutoRepairToastAllowedAt = now + 10f;
+                this.AutoEatRepairLog("[AutoRepair] Durability trigger ignored from " + source + " because " + kitProbeStatus + ".");
+                this.LogOwnKitSkip("durability trigger", standingKitNetId);
                 return false;
             }
 
@@ -3880,6 +4589,16 @@ namespace HeartopiaMod
             if (this.pendingAutoRepairRequest)
             {
                 return this.L("Queued");
+            }
+
+            // A standing own kit outranks the placement tier: it explains why nothing is being
+            // thrown right now (same role as the "ground 3m / at feet" tier suffix). Only while
+            // the last probe is fresh - the probe is not a poll, so staleness means the
+            // machinery has not asked recently, not that no kit stands.
+            if (this.ownPlacedKitProbePresent
+                && Time.unscaledTime - this.ownPlacedKitProbeAt <= OwnPlacedKitProbeFreshDisplaySeconds)
+            {
+                return this.L("Ready") + " · own kit standing";
             }
 
             // Where the last direct throw actually put the kit — the tiers degrade silently, so this

@@ -62,7 +62,7 @@ Tab index **1** is unused in the main tab bar (historical gap).
 | Homeland Farm | Crop-box farming: auto farm, water/weed/harvest/sow/fertilize in radius, seed/fertilizer selection |
 | Pictures | Decrypt / re-encrypt `ScreenCapture` cache (Photo, Draw, …). Draw files get a color preview via game `ColorLut`; index maps kept in `Draw/.index/` |
 | Extras | Ice skating: network "Perfect Ice Skating" sequences (`IceSkatingSequenceFeature`) + real-time **Auto Ice Skating** bot (`AutoIceSkatingFeature`) |
-| Extra | Open Craft panel; **Clear Missed Calls** — empty the watch's missed-call list (`ClearMissedCallsFeature`); **Analog Move** gamepad-stick → character bridge (`MovementInputFeature`); **Carpet Stamp** — scan party carpets + send a single step-on/step-off (`CarpetStampFeature`) |
+| Extra | Open Craft panel; **Clear Missed Calls** — empty the watch's missed-call list (`ClearMissedCallsFeature`); **Analog Move** gamepad-stick → character bridge (`MovementInputFeature`); **Furniture Lights** — radius slider + Turn ON/OFF for every light piece (campfires/lanterns) in the current house, whoever placed it (`FurnitureLightRadiusFeature`); hotkeys **Furniture Lights ON** / **Furniture Lights OFF**; **Carpet Stamp** — scan party carpets + send a single step-on/step-off (`CarpetStampFeature`) |
 
 **Hobby** (sidebar category immediately after New Features)
 
@@ -1414,6 +1414,19 @@ is not available at all (a boss run) or every spot refused in a row.
 
 - Opens bag UI programmatically, finds repair kit (standard or crafty), clicks Use, closes bag.
 - Trigger modes: manual hotkey, toast notification, **durability percentage threshold** (default 10%).
+- Equipped-tool wear follows `DataUpdated<ToolComponent>` for the id selected by `DataUpdated<TakenToolComponent>` (cleared by `DataRemoved<TakenToolComponent>`). One `TryGetCurrentToolDurability` seeds the world, and another runs only when a newly equipped id has no stored cap. The timed read and the empty `HandHoldUpdatedEvent` flag remain while those hooks are not installed.
+- **Never throws while the player's own kit is still standing** (since 2026-11-03). The server caps how
+  many repair-kit devices one player may have placed at once: another throw answers the CanPut check
+  with "no" and the game pops **"Unable to place more! Clear existing Repair Kits and place new
+  ones?"** (localization id 81). A thrown kit keeps counting at the server even after its aura buff
+  ends — the buff ends the moment the player steps out of the 5 m circle, the device stays. Auto
+  Repair now probes for a placed restorer entity owned by the local player
+  (`Entities.GetComponents<ToolRestorerComponent>`, owner filter) before every trigger and before
+  every throw inside the machine, and skips instead of throwing against the cap — covering kits the
+  player placed by hand too. The Repair Status row shows `Ready · own kit standing` while that skip
+  is in effect, and the log gets one throttled `[AutoRepair] … skipped: own repair kit still placed (device=… kitStaticId=…)`
+  line per half-minute.
+- **Limits of that skip.** The probe only sees `ToolRestorerComponent` instances the client has streamed in. A kit left in another region is invisible, so one "Unable to place more!" dialog can still show on the trigger that follows the 30 s latch re-arm; later triggers skip once the device is in view. The mod does not press the dialog's clear-and-replace confirm. Nothing listens for despawn — the next trigger or USE probe is what notices the device is gone. If the scan cannot run (class missing, pinning off, exception, or every returned component unreadable), one `[AutoRepair] own-kit probe unavailable (<kind>): …` line is logged on that transition and throws are allowed, which is the behavior from before the skip existed. The sea-cleaner contamination retry (`FarmWalkFeature.TryRetryContaminationRepairThrow`) uses the same probe: a standing own kit is not one of the four failed throws, and the farm throws again once the device is gone.
 - Optional teleport backward before repair (configurable distance).
 - **The primary path is the trimmed game throw** (since 2026-08-06). Configs written before that
   are migrated once on load (`repairThrowPathTrimMigrated`), otherwise the switch would be invisible
@@ -1470,7 +1483,8 @@ is not available at all (a boss run) or every spot refused in a row.
 - The **Repair Status** row appends the placement the last direct throw resolved to
   (`Ready · z 3m`, `Ready · x -1.5m + z 3m`, `Ready · at feet`, and `Ready · at player` when all
   three sliders sit at zero — only non-zero axes are listed), and every throw logs one
-  `[AutoRepair] throw target` line with the resolved position, player position and facing.
+  `[AutoRepair] throw target` line with the resolved position, player position and facing. While a
+  placed own kit is blocking throws, `Ready · own kit standing` replaces the placement tier.
 
 **Auto Eat**
 
@@ -1504,11 +1518,12 @@ Throttled background checks (`AutoEatTriggerCheckInterval`, `AutoRepairTriggerCh
 #### Auto collect snowballs
 
 - Toggle **Auto collect snowballs** on the same tab, **persisted** (`autoSnowCollectEnabled`) and **independent** of Auto Snow Sculpture — the collector runs with the sculptor off, and the sculptor runs with the collector off.
+- **Sends follow `DataUpdated<SnowMachineComponentData>`** (by-netId; the uint is the ECS writer's `entityData.entityId.value`, which matched the machine netId in the in-world proof). Owner, table row and radius are still read from the view, because the event does not carry them. One seed scan covers machines already present. The 2 s scan remains only while that hook is not installed. Entering the player's own yard (`RefreshInHomelandEvent` when `inHomeland` becomes true) scans machines whose live state or ball count differs from the stored snapshot, and repeats while an owned machine is still outside the radius. Leaving the yard stops that repeat. A collector enabled outside the yard still gathers after the walk home. See [GAME_EVENTS.md](GAME_EVENTS.md) per-component section.
 - **State-read gated, never optimistic.** Each scan reads every own snow machine's ECS view data first and only then sends; a machine whose `_data` cannot be read gets nothing. Scan of `SnowMachineComponent` views (`TryAuraMonoGetComponentObjects`, pinned `List<uint>` + `FreeAuraMonoPins` in `finally`) → filter: netId < 4 000 000 000 (local-predicted views have an empty `_data`/`_furnitureBase`) → `_furnitureBase` → `get_OwnerId` == self → `TableData.GetSnowmachine(staticId) != null` (**the table row is the filter** — staticId is never hard-coded) → within the radius → nearest first, max **8** machines per scan.
 - **State read:** the boxed `_data` (`SnowMachineComponentData { state, ballCount, capacity, startTimestamp, duration }`, `state`: 0 Closed / 1 Making / 2 Idle) via `AuraMonoPinNew` + `mono_class_get_field_from_name` / `mono_field_get_offset` and `Marshal.ReadInt32` with the 2-pointer box header subtracted. `DataCenter.TryGetComponentData<T>` (a 28-byte struct out-param slot) is never used.
-- **What it sends** (AuraMono `TryAuraInvoke` on `SnowSculptureProtocolManager` statics, machine netId as the only argument — the same calls the in-game machine UI makes): `GatherSnowBall(netId)` whenever `ballCount > 0`, in **any** state (live: a harvested machine stays `Making` with `ballCount` 0 → the next ball is another harvest, never a restart); `OnSnowMachine(netId)` only when `state == Closed && ballCount == 0`. **Nothing** is sent on `Making`/`Idle` with `ballCount == 0` (a machine that is producing is left alone), and `OffSnowMachine` is neither resolved nor sent. The mod has no proximity check of its own beyond `snowMachineScanRadius`; the live harvest at 2.28 m was **inside** the vanilla 10 m interact-icon radius, so it does not show whether the server accepts the command from farther out (the plan's open item, §9.3). No animation, no panel.
-- **No bag cap.** The collector keeps harvesting and restarting closed machines however many snowballs are already in the bag. Confirmation is the machine, not the bag: on a gather the mod remembers that machine's `ballCount`; a later scan showing a lower `ballCount` adds the difference to the collected counter. If the cooldown elapsed and the count is not lower, the entry is dropped and another gather may be sent. No bag-count delta, no result-callback detour (`OnSnowMachineResult` / `GatherSnowBallResult` only receive an `ErrorCode`, never a netId).
-- **Per-machine cooldown 1.5 s** (`SnowAutoCollectSendCooldownSeconds`) on both sends; cooldown entries for machines no longer in the filtered set are pruned, and an unconfirmed gather snapshot for such a machine is released once its cooldown has elapsed (so a machine the player walked away from cannot hold a stale snapshot). Scan interval is the user slider (1–10 s, default **2**), scan radius is the user slider (10–60 m whole metres, default **30**; the live-verified gather worked at 2.28 m, the server-side interact ceiling is not confirmed past 10 m — see the plan's open item). Both are persisted and clamped on load.
+- **What it sends** (AuraMono `TryAuraInvoke` on `SnowSculptureProtocolManager` statics, machine netId as the only argument — the same calls the in-game machine UI makes): `GatherSnowBall(netId)` whenever `ballCount > 0`, in **any** state (live: a harvested machine stays `Making` with `ballCount` 0 → the next ball is another harvest, never a restart); `OnSnowMachine(netId)` only when `state == Closed && ballCount == 0`. **Nothing** is sent on `Making`/`Idle` with `ballCount == 0` (a machine that is producing is left alone), and `OffSnowMachine` is neither resolved nor sent. A send happens once per observed transition (first sight of a machine counts); the same `ballCount` and the same Closed+empty state are not sent again on the 1.5 s cooldown. Leaving build mode (`LocalPlayerBuildModeChangeEvent` with `enterOrExit` false) forgets that memory so the next scan can send again; the game tip is not suppressed. The mod has no proximity check of its own beyond `snowMachineScanRadius`; the live harvest at 2.28 m was **inside** the vanilla 10 m interact-icon radius, so it does not show whether the server accepts the command from farther out (the plan's open item, §9.3). No animation, no panel.
+- **No bag cap.** The collector keeps harvesting and restarting closed machines however many snowballs are already in the bag. Confirmation is the machine, not the bag: on a gather the mod remembers that machine's `ballCount`; a later scan showing a lower `ballCount` adds the difference to the collected counter. An unchanged count does not drop that entry and does not send again. No bag-count delta, no result-callback detour (`OnSnowMachineResult` / `GatherSnowBallResult` only receive an `ErrorCode`, never a netId).
+- **No send cooldown.** `SnowAutoCollectSendCooldownSeconds` (1.5 s) does not gate a send. It only releases an unconfirmed gather snapshot for a machine that has left the filtered set, and those cooldown entries are pruned with it (so a machine the player walked away from cannot hold a stale snapshot). The per-netId seen map is pruned the same way. Scan interval is the user slider (1–10 s, default **2**), scan radius is the user slider (10–60 m whole metres, default **30**; the live-verified gather worked at 2.28 m, the server-side interact ceiling is not confirmed past 10 m — see the plan's open item). Both are persisted and clamped on load.
 - **Live status line** `Snow machines: kept | bag current | collected this run` plus the internal status (`no machine in 30m (views=… local=… other=… table=… far=… unreadable=… first=…)`, `scan kept=… confirmed=… gather=… start=… wait=… fail=… pending=… (views=… firstFail=…)`, `no player position`, …). A `get_OwnerId` that fails to read reports `owner getter …` (counted as unreadable), while an unowned machine reports `owner 0 (unowned)` and a foreign owner reports `not owner` — a broken getter cannot look like an empty owner filter. The collected counter resets when the toggle is re-enabled; a world-epoch change clears the per-machine maps. On the tab the collector block (toggle, status, scan interval, scan radius) sits above **Auto Snow Sculpture**; the sculpture controls (bag count, snowball limit, delays, QTE, status box) start directly under that toggle.
 - **Interaction with Auto Snow Sculpture:** its "no snowballs in bag" **self-disable becomes a backoff** while the collector is on — the sculptor's next attempt moves to `max(SnowApiRetryBackoffSeconds, scan interval + 0.5 s)` instead of the sculptor switching itself off; the **Snowball limit** self-disable is unchanged. The sculptor sculpts whenever the bag has a snowball, and the collector keeps refilling it.
 - **Out of scope:** warehouse → bag transfer (the **Move snowballs to backpack** button already does it; live behavior is that a harvest lands in the **bag**, not the warehouse). Auto-collect also does not persist or imply `autoSnowEnabled`.
@@ -1690,12 +1705,14 @@ Three quality features around Mass Cook (plan `plans/2026-10-31-mass-cook-dish-s
 - **The record drives all three surfaces, record-first** (requester decision; the exact reading — `max(Collection, ledger)` — re-confirmed at the 2026-11-01 review): the tile label, the "Only Below 5 Stars" filter, and the visibility of the 5★-mode toggle all read the Collection record wherever it speaks — a recipe the Collection calls 5★ stays 5★ no matter what the inventory holds. The ledger answers only where the Collection is silent (the recipes it never covers): there the mod's own evidence counts, and that includes a 5★ stack currently held in the inventory — such a dish reads as achieved, its row is filtered, and its 5★-mode toggle stays hidden. Consequence accepted out loud: a dish the account mastered once at 5★ shows 5★ and hides the 5★-mode toggle even when the current stock is entirely 2–4★. Dishes with no record anywhere show no label and stay in the filter.
 - **"Only Below 5 Stars"** (recipe-list filter, alongside "Only What I Can Cook"): hides recipes whose record already says 5★. Coverage caveat: 232 of 449 cooking recipes have a Collection entry on the test account; the rest become known to the mod only after this install has witnessed their collects.
 
+An empty recipe list while this filter is on says "All listed recipes are already 5-star" only when the search and the cookable filter had already produced rows; otherwise the list keeps "No recipes match your search." The 5-star line means the combined record (`max(Collection, ledger)`), not the Collection page alone.
+
 ##### Cook Until 5-Star Dish (`netCookCookUntilFiveStarDish`, saved)
 
 Keep cooking the selected recipe until a collected dish comes out 5★, then stop taking new dishes and only attend what is already on the stoves.
 
 - Visible only while the record cannot vouch for a 5★ on the selected recipe; the saved flag never engages for a known-5★ recipe.
-- **BATCH COUNT re-labels the DISH LIMIT field while the mode is on** (same input, mode-aware caption and value; DISH LIMIT is not in effect in this mode at all). Batch count = **maximum number of stoves cooking this run's dishes at once** (0 = every captured stove); default 4. In-flight prepares count toward the cap — the first live pass proved an occupancy-only count releases a second prepare wave (5 → 10 stoves).
+- **BATCH COUNT re-labels the DISH LIMIT field while the mode is on** (same input, mode-aware caption and value; DISH LIMIT is not in effect in this mode at all). Batch count = **maximum number of stoves cooking this run's dishes at once** (0 = every captured stove); default 4. The value is written to config when the normalized number changes and is restored on the next launch. DISH LIMIT stays session-only and still resets to 1. In-flight prepares count toward the cap — the first live pass proved an occupancy-only count releases a second prepare wave (5 → 10 stoves).
 - **Stove memory:** the batch claims its stove SET at start; a stove that finishes re-cooks the run's next dish on itself instead of the loop picking another idle stove. A stove outside the set is admitted only as a replacement for a member stove lost mid-run. A seat is claimed by the successful prepare send, never by an attempt.
 - **The 5★ trigger reads the backpack, not the stove.** The stove-side `FoodQuality`/`q=` value exists but no client code consumes it and it is not a quality signal. The authoritative path is the count diff on the recipe's (star → ΣCount) census right after our own collect (`CookResultEvent` TakeFood with the phase-4 gate proves the dish is OURS): the server merges collected dishes into existing same-identity stacks, so attribution is per (recipe, star), not per netId, and the settle window from Succeed to bag-visible is ~1–2 s. When a diff credits star 5 for the running recipe, `BeginNetCookDrain` ends the issuing phase.
 - A 5★ run can also end on **ingredient exhaustion** before ever rolling a 5★ — the ordinary run-out drain closes it and the status line says so. That is a legitimate outcome, not a bug: the roll is server-side random.
@@ -2080,8 +2097,8 @@ Crop-box (planter) farming inside your homeland. All operations are **region-bas
 
 Tab layout (top → bottom):
 
-1. **Auto Farming** — Capture planters + Start / Stop.
-2. **Farm Radius** — single slider (1–80 m) driving every operation below; **persisted to config**. Below it the **Whole homeland (own plot only)** checkbox (**persisted**, off by default) replaces the sphere with your own plot rectangle — see [Whole homeland](#whole-homeland-own-plot-only).
+1. **Auto Farming** — Capture planters + Reset capture + Start / Stop. **Harvest delay** (1–5 s, default 3) is a row inside this block, shown only while auto farm is running.
+2. **Farm Radius** — single slider (1–80 m) driving every operation below; **persisted to config**.
 3. **Privacy Pause** — single slider (0–100 m, **0 = off**, default off); **persisted to config**.
 4. **Crops** — seed source (Backpack / Warehouse / Both), Refresh seeds, seed selector.
 5. **Fertilizer** — fertilizer source, Refresh fertilizers, fertilizer selector.
@@ -2104,11 +2121,11 @@ Item names in the seed/fertilizer selectors resolve through the same game-table 
 
 ### Auto Farming
 
-**Capture planters** snapshots the crop boxes in the farm region (like Mass Cook "Capture Stoves") and pins the working-zone center — with the slider that is a sphere of Farm Radius metres around **where you stand**, so planters farther away than the slider are **not** part of the run; with Whole homeland it is your entire plot. **Start auto farm** then runs an autonomous loop (disabled until seeds are selected):
+**Capture planters** snapshots the crop boxes in radius (like Mass Cook "Capture Stoves") and pins the working-zone center. **Reset capture** undoes that snapshot without any world scan: it stops a running auto farm / operation first, then clears the captured planters, sow points, crop and field caches and the field-owner gate — a stale "Captured N planter(s)" from another field or world can therefore be dropped explicitly. The button appears only while a capture exists (hidden when there is nothing to reset) and never touches settings: radius, seed/fertilizer selection and keybinds survive a reset. A capture left idle across a **world change** (entering or leaving any level) is cleared automatically too — netIds are per world instance, and re-entering the same farm regenerates every planter's netId, so the old snapshot is provably dead ids; the status card then reads "Capture cleared — the world changed". A *running* auto farm is exempt and keeps its snapshot until it ends on its own (remote weed/harvest from another world is a deliberate feature). **Start auto farm** then runs an autonomous loop (disabled until seeds are selected):
 
 1. **Discovery first** — one radius scan builds a crop-netId cache (so it never re-sows already-occupied planters on restart).
-2. **Poll** the cached crops directly (no re-scan): remove weeds, harvest ripe crops, drop them from the cache.
-3. **Sow** a new generation **only when the zone holds no crops** (start, or after the whole generation is harvested) and a post-sow cooldown has elapsed — prevents re-sowing boxes the server hasn't registered yet (`MaxPlantCountLimit`).
+2. **Poll** — on each wake the cached crops are read directly (no re-scan): remove weeds and read **`stage`**. Crossing ripe does not trigger harvest or sow on that same wake.
+3. **Ripe burst** — the first time any tracked crop reads **`stage >= 4`**, harvest and sow **do not** run yet; the loop sleeps the **Harvest delay** (1–5 s, default 3; persisted as `homelandFarmAutoSyncDelaySeconds`, slider **Harvest delay** inside Auto Farming, shown only while auto farm is running). When the delay elapses, every tracked crop that is **then** `stage >= 4` is harvested in one burst, harvested crops drop from the cache, and the usual sow pass fills whichever planter boxes were freed (subject to the post-sow cooldown that prevents re-sowing boxes the server hasn't registered yet — `MaxPlantCountLimit`). A crop still growing when the burst runs stays tracked for its own later burst; plots sown hours apart are not held for each other.
 4. **Time-scheduled weeding** — sleep is driven by the crops' exact maturity (`mature = sowTime + ripeGrowTime − growTime`, read from `CropItemData`; "now" via the game clock `GameTimeUtility.GetUnixTime()`). Coarse weeding while far from ripe; **weed every second in the final minute** before harvest.
 
 **Stop:** manual (Stop button / Stop auto farm), or automatic once the selected seed runs out **and** the last harvest is collected.
@@ -2338,6 +2355,54 @@ Research tool for the party **stampede carpets** — Slippery Rug `260242` (`p_m
 - **Logging** — always on, no toggle: resolution pointers, dictionary walk per-actor lines (netId/staticId/ugcType/pos/dist), full command payloads, invoke results/exceptions.
 
 Skill ids are per-staticId constants recovered from the decrypted design tables (`oversea.bytes`) (`Mechanism.ugcSkills` → `Ugcskill` → `UgcServerAction`/`BuffConfig`); the game-side pipeline this replays is `UGCTriggerCase → LocalPlayerComponent.TriggerEnter → PhysInteractionSystem → PhysEventSkill → Action_Command_UgcOperate`. Research: `/ugc-mechanism-carpet-interaction.md`.
+
+---
+
+## New Features — Extra (Furniture Lights)
+
+**Tab:** New Features → Extra. **Source:** `FurnitureLightRadiusFeature.cs`. Research:
+[docs/plans/2026-11-04-furniture-light-radius.md](./plans/2026-11-04-furniture-light-radius.md).
+
+A radius slider (3–60 m, default 15) and **Turn ON / Turn OFF** buttons: one press sets every
+switchable light piece **you own** around you (campfires, braziers, lanterns) to that state.
+Server-authoritative. Other clients see both the light and the campfire flame, and the
+light state persists.
+
+- **The two bits are different visuals**: `BatchEntity` applies `UgcSwitch` bit 0 (Light) to the
+  model's lit tint + room lighting and bit 1 (Operate) to the operate material. The looping
+  campfire flame is a separate clip: `BuildActionClipComponent.InitInteractActionClip` plays
+  `config_interaction_{id}_on` via `PlayAnim` at spawn, and only the server's
+  `ExecuteActionNetworkEvent` replaces it with `config_interaction_{id}_off` / `_on`.
+  `SwitchState` alone leaves the loop running; a `quickCast` alone leaves the light.
+  Confirmed on two clients, same press: `LocalPlayerComponent.Cast(PlayerActionSwitchInteractArg)`
+  with `quickCast` set and `switchFlag` 1 (off clip) or 0 (on clip). The body pose is not
+  played, but the clip still hides the left hand and switches the animator; after the casts
+  the feature calls `UpdateMotionFocus(false)` then `true` so walk and jump come back.
+  Then the absolute byte `0b11` / `0b00`. The timeline is not played locally. The byte is
+  idempotent.
+- **Send**: `HomelandProtocolManager.SwitchState(netId, get_HomeNetId, in UgcSwitch)` — the exact
+  packet the campfire button (`SwitchInteractionCommand`) sends. There are **two 3-arg
+  overloads** (single-bit toggle vs absolute); the feature enumerates the class's methods and
+  picks the absolute overload: third param type name is `UgcSwitch` or `UgcSwitch&` (`in UgcSwitch`),
+  never `UgcSwitch.Idx` (that overload XORs one bit). CorElementType is VALUETYPE for both;
+  `mono_type_get_type` is required (offset 0 of MonoType is not the enum on this runtime).
+- **Which pieces**: `TableData.DecodeTypeEntityData(staticId)` → `f_asLight` set **and** entity
+  type `lighting` (`id 55`, 350001–359999 campfires/lanterns) or `outdoorlamp` (`id 221`,
+  37800–37999). `f_ugcSwitch` is not used: on decoration (`id 50`, 300001–309999) it is set for
+  every row, including Pumpkin Grimkin Surprise Box `302832` (skill `500100116`, trigger
+  `PlayerEnter`, timeline `ugcview_302832_touch`). `SwitchState` on that piece plays the scare.
+  The `Lighting` table is only 350001–350494. Plain `f_asLight=1` still spans bed/chair/catnest/…
+  and those stay excluded. `homeNetId` must be non-zero (the house instance; a visited home is
+  included, a public-area prop is not). ≤ 64 sends per press, closest-first
+  (a > 64 overflow names how many farther pieces were skipped). Verdicts are cached per staticId.
+  Hotkeys **Furniture Lights ON** / **Furniture Lights OFF** (Settings → Keybinds, unbound by default)
+  run the same action as the buttons.
+- No per-frame scan, no detours, no state store — the scan runs only when a button or hotkey is pressed,
+  with the standard pinned-enumeration discipline. Errors cool through the feature breaker and
+  land in the log + status line, never toast-only.
+- **Verification status**: confirmed in game on two clients. `switchFlag` 1 extinguishes the
+  flame and 0 ignites it; `SwitchState` `0x00` / `0x03` is only the light. Same press, cast
+  then byte. The body pose is not played.
 
 ---
 

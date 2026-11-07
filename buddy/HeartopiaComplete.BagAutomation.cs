@@ -50,7 +50,13 @@ namespace HeartopiaMod
                 this.lastStartWasAutoRepair = true;
                 this.AutoEatRepairLog("[AutoRepair] Running queued durability repair request.");
                 this.StartRepair(true);
-                this.resourceRepairPauseUntil = Time.time + this.resourceAutoRepairPauseSeconds;
+                // Only a repair that ACTUALLY started gets to pause the farms: the own-kit
+                // guard and the auto-eat re-entry guard return without starting, and a skipped
+                // attempt must not spend the farm/repair cooldown window for nothing.
+                if (this.isRepairing)
+                {
+                    this.resourceRepairPauseUntil = Time.time + this.resourceAutoRepairPauseSeconds;
+                }
                 return;
             }
 

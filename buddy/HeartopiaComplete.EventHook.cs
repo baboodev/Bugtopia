@@ -110,6 +110,7 @@ namespace HeartopiaMod
         internal sealed class GameEventHookEntry
         {
             public string EventFullName;
+            public IntPtr ResolvedEventClass; // non-zero => skip ResolveGameEventClass; image-lifetime, not an object
             public int PayloadBytes;
             public int StringFieldOffset = -1; // -1 = capture no string field
             public bool ByNetId; // true => hook the 2-arg DispatchEvent<T>(uint netId, in T) overload
@@ -203,6 +204,58 @@ namespace HeartopiaMod
         internal bool RegisterGameEventHookByNetId(string eventFullName, int payloadBytes, Action<GameEventSnapshot> handler)
         {
             return this.RegisterGameEventHookInternal(eventFullName, payloadBytes, true, handler, false);
+        }
+
+        // Closed generic, global DispatchEvent<T>(in T). logName is the slot key, not a type name.
+        internal bool RegisterGameEventHook(
+            IntPtr eventClass, string logName, int payloadBytes, Action<GameEventSnapshot> handler)
+        {
+            return this.RegisterResolvedGameEventHook(eventClass, logName, payloadBytes, false, handler);
+        }
+
+        // Closed generic, per-netId DispatchEvent<T>(uint, in T).
+        // A second call with the same key does not add another handler.
+        internal bool RegisterGameEventHookByNetId(
+            IntPtr eventClass, string logName, int payloadBytes, Action<GameEventSnapshot> handler)
+        {
+            return this.RegisterResolvedGameEventHook(eventClass, logName, payloadBytes, true, handler);
+        }
+
+        private bool RegisterResolvedGameEventHook(
+            IntPtr eventClass, string logName, int payloadBytes, bool byNetId, Action<GameEventSnapshot> handler)
+        {
+            if (eventClass == IntPtr.Zero || string.IsNullOrEmpty(logName) || handler == null)
+            {
+                return false;
+            }
+
+            if (this.gameEventHooksByName.TryGetValue(logName, out GameEventHookEntry existing))
+            {
+                return existing.ByNetId == byNetId && existing.ResolvedEventClass == eventClass;
+            }
+
+            int clamped = Math.Max(0, Math.Min(payloadBytes, EventPayloadCap));
+            if (this.gameEventHookSlotCount >= MaxEventHookSlots)
+            {
+                ModLogger.Warning("[EventHook] slot pool exhausted (" + this.gameEventHookSlotCount + "/"
+                    + MaxEventHookSlots + "); cannot hook " + logName);
+                return false;
+            }
+
+            GameEventHookEntry entry = new GameEventHookEntry
+            {
+                EventFullName = logName,
+                ResolvedEventClass = eventClass,
+                PayloadBytes = clamped,
+                ByNetId = byNetId,
+                Slot = this.gameEventHookSlotCount
+            };
+            entry.Handlers.Add(handler);
+            this.gameEventHookSlots[entry.Slot] = entry;
+            this.gameEventHooksByName[logName] = entry;
+            this.gameEventHookSlotCount++;
+            this.SyncGameEventHookSlotHandlerCount(entry);
+            return true;
         }
 
         internal void SetGameEventHookSuppressForward(string eventFullName, bool suppress)
@@ -507,17 +560,21 @@ namespace HeartopiaMod
             // class isn't resolvable yet, leave InstallAttempted=false so we retry on a later frame.
             // The expensive image walks only run on the 5 s beat, not on every pass.
             bool dueForRetry = UnityEngine.Time.unscaledTime >= entry.NextResolveLogAt;
-            IntPtr eventClass = this.ResolveGameEventClass(entry.EventFullName, dueForRetry);
+            IntPtr eventClass = entry.ResolvedEventClass;
             if (eventClass == IntPtr.Zero)
             {
-                if (dueForRetry)
+                eventClass = this.ResolveGameEventClass(entry.EventFullName, dueForRetry);
+                if (eventClass == IntPtr.Zero)
                 {
-                    entry.NextResolveLogAt = UnityEngine.Time.unscaledTime + 5f;
-                    ModLogger.Msg("[EventHook] awaiting event type: " + entry.EventFullName
-                        + " (not in any loaded image yet — its assembly may load later)");
-                }
+                    if (dueForRetry)
+                    {
+                        entry.NextResolveLogAt = UnityEngine.Time.unscaledTime + 5f;
+                        ModLogger.Msg("[EventHook] awaiting event type: " + entry.EventFullName
+                            + " (not in any loaded image yet — its assembly may load later)");
+                    }
 
-                return;
+                    return;
+                }
             }
 
             entry.InstallAttempted = true;
@@ -1334,6 +1391,223 @@ namespace HeartopiaMod
             }
             sb.Append(']');
             return sb.ToString();
+        }
+
+        // Probe for plugins/ClosedGenericProbe. Does not run unless that plugin asks.
+        // One bind of DataUpdated<SnowMachineComponentData>, then the existing by-netId detour.
+        // A null closed class is not retried: the export has crashed this mono before.
+        public string ClosedGenericProbeStatus { get; private set; } = "idle";
+
+        public string ClosedGenericProbeLast { get; private set; } = "";
+
+        private bool closedGenericProbeRegistered;
+        private bool closedGenericProbeGaveUp;
+        private int closedGenericProbeBallOffset;
+        private const string ClosedGenericProbeHookName = "DataUpdated<SnowMachineComponentData>";
+
+        public string ProbeClosedSnowDataUpdated()
+        {
+            if (this.closedGenericProbeRegistered)
+            {
+                return this.ClosedGenericProbeStatus;
+            }
+
+            if (this.IsGameEventHookInstalled(ClosedGenericProbeHookName)
+                || (this.gameEventHooksByName.TryGetValue(ClosedGenericProbeHookName, out GameEventHookEntry featureHook)
+                    && featureHook.ByNetId
+                    && featureHook.ResolvedEventClass != IntPtr.Zero))
+            {
+                this.ClosedGenericProbeStatus = "feature hook live";
+                return this.ClosedGenericProbeStatus;
+            }
+
+            if (this.closedGenericProbeGaveUp)
+            {
+                return this.ClosedGenericProbeStatus;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                this.ClosedGenericProbeStatus = "wait aura";
+                return this.ClosedGenericProbeStatus;
+            }
+
+            IntPtr open = this.FindAuraMonoClassByFullName(
+                "ScriptsRefactory.DataAndProtocol.Events.DataUpdated`1");
+            IntPtr arg = this.FindAuraMonoClassByFullName(
+                "XDTDataAndProtocol.ComponentsData.SnowMachineComponentData");
+            if (open == IntPtr.Zero || arg == IntPtr.Zero)
+            {
+                this.ClosedGenericProbeStatus = "wait classes open=0x" + open.ToInt64().ToString("X")
+                    + " arg=0x" + arg.ToInt64().ToString("X");
+                return this.ClosedGenericProbeStatus;
+            }
+
+            if (!this.TryBindAuraMonoGenericClass(open, new[] { arg }, out IntPtr closed) || closed == IntPtr.Zero)
+            {
+                this.closedGenericProbeGaveUp = true;
+                this.ClosedGenericProbeStatus = "bind failed open=0x" + open.ToInt64().ToString("X")
+                    + " arg=0x" + arg.ToInt64().ToString("X")
+                    + " closed=0x" + closed.ToInt64().ToString("X");
+                ModLogger.Msg("[EventHook] " + this.ClosedGenericProbeStatus);
+                return this.ClosedGenericProbeStatus;
+            }
+
+            // Live layout: state@0, ballCount@4, capacity@8, then 4 bytes of padding so the
+            // long is 8-aligned, startTimestamp@16, duration@24. Measured size is 32.
+            // The dump's 28 is the sum of the field widths without that hole.
+            int argBytes = 0;
+            int valueRaw = -1;
+            int ballRaw = -1;
+            bool measured = this.TryMeasureAuraMonoBlittableSize(arg, true, out argBytes)
+                && this.TryGetAuraMonoFieldRawOffset(closed, "Value", out valueRaw)
+                && this.TryGetAuraMonoFieldRawOffset(arg, "ballCount", out ballRaw);
+            if (!measured || valueRaw != 0 || ballRaw != 4 || argBytes < ballRaw + 4)
+            {
+                this.closedGenericProbeGaveUp = true;
+                this.ClosedGenericProbeStatus = "layout argBytes=" + argBytes
+                    + " valueRaw=" + valueRaw + " ballRaw=" + ballRaw;
+                ModLogger.Msg("[EventHook] DataUpdated<SnowMachineComponentData> " + this.ClosedGenericProbeStatus);
+                return this.ClosedGenericProbeStatus;
+            }
+
+            this.closedGenericProbeBallOffset = valueRaw + ballRaw;
+            int payload = valueRaw + argBytes;
+            if (!this.RegisterGameEventHookByNetId(
+                closed, ClosedGenericProbeHookName, payload, this.OnClosedGenericProbe))
+            {
+                this.closedGenericProbeGaveUp = true;
+                this.ClosedGenericProbeStatus = "register failed payload=" + payload;
+                ModLogger.Msg("[EventHook] DataUpdated<SnowMachineComponentData> " + this.ClosedGenericProbeStatus);
+                return this.ClosedGenericProbeStatus;
+            }
+
+            this.closedGenericProbeRegistered = true;
+            this.ClosedGenericProbeStatus = "registered payload=" + payload + " ballAt=" + this.closedGenericProbeBallOffset;
+            ModLogger.Msg("[EventHook] DataUpdated<SnowMachineComponentData> " + this.ClosedGenericProbeStatus);
+            return this.ClosedGenericProbeStatus;
+        }
+
+        private void OnClosedGenericProbe(GameEventSnapshot e)
+        {
+            int balls = e.ReadInt32(this.closedGenericProbeBallOffset);
+            this.ClosedGenericProbeLast = "netId=" + e.NetId + " ballCount=" + balls;
+            ModLogger.Msg("[EventHook] DataUpdated<SnowMachineComponentData> " + this.ClosedGenericProbeLast);
+        }
+
+        // Second bind: ComponentEvent<DataUpdated<SnowMachineComponentData>>, global DispatchEvent<T>(in T).
+        // Open ComponentEvent`1 fields (header 16): entityData@16, Value@48. EntityData.netId.value is raw 8.
+        // DataUpdated is 32 bytes, so Value starts at raw 32 and ballCount is at 36. Payload is 64, the cap.
+        public string ClosedGenericProbeComponentStatus { get; private set; } = "idle";
+
+        public string ClosedGenericProbeComponentLast { get; private set; } = "";
+
+        private bool closedComponentProbeRegistered;
+        private bool closedComponentProbeGaveUp;
+        private int closedComponentProbeNetOffset;
+        private int closedComponentProbeBallOffset;
+        private const string ClosedComponentProbeHookName = "ComponentEvent<DataUpdated<SnowMachineComponentData>>";
+
+        public string ProbeClosedComponentEvent()
+        {
+            if (this.closedComponentProbeRegistered || this.closedComponentProbeGaveUp)
+            {
+                return this.ClosedGenericProbeComponentStatus;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                this.ClosedGenericProbeComponentStatus = "wait aura";
+                return this.ClosedGenericProbeComponentStatus;
+            }
+
+            IntPtr dataOpen = this.FindAuraMonoClassByFullName(
+                "ScriptsRefactory.DataAndProtocol.Events.DataUpdated`1");
+            IntPtr snow = this.FindAuraMonoClassByFullName(
+                "XDTDataAndProtocol.ComponentsData.SnowMachineComponentData");
+            IntPtr eventOpen = this.FindAuraMonoClassByFullName(
+                "ScriptsRefactory.DataAndProtocol.Events.ComponentEvent`1");
+            IntPtr entityData = this.FindAuraMonoClassByFullName(
+                "XDTDataAndProtocol.ComponentsData.EntityData");
+            IntPtr netIdClass = this.FindAuraMonoClassByFullName(
+                "EcsClient.XDT.Scene.Shared.Data.SharedData.NetId");
+            if (dataOpen == IntPtr.Zero || snow == IntPtr.Zero || eventOpen == IntPtr.Zero
+                || entityData == IntPtr.Zero || netIdClass == IntPtr.Zero)
+            {
+                this.ClosedGenericProbeComponentStatus = "wait classes data=0x" + dataOpen.ToInt64().ToString("X")
+                    + " snow=0x" + snow.ToInt64().ToString("X")
+                    + " event=0x" + eventOpen.ToInt64().ToString("X")
+                    + " entity=0x" + entityData.ToInt64().ToString("X")
+                    + " net=0x" + netIdClass.ToInt64().ToString("X");
+                return this.ClosedGenericProbeComponentStatus;
+            }
+
+            if (!this.TryBindAuraMonoGenericClass(dataOpen, new[] { snow }, out IntPtr closedData) || closedData == IntPtr.Zero)
+            {
+                this.closedComponentProbeGaveUp = true;
+                this.ClosedGenericProbeComponentStatus = "bind DataUpdated failed closed=0x" + closedData.ToInt64().ToString("X");
+                ModLogger.Msg("[EventHook] " + this.ClosedGenericProbeComponentStatus);
+                return this.ClosedGenericProbeComponentStatus;
+            }
+
+            if (!this.TryBindAuraMonoGenericClass(eventOpen, new[] { closedData }, out IntPtr closedEvent) || closedEvent == IntPtr.Zero)
+            {
+                this.closedComponentProbeGaveUp = true;
+                this.ClosedGenericProbeComponentStatus = "bind ComponentEvent failed data=0x" + closedData.ToInt64().ToString("X")
+                    + " closed=0x" + closedEvent.ToInt64().ToString("X");
+                ModLogger.Msg("[EventHook] " + this.ClosedGenericProbeComponentStatus);
+                return this.ClosedGenericProbeComponentStatus;
+            }
+
+            int snowBytes = 0;
+            int dataValueRaw = -1;
+            int ballRaw = -1;
+            int eventValueRaw = -1;
+            int entityRaw = -1;
+            int netFieldRaw = -1;
+            int netValueRaw = -1;
+            bool measured = this.TryMeasureAuraMonoBlittableSize(snow, true, out snowBytes)
+                && this.TryGetAuraMonoFieldRawOffset(closedData, "Value", out dataValueRaw)
+                && this.TryGetAuraMonoFieldRawOffset(snow, "ballCount", out ballRaw)
+                && this.TryGetAuraMonoFieldRawOffset(closedEvent, "Value", out eventValueRaw)
+                && this.TryGetAuraMonoFieldRawOffset(closedEvent, "entityData", out entityRaw)
+                && this.TryGetAuraMonoFieldRawOffset(entityData, "netId", out netFieldRaw)
+                && this.TryGetAuraMonoFieldRawOffset(netIdClass, "value", out netValueRaw);
+            int ballAt = eventValueRaw + dataValueRaw + ballRaw;
+            int netAt = entityRaw + netFieldRaw + netValueRaw;
+            int payload = eventValueRaw + dataValueRaw + snowBytes;
+            if (!measured || ballAt < 0 || netAt < 0 || payload < ballAt + 4 || ballAt + 4 > EventPayloadCap)
+            {
+                this.closedComponentProbeGaveUp = true;
+                this.ClosedGenericProbeComponentStatus = "layout payload=" + payload
+                    + " netAt=" + netAt + " ballAt=" + ballAt
+                    + " eventValue=" + eventValueRaw + " snowBytes=" + snowBytes;
+                ModLogger.Msg("[EventHook] ComponentEvent<DataUpdated<SnowMachineComponentData>> " + this.ClosedGenericProbeComponentStatus);
+                return this.ClosedGenericProbeComponentStatus;
+            }
+
+            this.closedComponentProbeNetOffset = netAt;
+            this.closedComponentProbeBallOffset = ballAt;
+            if (!this.RegisterGameEventHook(closedEvent, ClosedComponentProbeHookName, payload, this.OnClosedComponentProbe))
+            {
+                this.closedComponentProbeGaveUp = true;
+                this.ClosedGenericProbeComponentStatus = "register failed payload=" + payload;
+                ModLogger.Msg("[EventHook] ComponentEvent<DataUpdated<SnowMachineComponentData>> " + this.ClosedGenericProbeComponentStatus);
+                return this.ClosedGenericProbeComponentStatus;
+            }
+
+            this.closedComponentProbeRegistered = true;
+            this.ClosedGenericProbeComponentStatus = "registered payload=" + payload + " netAt=" + netAt + " ballAt=" + ballAt;
+            ModLogger.Msg("[EventHook] ComponentEvent<DataUpdated<SnowMachineComponentData>> " + this.ClosedGenericProbeComponentStatus);
+            return this.ClosedGenericProbeComponentStatus;
+        }
+
+        private void OnClosedComponentProbe(GameEventSnapshot e)
+        {
+            uint netId = e.ReadUInt32(this.closedComponentProbeNetOffset);
+            int balls = e.ReadInt32(this.closedComponentProbeBallOffset);
+            this.ClosedGenericProbeComponentLast = "netId=" + netId + " ballCount=" + balls;
+            ModLogger.Msg("[EventHook] ComponentEvent<DataUpdated<SnowMachineComponentData>> " + this.ClosedGenericProbeComponentLast);
         }
     }
 }

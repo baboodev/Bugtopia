@@ -1552,19 +1552,24 @@ namespace HeartopiaMod
             this.SyncUguiFeaturesMassCookSlotRow(handle);
             SetUguiGoActive(handle.RecipeEmptyLabel, count <= 0); // :267-270
 
-            // An emptied grid has to explain itself (plan §6.1, the accepted Q7 consequence): the
-            // star filter ON over a maxed account legitimately hides every covered recipe, and a
-            // dropdown that goes blank with no reason reads as broken. Caption choice is a content
-            // diff like any label — no new rect, and both captions come from state, not a measure.
-            // Recipe-mode only: in slot-candidate mode the shared label/counter describe item ids,
-            // and a "5-star Collection" line or a "RECIPE shown/total" counter would describe the
-            // wrong grid entirely.
+            // An emptied grid has to explain itself (plan §6.1): caption choice is a content diff like
+            // any label — no new rect, and both captions come from state, not a measure. The 5-star
+            // line appears only when netCookGridTotalCount > 0 (search and cookable filter already
+            // produced rows and the star filter alone emptied the list); it reflects max(Collection,
+            // ledger), not the Collection page alone. Recipe-mode only: in slot-candidate mode the
+            // shared label/counter describe item ids, and a 5-star line or "RECIPE shown/total"
+            // counter would describe the wrong grid entirely.
             if (this.netCookSlotPickerIndex < 0)
             {
                 if (count <= 0)
                 {
-                    string emptyCaption = this.netCookUnderFiveStarsOnly
-                        ? this.L("All listed recipes are already 5-star in your Collection")
+                    // Star caption only when the star filter itself emptied a non-empty list.
+                    // Search (GetVisibleNetCookRecipeEntries) and the cookable filter both run
+                    // before netCookGridTotalCount is stored, so total == 0 means the grid was
+                    // already empty and the 5-star line would name the wrong filter.
+                    bool starFilterEmptiedGrid = this.netCookUnderFiveStarsOnly && this.netCookGridTotalCount > 0;
+                    string emptyCaption = starFilterEmptiedGrid
+                        ? this.L("All listed recipes are already 5-star")
                         : this.L("No recipes match your search.");
                     if (!string.Equals(handle.RecipeEmptyShown, emptyCaption, StringComparison.Ordinal))
                     {
@@ -2548,8 +2553,16 @@ namespace HeartopiaMod
             // back into the field like the qty normalization snap always has.
             if (this.IsNetCookFiveStarModeActive())
             {
+                string previous = this.netCookBatchCountInput;
                 this.netCookBatchCountInput = text;
                 this.SyncNetCookBatchCountFromInput();
+                // DISH LIMIT is reset to 1 on every load. BATCH COUNT is the persisted value
+                // (plan §4.1 / §6.2). SaveAllSettings is the silent flush; SaveKeybinds would
+                // log a line per keystroke.
+                if (!string.Equals(previous, this.netCookBatchCountInput, StringComparison.Ordinal))
+                {
+                    try { this.SaveAllSettings(); } catch { }
+                }
                 return;
             }
 

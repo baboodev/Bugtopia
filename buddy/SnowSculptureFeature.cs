@@ -139,7 +139,18 @@ namespace HeartopiaMod
         private bool snowAutoCollectWasEnabled;        // §4 rising/falling edge tracker
         private float snowAutoCollectNextScanAt;
         private int snowAutoCollectWorldEpoch;
+        private bool snowAutoCollectSeeded;
+        private bool snowAutoCollectUnseenScan;
+        private bool snowAutoCollectUnseenHadFar;
         private FeatureBreakerState snowAutoCollectBreaker;
+
+        private const string SnowDataUpdatedHookName = "DataUpdated<SnowMachineComponentData>";
+        private IntPtr snowDataUpdatedClass;
+        private bool snowDataUpdatedHookRegistered;
+        private bool snowDataUpdatedNameTakenLogged;
+        private int snowDataUpdatedStateRaw;
+        private int snowDataUpdatedBallRaw;
+        private int snowDataUpdatedPayload;
 
         // Scalar-only per-netId state (never an IntPtr).
         private readonly Dictionary<uint, float> snowAutoCollectLastGatherAt = new Dictionary<uint, float>();
@@ -147,6 +158,15 @@ namespace HeartopiaMod
         // Machine netId -> the machine's OWN ballCount read just before that machine's gather was sent
         // (the machine is the ack, not the bag). A later scan showing a lower ballCount confirms the harvest.
         private readonly Dictionary<uint, int> snowAutoCollectGatherFromCount = new Dictionary<uint, int>();
+
+        private struct SnowAutoCollectSeen
+        {
+            public int State;
+            public int BallCount;
+        }
+
+        private readonly Dictionary<uint, SnowAutoCollectSeen> snowAutoCollectSeen =
+            new Dictionary<uint, SnowAutoCollectSeen>();
 
         private int snowballsCollectedThisRun;         // reset when the toggle rises
         private int snowAutoCollectMachinesSeen;       // last scan's kept machines (UGUI status line)
@@ -2306,13 +2326,50 @@ namespace HeartopiaMod
 
             this.snowAutoCollectRegistrationsDone = true;
 
-            // Events-first check (AGENTS §7 step 3): the snow machine has no S2C EventCenter event. Its
-            // state arrives as an ECS data update (SnowSculptingClientSystem ->
-            // SnowSculptureProtocolManager.UpdateSnowMachine -> the view's _data), and the two result
-            // callbacks OnSnowMachineResult / GatherSnowBallResult receive ONLY an ErrorCode — no netId,
-            // so neither can acknowledge a specific machine. There is nothing to hook; the gate only has
-            // to RESOLVE types, and nothing is inflated or compiled before a world exists.
+            // Per-machine updates use DataUpdated<SnowMachineComponentData>, registered from TryResolveSnowAutoCollect.
+            // RefreshInHomelandEvent fires when inHomeland changes (own yard enter and leave).
+            // Enter arms a scan. A seen machine is included when its live state or ball count
+            // differs from the stored snapshot. The scan repeats while an owned machine is still
+            // outside the radius, and leave clears it.
+            // LocalPlayerBuildModeChangeEvent on exit clears snowAutoCollectSeen so the next scan can
+            // send again after building mode; enter does not clear and sends are not suppressed in build mode.
             this.RegisterWorldReadyCallback("snowball-autocollect", this.TryResolveSnowAutoCollect);
+            this.RegisterGameEventHook(
+                "XDTDataAndProtocol.Events.LocalPlayerBuildModeChangeEvent",
+                1,
+                this.OnSnowAutoCollectBuildMode);
+            this.RegisterGameEventHook(
+                "XDTDataAndProtocol.Events.RefreshInHomelandEvent",
+                0,
+                this.OnSnowAutoCollectHomeland);
+        }
+
+        private void OnSnowAutoCollectBuildMode(GameEventSnapshot e)
+        {
+            if (e.ReadBool(0))
+            {
+                return;
+            }
+
+            this.snowAutoCollectSeen.Clear();
+            this.snowAutoCollectSeeded = false;
+        }
+
+        private void OnSnowAutoCollectHomeland(GameEventSnapshot e)
+        {
+            if (!this.autoSnowCollectEnabled)
+            {
+                return;
+            }
+
+            if (!this.TryHomelandFarmTryReadInHomelandAura(out bool inHomeland, out _) || !inHomeland)
+            {
+                this.snowAutoCollectUnseenScan = false;
+                return;
+            }
+
+            this.snowAutoCollectUnseenScan = true;
+            this.snowAutoCollectNextScanAt = 0f;
         }
 
         // Resolved BY NAME on the world-ready gate, never from a live instance: the gate can run before
@@ -2323,7 +2380,7 @@ namespace HeartopiaMod
         {
             if (this.snowAutoCollectResolveReady)
             {
-                return true;
+                return this.snowDataUpdatedHookRegistered || this.TryRegisterSnowDataUpdatedHook();
             }
 
             this.ResolveAuraFarmRuntimeMethods();
@@ -2458,7 +2515,204 @@ namespace HeartopiaMod
                     + " (the collector stays idle until every handle resolves)");
             }
 
-            return this.snowAutoCollectResolveReady;
+            if (!this.snowAutoCollectResolveReady)
+            {
+                return false;
+            }
+
+            return this.TryRegisterSnowDataUpdatedHook();
+        }
+
+        private bool TryRegisterSnowDataUpdatedHook()
+        {
+            if (this.snowDataUpdatedHookRegistered)
+            {
+                return true;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                return false;
+            }
+
+            IntPtr open = this.FindAuraMonoClassByFullName(
+                "ScriptsRefactory.DataAndProtocol.Events.DataUpdated`1");
+            IntPtr arg = this.FindAuraMonoClassByFullName(
+                "XDTDataAndProtocol.ComponentsData.SnowMachineComponentData");
+            if (open == IntPtr.Zero || arg == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryBindAuraMonoGenericClass(open, new[] { arg }, out IntPtr closed) || closed == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            this.snowDataUpdatedClass = closed;
+
+            if (this.gameEventHooksByName.ContainsKey(SnowDataUpdatedHookName))
+            {
+                if (!this.snowDataUpdatedNameTakenLogged)
+                {
+                    this.snowDataUpdatedNameTakenLogged = true;
+                    ModLogger.Msg("[SnowAutoCollect] DataUpdated hook name already registered as "
+                        + SnowDataUpdatedHookName);
+                }
+
+                return false;
+            }
+
+            int snowBytes = 0;
+            int valueRaw = -1;
+            int ballRaw = -1;
+            int stateRaw = -1;
+            bool measured = this.TryMeasureAuraMonoBlittableSize(arg, true, out snowBytes)
+                && this.TryGetAuraMonoFieldRawOffset(closed, "Value", out valueRaw)
+                && this.TryGetAuraMonoFieldRawOffset(arg, "ballCount", out ballRaw)
+                && this.TryGetAuraMonoFieldRawOffset(arg, "state", out stateRaw);
+            if (!measured || snowBytes != 32 || valueRaw != 0 || ballRaw != 4 || stateRaw != 0)
+            {
+                ModLogger.Msg("[SnowAutoCollect] DataUpdated layout rejected snowBytes=" + snowBytes
+                    + " valueRaw=" + valueRaw + " ballRaw=" + ballRaw + " stateRaw=" + stateRaw);
+                return false;
+            }
+
+            this.snowDataUpdatedBallRaw = valueRaw + ballRaw;
+            this.snowDataUpdatedStateRaw = valueRaw + stateRaw;
+            this.snowDataUpdatedPayload = valueRaw + snowBytes;
+            if (this.snowDataUpdatedBallRaw + 4 > EventPayloadCap)
+            {
+                ModLogger.Msg("[SnowAutoCollect] DataUpdated layout rejected snowBytes=" + snowBytes
+                    + " valueRaw=" + valueRaw + " ballRaw=" + ballRaw + " stateRaw=" + stateRaw);
+                return false;
+            }
+
+            this.snowDataUpdatedHookRegistered = this.RegisterGameEventHookByNetId(
+                this.snowDataUpdatedClass,
+                SnowDataUpdatedHookName,
+                this.snowDataUpdatedPayload,
+                this.OnSnowMachineDataUpdated);
+            if (!this.snowDataUpdatedHookRegistered)
+            {
+                return false;
+            }
+
+            ModLogger.Msg("[SnowAutoCollect] DataUpdated registered payload=32 ballAt=4");
+            return true;
+        }
+
+        private bool TryReadSnowMachineView(uint netId, out SnowMachineSnapshot machine)
+        {
+            machine = default(SnowMachineSnapshot);
+            if (!AuraMonoPinningAvailable)
+            {
+                return false;
+            }
+
+            if (!this.TryResolveSelfPlayerNetId(out uint selfNetId) || selfNetId == 0U)
+            {
+                return false;
+            }
+
+            if (!this.TryGetAuraMonoEntityObjectByNetId(netId, out IntPtr entity) || entity == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            uint entityPin = AuraMonoPinNew(entity);
+            if (entityPin == 0U)
+            {
+                return false;
+            }
+
+            uint componentPin = 0U;
+            try
+            {
+                if (!this.TryAuraMonoEntityGetComponent(entity, this.snowMachineViewClass, out IntPtr component)
+                    || component == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                componentPin = AuraMonoPinNew(component);
+                if (componentPin == 0U)
+                {
+                    return false;
+                }
+
+                return this.TryReadSnowMachineSnapshot(component, selfNetId, out machine, out string _);
+            }
+            finally
+            {
+                AuraMonoPinFree(componentPin);
+                AuraMonoPinFree(entityPin);
+            }
+        }
+
+        private void OnSnowMachineDataUpdated(GameEventSnapshot e)
+        {
+            if (!this.autoSnowCollectEnabled || !this.snowAutoCollectResolveReady)
+            {
+                return;
+            }
+
+            int epoch = AuraMonoWorldEpoch;
+            if (epoch != this.snowAutoCollectWorldEpoch)
+            {
+                this.snowAutoCollectWorldEpoch = epoch;
+                this.ClearSnowAutoCollectState();
+            }
+
+            if (e.Length < this.snowDataUpdatedBallRaw + 4 || e.Length < this.snowDataUpdatedStateRaw + 4)
+            {
+                return;
+            }
+
+            int state = e.ReadInt32(this.snowDataUpdatedStateRaw);
+            int ballCount = e.ReadInt32(this.snowDataUpdatedBallRaw);
+            if (!this.TryReadSnowMachineView(e.NetId, out SnowMachineSnapshot machine))
+            {
+                return;
+            }
+
+            machine.State = state;
+            machine.BallCount = ballCount;
+
+            if (!this.TryGetAuraSnowSelfPlayerPosition(out Vector3 playerPos))
+            {
+                return;
+            }
+
+            float radius = Mathf.Clamp(this.snowMachineScanRadius, SnowMachineRadiusMin, SnowMachineRadiusMax);
+            if (Vector3.Distance(playerPos, machine.Position) > radius)
+            {
+                this.snowAutoCollectSeen.Remove(e.NetId);
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            int confirmed = 0;
+            int gatherSent = 0;
+            int startSent = 0;
+            int waiting = 0;
+            int sendFailed = 0;
+            string firstSendFailure = string.Empty;
+            this.ApplySnowAutoCollectMachine(
+                machine,
+                now,
+                ref confirmed,
+                ref gatherSent,
+                ref startSent,
+                ref waiting,
+                ref sendFailed,
+                ref firstSendFailure);
+
+            if (gatherSent > 0 || startSent > 0)
+            {
+                ModLogger.Msg("[SnowAutoCollect] event netId=" + e.NetId + " state=" + state + " ballCount=" + ballCount
+                    + " gather=" + gatherSent + " start=" + startSent);
+            }
         }
 
         // Forget per-world / per-run feature state. Called on the falling edge and on a world-epoch
@@ -2469,6 +2723,9 @@ namespace HeartopiaMod
             this.snowAutoCollectLastGatherAt.Clear();
             this.snowAutoCollectLastStartAt.Clear();
             this.snowAutoCollectGatherFromCount.Clear();
+            this.snowAutoCollectSeen.Clear();
+            this.snowAutoCollectSeeded = false;
+            this.snowAutoCollectUnseenScan = false;
             this.snowAutoCollectMachinesSeen = 0;
         }
 
@@ -2503,7 +2760,33 @@ namespace HeartopiaMod
             }
 
             float now = Time.unscaledTime;
-            if (!this.snowAutoCollectBreaker.ShouldRun(now))
+            bool snowAutoCollectBreakerRun = this.snowAutoCollectBreaker.ShouldRun(now);
+
+            if (this.snowDataUpdatedHookRegistered && this.IsGameEventHookInstalled(SnowDataUpdatedHookName))
+            {
+                if (!this.snowAutoCollectSeeded && this.snowAutoCollectResolveReady && snowAutoCollectBreakerRun
+                    && now >= this.snowAutoCollectNextScanAt)
+                {
+                    try
+                    {
+                        if (this.SnowAutoCollectTick(now))
+                        {
+                            this.snowAutoCollectSeeded = true;
+                            this.snowAutoCollectBreaker.Success();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        this.snowAutoCollectBreaker.Failure("SnowAutoCollect", ex, now);
+                        this.snowAutoCollectNextScanAt = now + SnowAutoCollectScanBackoffSeconds;
+                    }
+                }
+
+                this.TrySnowAutoCollectUnseenScan(now, snowAutoCollectBreakerRun);
+                return;
+            }
+
+            if (!snowAutoCollectBreakerRun)
             {
                 return;
             }
@@ -2516,7 +2799,11 @@ namespace HeartopiaMod
             this.snowAutoCollectNextScanAt = now + Mathf.Clamp(this.snowMachineScanSeconds, SnowMachineScanMin, SnowMachineScanMax);
             try
             {
-                this.SnowAutoCollectTick(now);
+                if (this.SnowAutoCollectTick(now))
+                {
+                    this.snowAutoCollectUnseenScan = false;
+                }
+
                 this.snowAutoCollectBreaker.Success();
             }
             catch (Exception ex)
@@ -2526,27 +2813,59 @@ namespace HeartopiaMod
             }
         }
 
-        private void SnowAutoCollectTick(float now)
+        private void TrySnowAutoCollectUnseenScan(float now, bool breakerRun)
+        {
+            if (!this.snowAutoCollectUnseenScan || !this.snowAutoCollectResolveReady || !breakerRun
+                || now < this.snowAutoCollectNextScanAt)
+            {
+                return;
+            }
+
+            try
+            {
+                if (this.SnowAutoCollectTick(now, unseenOnly: true))
+                {
+                    if (this.snowAutoCollectUnseenHadFar)
+                    {
+                        this.snowAutoCollectNextScanAt = now + Mathf.Clamp(
+                            this.snowMachineScanSeconds, SnowMachineScanMin, SnowMachineScanMax);
+                    }
+                    else
+                    {
+                        this.snowAutoCollectUnseenScan = false;
+                    }
+
+                    this.snowAutoCollectBreaker.Success();
+                }
+            }
+            catch (Exception ex)
+            {
+                this.snowAutoCollectBreaker.Failure("SnowAutoCollect", ex, now);
+                this.snowAutoCollectNextScanAt = now + SnowAutoCollectScanBackoffSeconds;
+            }
+        }
+
+        private bool SnowAutoCollectTick(float now, bool unseenOnly = false)
         {
             if (!AuraMonoPinningAvailable)
             {
                 this.snowAutoCollectMachinesSeen = 0;
                 this.SnowAutoCollectSetStatus("pinning unavailable");
-                return;
+                return false;
             }
 
             if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
             {
                 this.snowAutoCollectMachinesSeen = 0;
                 this.SnowAutoCollectSetStatus("GetComponents not ready");
-                return;
+                return false;
             }
 
             if (!this.TryResolveSelfPlayerNetId(out uint selfNetId) || selfNetId == 0U)
             {
                 this.snowAutoCollectMachinesSeen = 0;
                 this.SnowAutoCollectSetStatus("self netId unavailable");
-                return;
+                return false;
             }
 
             if (!this.TryGetAuraSnowSelfPlayerPosition(out Vector3 playerPos))
@@ -2555,10 +2874,11 @@ namespace HeartopiaMod
                 // and the radius filter would silently drop or keep the wrong set.
                 this.snowAutoCollectMachinesSeen = 0;
                 this.SnowAutoCollectSetStatus("no player position");
-                return;
+                return false;
             }
 
             float radius = Mathf.Clamp(this.snowMachineScanRadius, SnowMachineRadiusMin, SnowMachineRadiusMax);
+            this.snowAutoCollectUnseenHadFar = false;
             List<uint> pins = new List<uint>();
             try
             {
@@ -2572,7 +2892,12 @@ namespace HeartopiaMod
                     this.SnowAutoCollectSetStatus(infrastructureOk
                         ? "no snow machine views"
                         : "GetComponents failed");
-                    return;
+                    if (unseenOnly && infrastructureOk)
+                    {
+                        this.snowAutoCollectUnseenHadFar = true;
+                    }
+
+                    return infrastructureOk;
                 }
 
                 List<SnowMachineSnapshot> machines = new List<SnowMachineSnapshot>();
@@ -2586,6 +2911,17 @@ namespace HeartopiaMod
 
                 for (int i = 0; i < components.Count; i++)
                 {
+                    if (i >= pins.Count || pins[i] == 0U)
+                    {
+                        unreadable++;
+                        if (firstUnreadable.Length == 0)
+                        {
+                            firstUnreadable = "component pin failed";
+                        }
+
+                        continue;
+                    }
+
                     if (!this.TryReadSnowMachineSnapshot(components[i], selfNetId, out SnowMachineSnapshot view, out string reason))
                     {
                         if (reason == "local netId")
@@ -2623,11 +2959,26 @@ namespace HeartopiaMod
                         continue;
                     }
 
+                    if (unseenOnly
+                        && this.snowAutoCollectSeen.TryGetValue(view.NetId, out SnowAutoCollectSeen known)
+                        && known.State == view.State
+                        && known.BallCount == view.BallCount)
+                    {
+                        continue;
+                    }
+
                     seenNetIds.Add(view.NetId);
                     machines.Add(view);
                 }
 
-                this.PruneSnowAutoCollectCooldowns(seenNetIds, now);
+                if (unseenOnly)
+                {
+                    this.snowAutoCollectUnseenHadFar = skippedFar > 0;
+                }
+                else
+                {
+                    this.PruneSnowAutoCollectCooldowns(seenNetIds, now);
+                }
 
                 if (machines.Count == 0)
                 {
@@ -2636,7 +2987,7 @@ namespace HeartopiaMod
                         + " local=" + skippedLocal + " other=" + skippedOther + " table=" + skippedTable
                         + " far=" + skippedFar + " unreadable=" + unreadable
                         + (firstUnreadable.Length > 0 ? " first=" + firstUnreadable : string.Empty) + ")");
-                    return;
+                    return true;
                 }
 
                 // Nearest first: the cap drops the farthest machines, and the plan's own "nearest
@@ -2654,95 +3005,16 @@ namespace HeartopiaMod
 
                 for (int i = 0; i < kept; i++)
                 {
-                    SnowMachineSnapshot machine = machines[i];
-                    uint netId = machine.NetId;
-
-                    // Plan section 4 step 7 — the gather confirmation is applied BEFORE the send
-                    // decision, and a new send overwrites gatherFromCount only after that delta.
-                    if (this.snowAutoCollectGatherFromCount.TryGetValue(netId, out int fromCount))
-                    {
-                        this.snowAutoCollectLastGatherAt.TryGetValue(netId, out float lastGather);
-                        if (machine.BallCount < fromCount)
-                        {
-                            this.snowAutoCollectGatherFromCount.Remove(netId);
-                            this.snowballsCollectedThisRun += fromCount - machine.BallCount;
-                            confirmed++;
-                        }
-                        else if (lastGather == 0f || now - lastGather >= SnowAutoCollectSendCooldownSeconds)
-                        {
-                            // The send did not land (or the machine refilled the same count inside the
-                            // window): drop the snapshot so the next scan may send again. lastGather == 0
-                            // is defensive — PruneSnowAutoCollectCooldowns now releases a snapshot whose
-                            // cooldown entry is gone, so this branch is normally the cooldown test alone.
-                            this.snowAutoCollectGatherFromCount.Remove(netId);
-                        }
-                        else
-                        {
-                            // Snapshot still open — no second gather for this machine.
-                            waiting++;
-                            continue;
-                        }
-                    }
-
-                    float lastSendAt;
-                    if (machine.BallCount > 0)
-                    {
-                        if (this.snowAutoCollectLastGatherAt.TryGetValue(netId, out lastSendAt)
-                            && now - lastSendAt < SnowAutoCollectSendCooldownSeconds)
-                        {
-                            waiting++;
-                            continue;
-                        }
-
-                        if (!this.TrySendSnowMachineProtocol(this.snowAuraMonoGatherSnowBallMethod, "GatherSnowBall", netId, out string gatherStatus))
-                        {
-                            sendFailed++;
-                            this.SnowAutoCollectSetStatus(gatherStatus);
-                            if (firstSendFailure.Length == 0)
-                            {
-                                firstSendFailure = gatherStatus;
-                            }
-                            continue;
-                        }
-
-                        this.snowAutoCollectLastGatherAt[netId] = now;
-                        this.snowAutoCollectGatherFromCount[netId] = machine.BallCount;
-                        gatherSent++;
-                        continue;
-                    }
-
-                    // ballCount == 0: only a CLOSED machine is restarted. Live behavior (plan section
-                    // 9.2) is that a harvest leaves the machine Making with an empty ballCount — the
-                    // next ball is another harvest, never a restart. Idle is never started from here.
-                    if (machine.State == SnowMachineStateClosed)
-                    {
-                        if (this.snowAutoCollectLastStartAt.TryGetValue(netId, out lastSendAt)
-                            && now - lastSendAt < SnowAutoCollectSendCooldownSeconds)
-                        {
-                            waiting++;
-                            continue;
-                        }
-
-                        if (!this.TrySendSnowMachineProtocol(this.snowAuraMonoOnSnowMachineMethod, "OnSnowMachine", netId, out string startStatus))
-                        {
-                            sendFailed++;
-                            this.SnowAutoCollectSetStatus(startStatus);
-                            if (firstSendFailure.Length == 0)
-                            {
-                                firstSendFailure = startStatus;
-                            }
-                            continue;
-                        }
-
-                        this.snowAutoCollectLastStartAt[netId] = now;
-                        startSent++;
-                        continue;
-                    }
-
-                    waiting++;
+                    this.ApplySnowAutoCollectMachine(machines[i], now, ref confirmed, ref gatherSent, ref startSent,
+                        ref waiting, ref sendFailed, ref firstSendFailure);
                 }
 
                 this.snowAutoCollectMachinesSeen = kept;
+                if (unseenOnly && (gatherSent > 0 || startSent > 0))
+                {
+                    ModLogger.Msg("[SnowAutoCollect] homeland unseen gather=" + gatherSent + " start=" + startSent);
+                }
+
                 this.SnowAutoCollectSetStatus("scan kept=" + kept + " confirmed=" + confirmed
                     + " gather=" + gatherSent + " start=" + startSent
                     + " wait=" + waiting + " fail=" + sendFailed + " pending=" + this.snowAutoCollectGatherFromCount.Count
@@ -2754,6 +3026,90 @@ namespace HeartopiaMod
             {
                 FreeAuraMonoPins(pins);
             }
+
+            return true;
+        }
+
+        private void ApplySnowAutoCollectMachine(
+            SnowMachineSnapshot machine,
+            float now,
+            ref int confirmed,
+            ref int gatherSent,
+            ref int startSent,
+            ref int waiting,
+            ref int sendFailed,
+            ref string firstSendFailure)
+        {
+            uint netId = machine.NetId;
+
+            if (this.snowAutoCollectGatherFromCount.TryGetValue(netId, out int fromCount)
+                && machine.BallCount < fromCount)
+            {
+                this.snowAutoCollectGatherFromCount.Remove(netId);
+                this.snowballsCollectedThisRun += fromCount - machine.BallCount;
+                confirmed++;
+            }
+
+            bool hasSeen = this.snowAutoCollectSeen.TryGetValue(netId, out SnowAutoCollectSeen previous);
+            bool gatherTransition = machine.BallCount > 0
+                && (!hasSeen || previous.BallCount != machine.BallCount);
+            bool startTransition = machine.State == SnowMachineStateClosed
+                && machine.BallCount == 0
+                && (!hasSeen || previous.State != SnowMachineStateClosed || previous.BallCount != 0);
+
+            if (gatherTransition)
+            {
+                if (!this.TrySendSnowMachineProtocol(this.snowAuraMonoGatherSnowBallMethod, "GatherSnowBall", netId, out string gatherStatus))
+                {
+                    sendFailed++;
+                    this.SnowAutoCollectSetStatus(gatherStatus);
+                    if (firstSendFailure.Length == 0)
+                    {
+                        firstSendFailure = gatherStatus;
+                    }
+                    return;
+                }
+
+                this.snowAutoCollectLastGatherAt[netId] = now;
+                this.snowAutoCollectGatherFromCount[netId] = machine.BallCount;
+                this.snowAutoCollectSeen[netId] = new SnowAutoCollectSeen
+                {
+                    State = machine.State,
+                    BallCount = machine.BallCount,
+                };
+                gatherSent++;
+                return;
+            }
+
+            if (startTransition)
+            {
+                if (!this.TrySendSnowMachineProtocol(this.snowAuraMonoOnSnowMachineMethod, "OnSnowMachine", netId, out string startStatus))
+                {
+                    sendFailed++;
+                    this.SnowAutoCollectSetStatus(startStatus);
+                    if (firstSendFailure.Length == 0)
+                    {
+                        firstSendFailure = startStatus;
+                    }
+                    return;
+                }
+
+                this.snowAutoCollectLastStartAt[netId] = now;
+                this.snowAutoCollectSeen[netId] = new SnowAutoCollectSeen
+                {
+                    State = machine.State,
+                    BallCount = machine.BallCount,
+                };
+                startSent++;
+                return;
+            }
+
+            this.snowAutoCollectSeen[netId] = new SnowAutoCollectSeen
+            {
+                State = machine.State,
+                BallCount = machine.BallCount,
+            };
+            waiting++;
         }
 
         private void PruneSnowAutoCollectCooldowns(List<uint> seenNetIds, float now)
@@ -2762,7 +3118,8 @@ namespace HeartopiaMod
             // machine removed, no longer owned) are dropped — plan section 4 step 6.
             if (this.snowAutoCollectLastGatherAt.Count == 0
                 && this.snowAutoCollectLastStartAt.Count == 0
-                && this.snowAutoCollectGatherFromCount.Count == 0)
+                && this.snowAutoCollectGatherFromCount.Count == 0
+                && this.snowAutoCollectSeen.Count == 0)
             {
                 return;
             }
@@ -2773,9 +3130,9 @@ namespace HeartopiaMod
             // reached without us ever being able to observe the drop, so the snapshot is released here
             // (with no credit). Keeping it would confirm a later reuse of that netId against a stale
             // ballCount. Snapshots of machines that ARE in the filtered set are never touched here — the
-            // per-machine loop owns
-            // their lifecycle (confirm, expire, re-send). This runs before the cooldown keys are dropped
-            // below, so the cooldown test still has its timestamp to work from.
+            // per-machine loop owns their lifecycle (confirm on a lower count; an unchanged count stays
+            // latched). This runs before the cooldown keys are dropped below, so the cooldown test still
+            // has its timestamp to work from.
             if (this.snowAutoCollectGatherFromCount.Count > 0)
             {
                 List<uint> staleSnapshots = null;
@@ -2840,6 +3197,24 @@ namespace HeartopiaMod
                 }
             }
 
+            stale = null;
+            foreach (KeyValuePair<uint, SnowAutoCollectSeen> pair in this.snowAutoCollectSeen)
+            {
+                if (!seenNetIds.Contains(pair.Key))
+                {
+                    stale = stale ?? new List<uint>();
+                    stale.Add(pair.Key);
+                }
+            }
+
+            if (stale != null)
+            {
+                for (int i = 0; i < stale.Count; i++)
+                {
+                    this.snowAutoCollectSeen.Remove(stale[i]);
+                }
+            }
+
         }
 
         // One machine view -> scalars. Everything transient is pinned for the duration of the read and
@@ -2865,6 +3240,12 @@ namespace HeartopiaMod
             uint furniturePin = 0U;
             try
             {
+                if (entityPin == 0U)
+                {
+                    reason = "entity pin failed";
+                    return false;
+                }
+
                 if (!this.TryGetAuraMonoEntityNetId(entityObj, out uint netId) || netId == 0U)
                 {
                     reason = "netId unreadable";
@@ -2896,6 +3277,11 @@ namespace HeartopiaMod
                 }
 
                 furniturePin = AuraMonoPinNew(furnitureObj);
+                if (furniturePin == 0U)
+                {
+                    reason = "furniture pin failed";
+                    return false;
+                }
 
                 if (!this.TryInvokeAuraMonoFurnitureGetterUInt32(furnitureObj, this.snowMachineOwnerGetter, out uint ownerId, out string ownerFailure))
                 {
@@ -3049,6 +3435,12 @@ namespace HeartopiaMod
             uint boxPin = AuraMonoPinNew(boxedData);
             try
             {
+                if (boxPin == 0U)
+                {
+                    reason = "_data pin failed";
+                    return false;
+                }
+
                 IntPtr dataClass = auraMonoObjectGetClass(boxedData);
                 if (dataClass == IntPtr.Zero)
                 {
