@@ -1302,19 +1302,20 @@ namespace HeartopiaMod
         // conservative choice, and the same direction every other stealth hop takes.
         private const float StealthForagingContaminationPointLift = 4f;
 
-        // Y adjustment for a RESOURCE-NODE hop. Deliberately NOT applied to world-load
+        // Landing adjustment for a RESOURCE-NODE hop. Deliberately NOT applied to world-load
         // checkpoints (farm-location waypoints, priority-area anchors, cleansing corals) — those
         // are area arrivals that must land where the world streams in normally.
         //   * Stealth Foraging engaged -> contamination -3m hosted / +4m point-anchored, every
         //     other resource -1.5m (StealthForagingFeature.cs).
-        //   * Otherwise -> NO Y adjustment at all. Contamination used to take the vanilla
+        //   * Otherwise -> fruit trees land beside the trunk (ApplyFruitTreeTeleportStandoff);
+        //     every other node has NO adjustment at all. Contamination used to take the vanilla
         //     SeaCleanTeleportYOffset (+7m) lift here; that lift now lives only on the
         //     cleansing-coral hop (CorruptionCleanseFeature.cs), which is a different target.
         private Vector3 ApplyForagingNodeTeleportOffset(Vector3 position, string nodeLabel)
         {
             if (!this.StealthForagingActive)
             {
-                return position;
+                return this.ApplyFruitTreeTeleportStandoff(position, nodeLabel);
             }
 
             if (string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal))
@@ -1330,6 +1331,111 @@ namespace HeartopiaMod
             }
 
             return position;
+        }
+
+        // ---- Fruit-tree landing stand-off -----------------------------------------------------
+        // A fruit tree's entity position is its trunk pivot, and a node hop used to land the player
+        // exactly there — inside the trunk. Whether the game's collision then pushed the player out
+        // or left them wedged in the tree varied from hop to hop, not least because the post-warp
+        // settle (SyncTeleportPosition) kept re-writing the pivot position for 30 frames against
+        // that push. The hop therefore lands BESIDE the tree: 1.1 m out, the distance the walker
+        // stops at on every node (FarmWalkCollectStandoff), inside the measured 1.5 m aura trigger
+        // radius (FarmWalkAuraReach). Only the teleport argument moves — lastNodePosition and every
+        // marker / cooldown / dwell check keep the true tree position.
+        //
+        // No physics: Unity casts are blind in this game (XDT.Physics owns the colliders, see the
+        // repair-kit placement notes in HeartopiaComplete.AutoEatRepair.cs), so the side is chosen
+        // geometrically. Eight candidates around the trunk are scored by their clearance from every
+        // other scanned gatherable (mapResEntities: neighbouring trees, stones, bushes), starting
+        // from the side the player is coming from, and the first with the most room wins.
+        private const float FruitTreeTeleportStandoff = 0.5f;
+        // The landing is off the pivot, so on a slope its ground can sit a little higher than the
+        // tree base. Arriving slightly above and dropping is safe; arriving below the surface is not.
+        private const float FruitTreeTeleportLift = 0.3f;
+        private const int FruitTreeStandoffCandidates = 8;
+        // Room past this buys nothing: a neighbour 2.5 m from the landing cannot overlap it.
+        private const float FruitTreeStandoffClearanceCap = 2.5f;
+        // Scan entries this close to the tree are the tree itself, not a neighbour.
+        private const float FruitTreeStandoffSelfRadius = 0.5f;
+
+        private static bool IsFruitTreeNodeLabel(string nodeLabel)
+        {
+            return string.Equals(nodeLabel, "Apple Tree", StringComparison.Ordinal)
+                || string.Equals(nodeLabel, "Mandarin Tree", StringComparison.Ordinal);
+        }
+
+        private Vector3 ApplyFruitTreeTeleportStandoff(Vector3 treePosition, string nodeLabel)
+        {
+            if (!IsFruitTreeNodeLabel(nodeLabel))
+            {
+                return treePosition;
+            }
+
+            // The candidates fan out from the side the player is on, so an all-clear pick stays on
+            // the approach side instead of jumping to an arbitrary compass point.
+            Vector3 preferred = Vector3.forward;
+            if (this.TryGetLocalPlayerPosition(out Vector3 playerPos))
+            {
+                Vector3 toPlayer = playerPos - treePosition;
+                toPlayer.y = 0f;
+                if (toPlayer.sqrMagnitude > 0.01f)
+                {
+                    preferred = toPlayer.normalized;
+                }
+            }
+
+            Vector3 bestDirection = preferred;
+            float bestClearance = -1f;
+            float step = 360f / FruitTreeStandoffCandidates;
+            for (int i = 0; i < FruitTreeStandoffCandidates && bestClearance < FruitTreeStandoffClearanceCap; i++)
+            {
+                // 0, +45, -45, +90, -90, +135, -135, 180 degrees off the preferred side.
+                float angle = ((i + 1) / 2) * step * (i % 2 == 1 ? 1f : -1f);
+                Vector3 direction = Quaternion.Euler(0f, angle, 0f) * preferred;
+                float clearance = this.MeasureFruitTreeStandoffClearance(
+                    treePosition + direction * FruitTreeTeleportStandoff, treePosition);
+                if (clearance > bestClearance + 0.05f)
+                {
+                    bestClearance = clearance;
+                    bestDirection = direction;
+                }
+            }
+
+            Vector3 landing = treePosition + bestDirection * FruitTreeTeleportStandoff;
+            landing.y += FruitTreeTeleportLift;
+            this.AutoFarmLog(nodeLabel + " stand-off: landing " + FruitTreeTeleportStandoff.ToString("0.0")
+                + "m beside the trunk at " + landing + " (clearance "
+                + (bestClearance >= FruitTreeStandoffClearanceCap ? ">=" : string.Empty)
+                + Mathf.Min(bestClearance, FruitTreeStandoffClearanceCap).ToString("0.0") + "m)");
+            return landing;
+        }
+
+        // Horizontal distance from a candidate landing to the nearest OTHER scanned gatherable,
+        // capped at FruitTreeStandoffClearanceCap. An empty scan reads as fully clear.
+        private float MeasureFruitTreeStandoffClearance(Vector3 candidate, Vector3 treePosition)
+        {
+            float clearance = FruitTreeStandoffClearanceCap;
+            float selfSqr = FruitTreeStandoffSelfRadius * FruitTreeStandoffSelfRadius;
+            for (int i = 0; i < this.mapResEntities.Count; i++)
+            {
+                Vector3 other = this.mapResEntities[i].Position;
+                Vector3 fromTree = other - treePosition;
+                fromTree.y = 0f;
+                if (fromTree.sqrMagnitude <= selfSqr)
+                {
+                    continue;
+                }
+
+                Vector3 fromCandidate = other - candidate;
+                fromCandidate.y = 0f;
+                float distance = fromCandidate.magnitude;
+                if (distance < clearance)
+                {
+                    clearance = distance;
+                }
+            }
+
+            return clearance;
         }
 
         // ---- Foraging teleport trace (MasterLogForagingTeleport) -------------------------------

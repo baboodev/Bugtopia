@@ -419,6 +419,9 @@ namespace HeartopiaMod
             public int netCookCookQuantity;
             public float homelandFarmWaterRadius;
             public bool homelandFarmAutoFertilizeEnabled;
+            // Whole homeland: scan the own plot rectangle instead of the radius sphere. A missing
+            // element deserializes to false — the classic radius behaviour.
+            public bool homelandFarmWholePlotEnabled;
             // Privacy pause radius in metres, 0 = off. A missing element deserializes to 0, which
             // is exactly the off state — no sentinel needed.
             public float homelandFarmPrivacyRadius;

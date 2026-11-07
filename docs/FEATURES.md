@@ -1269,6 +1269,17 @@ Server-command style farming **without teleporting** to each node:
     dead on this build — XDT* entity resolution is Mono-only.
   - Bounded by the **Collect Wait Max** slider (4–30 s, default 12, `auraCollectWaitTimeout`);
     priority-anchor dwells keep the old fixed delay.
+- **Fruit-tree landing stand-off:** a node hop to an **Apple Tree** / **Mandarin Tree** lands
+  **1.1 m beside the trunk** (plus a 0.3 m drop-in lift), not on the tree's pivot. Landing on the
+  pivot put the player inside the trunk, and whether the game's collision then pushed them out or
+  left them wedged in the tree varied from hop to hop — the post-warp settle kept re-writing the
+  pivot position for 30 frames against that push. 1.1 m is the walker's own collect stand-off
+  (`FarmWalkCollectStandoff`), inside the measured 1.5 m aura trigger radius. The side is chosen
+  geometrically (Unity physics casts are blind in this game): eight candidates around the trunk,
+  scored by clearance from every other scanned gatherable, starting from the side the player is
+  coming from. `lastNodePosition`, marker matching, cooldown stamping and the collect wait all keep
+  the true tree position. Not applied under Stealth Foraging, whose hop dives under the ground
+  where the trunk is irrelevant (`ApplyFruitTreeTeleportStandoff`, `HeartopiaComplete.Farm.cs`).
 
 #### Meteorites (starfall rocks)
 
@@ -1299,7 +1310,7 @@ Tree/stone **patrol automation**:
 
 Behavior:
 
-1. Ensures fishing rod equipped (restores previous tool on disable).
+1. Ensures fishing rod equipped; disabling the farm leaves the currently held tool unchanged.
 2. Scans for fish shadows within detect range (15–200 m, default 60 m).
 3. Resolves targets via server/netId-aware game APIs on `HeartopiaComplete`.
 4. Casts, waits for bite, handles hook and **reel minigame** via `TrySetFishingPressed` (not legacy Input patches).
@@ -1355,7 +1366,7 @@ is not available at all (a boss run) or every spot refused in a row.
 
 ### Insects (`InsectNetFarm`)
 
-- Auto equips insect net; restores previous tool on stop.
+- Auto equips insect net; stopping the farm leaves the currently held tool unchanged.
 - Scans catchable insects in range (default 50 m).
 - Batch catch (default 3 per tick).
 - Optional **patrol teleport** through ~50 predefined world coordinates when no targets nearby.
@@ -1364,7 +1375,8 @@ is not available at all (a boss run) or every spot refused in a row.
 
 ### Birds (`BirdNetFarm`)
 
-- Auto equips bird scanner; multi-catch support (1–10, default 1).
+- Auto equips bird scanner; stopping the farm leaves the currently held tool unchanged.
+- Multi-catch support (1–10, default 1).
 - Capture modes: **Safe Capture** vs **Spam Capture**.
 - Perfect photo / auto-scare options.
 - Safety stop after 90 s continuous run; 60 s re-enable cooldown.
@@ -2081,7 +2093,7 @@ Implementation: `UgcTextureCacheFeature.cs` (backend) + the "UGC TEXTURE CACHE" 
 
 ## New Features — Homeland Farm
 
-Crop-box (planter) farming inside your homeland. All operations are **radius-based** around the player and send real server commands. Implemented in `HomelandFarmFeature.cs` (resolved via reflection + **AuraMono** native path — managed component types are absent under BepInEx).
+Crop-box (planter) farming inside your homeland. All operations are **region-based** — a sphere of Farm Radius metres around the player by default, or your **whole own plot** with the Whole homeland toggle — and send real server commands. Implemented in `HomelandFarmFeature.cs` (resolved via reflection + **AuraMono** native path — managed component types are absent under BepInEx).
 
 Tab layout (top → bottom):
 
@@ -2119,6 +2131,40 @@ Item names in the seed/fertilizer selectors resolve through the same game-table 
 **Stop:** manual (Stop button / Stop auto farm), or automatic once the selected seed runs out **and** the last harvest is collected.
 
 Enable `MasterLogHomelandFarm` for per-tick logs (`Auto crop timing`, `Auto poll`, `next ripe in …`).
+
+### Whole homeland (own plot only)
+
+Checkbox under the Farm Radius slider. While it is on, every operation above — capture, the auto
+loop, the manual buttons and the water+weed hotkeys — selects its targets by **your own plot
+rectangle** instead of a sphere, so one capture covers the whole homeland regardless of where you
+stand and regardless of how large the plot is. The slider is greyed out (it drives nothing in this
+mode) and its value label shows the resolved plot size, e.g. `Own plot 48×36 m`.
+
+Why a rectangle rather than a larger radius: in shared towns the neighbours' plots sit a few
+metres away, and the per-box owner reads the sow path relies on are soft (a box whose `ownerId`
+has not resolved yet passes as own). The region is therefore the game's own plot —
+`Entities.fieldSystem.GetFieldByOwnerId(selfNetId)` → `FieldComponent.minCorner/maxCorner`,
+the rectangle `OutOfBoundsTesting` validates every furniture placement against, read in the
+plot's local frame so a rotated plot is cut correctly — the same resolve the Privacy Pause uses.
+A target is kept when its position lies inside that rectangle (0.5 m tolerance for float error
+between position sources); a target whose position cannot be resolved is treated exactly as
+before (kept, then re-checked by the per-action gates).
+
+- **Only on your own homeland.** `GetFieldByOwnerId(self)` returns nothing in a level that does
+  not contain your plot (a friend's homeland, the wild). An action is then **refused** with a
+  notification naming the mode — it never silently falls back to a sphere around you on someone
+  else's field. Turn the checkbox off to water or weed a friend's field with the radius.
+- **Capture needs you on (or within 40 m of) the plot** — ECS entities stream around the player,
+  not the plot, so a capture from across town would just report zero planters. The notification
+  tells you how far from the edge you are.
+- **Toggling the mode drops an existing capture** (not a running auto farm) and asks for a fresh
+  one: a sphere-era capture no longer describes the zone the loop would farm.
+- The auto loop re-resolves the rectangle every 30 s while you are on the field and keeps the last
+  one (plain values, no pointers) while you are away; its remote weed/harvest/sow is unchanged.
+
+Implemented in `HomelandFarmPlotRegionFeature.cs`; the scan funnel's single spatial predicate is
+`HomelandFarmIsOutsideScanRegion`. Log lines: `Whole homeland: own plot resolved …`,
+`Auto capture: dropped N farm entity(ies) outside the own plot`.
 
 ### Privacy Pause
 
@@ -2463,7 +2509,7 @@ Sections typically include:
 | Performance | FPS bypass; **FPS Watchdog** (see below); LOD override (game default / better / performance / custom bias & max level) |
 | Misc | Restore defaults, export-related options |
 
-Config persisted to `%LocalLow%/Bugtopia/Config.xml` (XML serialized `UnifiedConfigData`). Persisted values include keybinds (incl. **Water + Weed Radius**), theme, radar, patrols, bird farm, the **Homeland Farm radius** (`homelandFarmWaterRadius`, clamped 1–80, default 30) and the **Homeland Farm privacy pause radius** (`homelandFarmPrivacyRadius`, clamped 0–100, default 0 = off).
+Config persisted to `%LocalLow%/Bugtopia/Config.xml` (XML serialized `UnifiedConfigData`). Persisted values include keybinds (incl. **Water + Weed Radius**), theme, radar, patrols, bird farm, the **Homeland Farm radius** (`homelandFarmWaterRadius`, clamped 1–80, default 30), the **Homeland Farm Whole homeland** toggle (`homelandFarmWholePlotEnabled`, default false) and the **Homeland Farm privacy pause radius** (`homelandFarmPrivacyRadius`, clamped 0–100, default 0 = off).
 
 Separate legacy-compatible JSON fragments still loaded line-by-line for some keys in older migration path.
 

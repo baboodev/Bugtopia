@@ -42,8 +42,6 @@ namespace HeartopiaMod
         private static float nextNetEquipAttemptAt = -999f;
         private static float nextToolStatusRefreshAt = -999f;
         private static float lastNetConfirmedAt = -999f;
-        private static int previousToolId = 0;
-        private static bool previousToolRestorePending = false;
         private static readonly Dictionary<uint, float> recentCountedNetIds = new Dictionary<uint, float>();
         private static readonly Dictionary<uint, float> recentTargetedNetIds = new Dictionary<uint, float>();
         private static readonly List<uint> expiredRecentCountedBuffer = new List<uint>(16);
@@ -125,11 +123,6 @@ namespace HeartopiaMod
             int endCatches = sessionCatchCount;
             int endConfirmed = sessionConfirmedCount;
 
-            if (value && !enabled)
-            {
-                CapturePreviousTool(host);
-            }
-
             if (!value)
             {
                 suspended = false; // a stopped farm must never stay paused — see ForceStop
@@ -146,7 +139,6 @@ namespace HeartopiaMod
             lastNetConfirmedAt = -999f;
             if (!enabled)
             {
-                RestorePreviousTool(host);
                 ResetAckStats();
                 sessionCatchCount = 0;
                 recentCountedNetIds.Clear();
@@ -184,7 +176,7 @@ namespace HeartopiaMod
         // A PAUSE, not a stop — see the same block in AutoFishingFarm. This farm has no long-running
         // session, so any tick boundary is a safe suspend point; the only per-tick state that must go
         // is the target lock (a netId reserved for a catch that will now not happen).
-        // Resume replays SetEnabled's tool-state reset (minus the counters and the tool capture) so
+        // Resume replays SetEnabled's tool-state reset (minus the counters) so
         // the net is requested immediately and the 1 s equip-confirmation grace restarts honestly
         // instead of trusting a "Net Equipped" reading from before another tool was held.
         private static bool suspended;
@@ -780,8 +772,6 @@ namespace HeartopiaMod
             nextNetEquipAttemptAt = -999f;
             nextToolStatusRefreshAt = -999f;
             lastNetConfirmedAt = -999f;
-            previousToolId = 0;
-            previousToolRestorePending = false;
             sessionCatchCount = 0;
             recentCountedNetIds.Clear();
             recentTargetedNetIds.Clear();
@@ -898,57 +888,5 @@ namespace HeartopiaMod
             lastStatus = "Waiting for net equip...";
         }
 
-        private static void CapturePreviousTool(HeartopiaComplete host)
-        {
-            previousToolId = 0;
-            previousToolRestorePending = false;
-
-            // See AutoFishingFarm.CapturePreviousTool: the coordinator is the single writer of the
-            // handhold while it is active, and it owns the capture/restore pair.
-            if (FarmToolBroker.IsActive)
-            {
-                return;
-            }
-
-            if (host == null || !host.TryGetCurrentToolInfo(out int toolId, out _, out _))
-            {
-                return;
-            }
-
-            previousToolId = toolId;
-            previousToolRestorePending = toolId != 0 && toolId != 5;
-            if (previousToolRestorePending)
-            {
-                Log("Captured previous toolId=" + previousToolId);
-            }
-        }
-
-        private static void RestorePreviousTool(HeartopiaComplete host)
-        {
-            if (host == null || FarmToolBroker.IsActive)
-            {
-                previousToolId = 0;
-                previousToolRestorePending = false;
-                return;
-            }
-
-            if (!previousToolRestorePending || previousToolId == 0)
-            {
-                if (host.TryGetInsectNetToolStatus(out bool netEquipped, out _) && netEquipped)
-                {
-                    host.EquipHandTool(0);
-                    Log("No previous supported tool captured; unequipping net.");
-                }
-
-                previousToolId = 0;
-                previousToolRestorePending = false;
-                return;
-            }
-
-            host.EquipHandTool(previousToolId);
-            Log("Restoring previous toolId=" + previousToolId);
-            previousToolId = 0;
-            previousToolRestorePending = false;
-        }
     }
 }

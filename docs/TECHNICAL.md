@@ -451,8 +451,8 @@ Reflection / Il2Cpp calls on `HeartopiaComplete` (representative):
 
 ### Tool management
 
-- Saves `previousToolEquipType` before equipping rod.
-- `RestorePreviousTool` on disable.
+- Equips the rod while enabled without capturing the previous tool.
+- Disabling releases reel input and clears run state without changing the held tool.
 - Retry equip every 3.25 s if rod missing.
 
 ### Instant Catch (optional toggle)

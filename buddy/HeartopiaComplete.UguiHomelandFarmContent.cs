@@ -93,6 +93,7 @@ namespace HeartopiaMod
     //
     // Layout replays the source y-cursor chain (content top margin 8 standing in for startY,
     // the Foraging convention), with the two documented height deviations noted below:
+
     //   auto card      y=8    h=176  (capture+reset 38, status 43, hint 74, checkbox 98, start/stop 126)
     //                  while auto farm is running the card grows to h=222 and the harvest-delay
     //                  row (local y=166) is shown; every sibling below shifts +46 for that time
@@ -105,6 +106,7 @@ namespace HeartopiaMod
     //   y += 38    →   status card  y=1098 h=52 (label 16,10, wrapped 11pt @ .82)
     //   y += 62    →   stop button  y=1160 (160x30); + 40 → content height 1200.
     //                  running content height is 1246 (1200 + the 46px card growth)
+
     // NOTE (2026-07-22): the radius card is 88, not the source's 70 — its slider runs y=54..74 and
     // was overflowing the card. Everything from the crops card down is therefore +18 off the IMGUI
     // y-cursor; the 12px inter-card gap is unchanged. Don't "restore" these to source parity.
@@ -118,6 +120,7 @@ namespace HeartopiaMod
     // NOTE (2026-09-04): the PRIVACY PAUSE card was inserted after the radius card, so everything
     // from the crops card down is a further +100 (its 88 height + the uniform 12px gap). It has no
     // IMGUI twin — the feature is UGUI-only.
+
     // NOTE (2026-11-04): Reset capture joined the auto card's y=38 row — CaptureButton shrank
     // 200→140px, Reset (danger) sits at 164/130x28. The card height (176) and every y below it
     // are UNCHANGED. Reset is SetActive-gated on homelandFarmAutoCaptured in the Sync pass
@@ -131,6 +134,7 @@ namespace HeartopiaMod
     // and every sibling below shifts +46. The collapsed chain above is the resting layout
     // (radius y=196, content height 1200). The wait still saves through the radius debounce
     // machine (int compare, PersistHomelandFarmAutoSyncDelay). No IMGUI twin.
+
     //
     // Per-gated-frame cadence (shell visible + New Features tab + Homeland Farm sub, matching
     // the source running these on every IMGUI repaint of the tab):
@@ -207,6 +211,7 @@ namespace HeartopiaMod
             public Slider RadiusSlider;
             public GameObject RadiusValueLabel;
             public string RadiusValueShown;
+            public Toggle WholePlotToggle;        // own-plot rectangle instead of the sphere; disables the slider
 
             // PRIVACY PAUSE card — same three-field shape; 0 shows as "Off".
             public GameObject PrivacyPanel;
@@ -643,10 +648,14 @@ namespace HeartopiaMod
             // 4px and sat visually welded to its bottom edge. 88 clears the slider and leaves the
             // same ~14px breathing room the other cards have. Every scrollContent child below moved
             // down by the same +18 so the uniform 12px inter-card gap is preserved.
+            // 2026-10-31: the WHOLE HOMELAND checkbox row sits under the slider (y=80..102), so the
+            // card is 114 and everything below it is a further +26.
             GameObject radiusCard = this.CreateUguiSettingsMainPanel(scrollContent, "RadiusPanel",
                 this.L("homeland_farm.radius_section"));
+
             handle.RadiusPanel = radiusCard;
             PlaceUguiTopLeft(radiusCard, 8f, UguiHomelandFarmRadiusY, panelW, 88f);
+
 
             // sliderLabelStyle: bold 11 @ 0.78 (:22303-22304).
             GameObject sliderName = this.CreateUguiLabel(radiusCard.transform, "SliderLabel",
@@ -669,14 +678,24 @@ namespace HeartopiaMod
                 true, new System.Action<float>(this.OnUguiHomelandFarmRadiusChanged));
             PlaceUguiTopLeft(handle.RadiusSlider.gameObject, 16f, 54f, rowW, 20f);
 
-            // -------- 2b. PRIVACY PAUSE card (y=296, h=88) --------
+            // Whole homeland: scan the own plot rectangle edge to edge instead of the sphere. While
+            // on, the slider is greyed (it no longer drives anything) and the value label shows
+            // the resolved plot size instead of the metres (HomelandFarmPlotRegionFeature.cs).
+            handle.WholePlotToggle = this.CreateUguiCheckbox(radiusCard.transform, "WholePlotToggle",
+                this.L("homeland_farm.whole_plot"), this.homelandFarmWholePlotEnabled,
+                new System.Action<bool>(this.OnUguiHomelandFarmWholePlotToggled));
+            PlaceUguiTopLeft(handle.WholePlotToggle.gameObject, 16f, 80f, rowW, 22f);
+
+            // -------- 2b. PRIVACY PAUSE card (y=322, h=88) --------
             // Added 2026-09-04. Same geometry as the FARM RADIUS card above it, so the two
             // distance sliders read as a pair; every scrollContent child below moved down by
             // +100 (88 card + the file's uniform 12px gap).
             GameObject privacyCard = this.CreateUguiSettingsMainPanel(scrollContent, "PrivacyPanel",
                 this.L("homeland_farm.privacy_section"));
+
             handle.PrivacyPanel = privacyCard;
             PlaceUguiTopLeft(privacyCard, 8f, UguiHomelandFarmPrivacyY, panelW, 88f);
+
             // Under 10 m (0 = off) the farm keeps running with a player practically on the plot.
             Transform privacyHeader = privacyCard.transform.Find("Header");
             handle.PrivacyRiskMark = privacyHeader != null
@@ -774,6 +793,7 @@ namespace HeartopiaMod
             // 230+30 = 260, +14 bottom pad = 274. Everything below the card is +38 vs 07-29.
             GameObject opsCard = this.CreateUguiSettingsMainPanel(scrollContent, "OpsPanel",
                 this.L("homeland_farm.operations_section"));
+
             handle.OpsPanel = opsCard;
             PlaceUguiTopLeft(opsCard, 8f, UguiHomelandFarmOpsY, panelW, 274f);
 
@@ -825,17 +845,20 @@ namespace HeartopiaMod
             handle.EventDiagToggle = this.CreateUguiCheckbox(scrollContent, "EventDiagToggle",
                 this.L("Event Diagnostics (log)"), this.homelandFarmEventDiagEnabled,
                 new System.Action<bool>(this.OnUguiHomelandFarmEventDiagToggled));
+
             PlaceUguiTopLeft(handle.EventDiagToggle.gameObject, 8f, UguiHomelandFarmEventDiagY, panelW, 28f);
 
             handle.EventDrivenToggle = this.CreateUguiCheckbox(scrollContent, "EventDrivenToggle",
                 this.L("Event-driven auto-farm (no rescan)"), this.homelandFarmAutoEventDriven,
                 new System.Action<bool>(this.OnUguiHomelandFarmEventDrivenToggled));
-            PlaceUguiTopLeft(handle.EventDrivenToggle.gameObject, 8f, UguiHomelandFarmEventDrivenY, panelW, 28f);
 
+            PlaceUguiTopLeft(handle.EventDrivenToggle.gameObject, 8f, UguiHomelandFarmEventDrivenY, panelW, 28f);
+          
             // -------- 8. Status card (source y=978, h=52 — :22501-22508) --------
             // Headerless panel (the source box carries no label — Animal Care's "" precedent).
             GameObject statusCard = this.CreateUguiSettingsMainPanel(scrollContent, "StatusPanel",
                 string.Empty);
+
             handle.StatusPanel = statusCard;
             PlaceUguiTopLeft(statusCard, 8f, UguiHomelandFarmStatusY, panelW, 52f);
 
@@ -852,6 +875,7 @@ namespace HeartopiaMod
             handle.StopButton = this.CreateUguiPrimaryButton(scrollContent, "StopButton",
                 this.L("homeland_farm.stop"),
                 new System.Action(this.OnUguiHomelandFarmStopClicked));
+
             PlaceUguiTopLeft(handle.StopButton, 8f, UguiHomelandFarmStopY, 160f, 30f);
 
             // Cursor chain end (file header): stop button 1160 + the source's trailing 40 = 1200.
@@ -1041,8 +1065,18 @@ namespace HeartopiaMod
             {
                 handle.RadiusSlider.SetValueWithoutNotify(this.homelandFarmWaterRadius);
             }
+            // Whole homeland on: the slider drives nothing, so it greys out (Selectable
+            // interactable dims the knob) and the value label reports the plot instead of metres.
+            bool wholePlot = this.homelandFarmWholePlotEnabled;
+            if (handle.RadiusSlider != null && handle.RadiusSlider.interactable == wholePlot)
+            {
+                handle.RadiusSlider.interactable = !wholePlot;
+            }
+            this.SyncUguiToggleFromField(handle.WholePlotToggle, wholePlot);
             this.SyncUguiSelfLabelText(handle.RadiusValueLabel, ref handle.RadiusValueShown,
-                $"{this.homelandFarmWaterRadius:F0}m"); // :22313
+                wholePlot
+                    ? this.HomelandFarmPlotRegionStatusText()
+                    : $"{this.homelandFarmWaterRadius:F0}m"); // :22313
 
             // -------- HARVEST DELAY --------
             if (handle.SyncDelaySlider != null
@@ -1193,6 +1227,14 @@ namespace HeartopiaMod
         private void OnUguiHomelandFarmRadiusChanged(float value)
         {
             this.homelandFarmWaterRadius = Mathf.Round(value);
+        }
+
+        // Whole homeland checkbox: the backend owns the field write, the eager plot resolve and
+        // the bespoke persist (HomelandFarmPlotRegionFeature.cs); the per-frame
+        // SyncUguiToggleFromField re-syncs the checkbox from the field.
+        private void OnUguiHomelandFarmWholePlotToggled(bool value)
+        {
+            this.OnHomelandFarmWholePlotToggled(value);
         }
 
         // Privacy-pause radius. Same shape as the farm-radius handler: a plain rounded field

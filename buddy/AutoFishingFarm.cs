@@ -193,8 +193,6 @@ namespace HeartopiaMod
         private static string lastTargetStatus = "None";
         private const float RodEquipRetryInterval = 3.25f;
         private static float nextRodEquipAttemptAt = -999f;
-        private static int previousToolId = 0;
-        private static bool previousToolRestorePending = false;
         private static float nextActionAt = -999f;
         private static float sessionStartedAt = -999f;
         private static float waitingSinceAt = -999f;
@@ -632,8 +630,8 @@ namespace HeartopiaMod
 
         // ── Combined Farming: suspend/resume (CombinedFarmFeature) ───────────────────────────────
         // A PAUSE, not a stop: `enabled`, the session catch count and every setting survive, only
-        // Update() stops doing work. SetEnabled(false) must never be used for this — it resets the
-        // counters and re-equips the captured tool, i.e. it fights the coordinator for the handhold.
+        // Update() stops doing work. SetEnabled(false) must never be used for this — it disables the
+        // farm and resets the counters instead of preserving the run for the next slice.
         //
         // Safe suspend point is `!IsInFishingSession` (the caller checks it); the reel press is
         // released here regardless so a suspend forced mid-battle cannot leave the button held.
@@ -694,11 +692,6 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (value && !enabled)
-            {
-                CapturePreviousTool(host);
-            }
-
             int endCatches = SessionCatchCount; // read before the reset — see the Tier-1 line below
             SessionCatchCount = 0;
             if (!value)
@@ -752,7 +745,6 @@ namespace HeartopiaMod
             if (!enabled && host != null)
             {
                 try { host.TrySetFishingPressed(false, out _); } catch { }
-                RestorePreviousTool(host);
             }
 
             // TIER 1 — unconditional. MasterLogAutoFish ships OFF, and every one of this farm's
@@ -1675,8 +1667,6 @@ namespace HeartopiaMod
             suspended = false;
             SessionCatchCount = 0;
             nextRodEquipAttemptAt = -999f;
-            previousToolId = 0;
-            previousToolRestorePending = false;
             nextActionAt = -999f;
             instantCatchActiveCached = false;
             sessionStartedAt = -999f;
@@ -1736,61 +1726,6 @@ namespace HeartopiaMod
             }
 
             lastStatus = "Waiting for rod equip...";
-        }
-
-        private static void CapturePreviousTool(HeartopiaComplete host)
-        {
-            previousToolId = 0;
-            previousToolRestorePending = false;
-
-            // While the combined-farm coordinator owns the handhold it is the ONE writer: it captured
-            // the player's tool once and restores it when it releases. A per-farm capture here would
-            // snapshot whichever farm's tool happens to be out and re-equip it later, behind the
-            // coordinator's back (conflict #2 in the plan).
-            if (FarmToolBroker.IsActive)
-            {
-                return;
-            }
-
-            if (host == null || !host.TryGetCurrentToolInfo(out int toolId, out _, out _))
-            {
-                return;
-            }
-
-            previousToolId = toolId;
-            previousToolRestorePending = toolId != 0 && toolId != 3;
-            if (previousToolRestorePending)
-            {
-                Log("Captured previous toolId=" + previousToolId);
-            }
-        }
-
-        private static void RestorePreviousTool(HeartopiaComplete host)
-        {
-            if (host == null || FarmToolBroker.IsActive)
-            {
-                previousToolId = 0;
-                previousToolRestorePending = false;
-                return;
-            }
-
-            if (!previousToolRestorePending || previousToolId == 0)
-            {
-                if (host.TryGetFishingRodToolStatus(out bool rodEquipped, out _) && rodEquipped)
-                {
-                    host.EquipHandTool(0);
-                    Log("No previous supported tool captured; unequipping rod.");
-                }
-
-                previousToolId = 0;
-                previousToolRestorePending = false;
-                return;
-            }
-
-            host.EquipHandTool(previousToolId);
-            Log("Restoring previous toolId=" + previousToolId);
-            previousToolId = 0;
-            previousToolRestorePending = false;
         }
 
         private static void Log(string message)

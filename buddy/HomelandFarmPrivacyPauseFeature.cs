@@ -91,10 +91,12 @@ namespace HeartopiaMod
         private IntPtr homelandFarmPrivacyGetFieldByOwnerIdMethod;
         private bool homelandFarmPrivacyMethodsResolved;
 
-        // The plot rectangle, resolved fresh on every poll.
+        // The plot rectangle, resolved fresh on every poll. Shared with the whole-homeland scan
+        // region (HomelandFarmPlotRegionFeature.cs), which needs the forward matrix too.
         private struct HomelandFarmPrivacyPlot
         {
             public Matrix4x4 WorldToLocal;
+            public Matrix4x4 LocalToWorld;
             public Vector3 Min;
             public Vector3 Max;
         }
@@ -310,7 +312,33 @@ namespace HeartopiaMod
         // Entities.fieldSystem -> GetFieldByOwnerId(owner) -> { minCorner, maxCorner, fieldZone }.
         // Resolved fresh every poll: the field object is torn down and rebuilt (build mode, world
         // change), and a cached pointer would keep answering after fieldZone was nulled.
-        private unsafe bool TryResolveHomelandFarmPrivacyPlot(out HomelandFarmPrivacyPlot plot, out string error)
+        private bool TryResolveHomelandFarmPrivacyPlot(out HomelandFarmPrivacyPlot plot, out string error)
+        {
+            plot = default(HomelandFarmPrivacyPlot);
+
+            uint ownerNetId = this.homelandFarmAutoFieldOwnerNetId;
+            if (ownerNetId == 0U && this.TryHomelandFarmGetSelfPlayInFieldOwnerNetId(out uint currentOwner))
+            {
+                ownerNetId = currentOwner;
+            }
+
+            if (ownerNetId == 0U && this.TryResolveSelfPlayerNetId(out uint selfNetId))
+            {
+                ownerNetId = selfNetId; // what GameplayApi.IsPlayerNearSelfHomeLand passes
+            }
+
+            if (ownerNetId == 0U)
+            {
+                error = "field owner netId unknown.";
+                return false;
+            }
+
+            return this.TryResolveHomelandFarmPlotForOwner(ownerNetId, out plot, out error);
+        }
+
+        // The plot rectangle of ONE owner's field. Object pointers are pinned for the duration of
+        // the read and never leave this method; only the matrices and corners come out.
+        private unsafe bool TryResolveHomelandFarmPlotForOwner(uint ownerNetId, out HomelandFarmPrivacyPlot plot, out string error)
         {
             plot = default(HomelandFarmPrivacyPlot);
             error = string.Empty;
@@ -333,17 +361,6 @@ namespace HeartopiaMod
             if (!this.TryResolveHomelandFarmPrivacyMethods(out error))
             {
                 return false;
-            }
-
-            uint ownerNetId = this.homelandFarmAutoFieldOwnerNetId;
-            if (ownerNetId == 0U && this.TryHomelandFarmGetSelfPlayInFieldOwnerNetId(out uint currentOwner))
-            {
-                ownerNetId = currentOwner;
-            }
-
-            if (ownerNetId == 0U && this.TryResolveSelfPlayerNetId(out uint selfNetId))
-            {
-                ownerNetId = selfNetId; // what GameplayApi.IsPlayerNearSelfHomeLand passes
             }
 
             if (ownerNetId == 0U)
@@ -412,6 +429,7 @@ namespace HeartopiaMod
                         }
 
                         plot.WorldToLocal = localToWorld.inverse;
+                        plot.LocalToWorld = localToWorld;
                         plot.Min = min;
                         plot.Max = max;
 

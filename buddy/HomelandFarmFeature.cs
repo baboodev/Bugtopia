@@ -2225,7 +2225,7 @@ namespace HeartopiaMod
 
             HashSet<uint> netIds = new HashSet<uint>();
             string scanSource = string.Empty;
-            bool hasPlayerPos = this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos);
+            bool hasPlayerPos = this.TryGetHomelandFarmRegionCenter(out Vector3 playerPos);
             float buildRadiusSq = -1f;
             if (hasPlayerPos)
             {
@@ -2234,7 +2234,7 @@ namespace HeartopiaMod
                 // far entities and froze the game. A wider default is still used for whole-field modes.
                 float radius = scanRadiusOverride > 0f
                     ? scanRadiusOverride + 2f
-                    : Mathf.Max(this.homelandFarmWaterRadius, HomelandFarmDefaultWaterRadius);
+                    : Mathf.Max(this.HomelandFarmScanRadius, HomelandFarmDefaultWaterRadius);
                 if (!this.TryHomelandFarmCollectFarmEntityNetIds(
                         netIds,
                         out scanSource,
@@ -2278,7 +2278,7 @@ namespace HeartopiaMod
                 if (buildRadiusSq >= 0f
                     && this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 netIdPos)
                     && netIdPos != Vector3.zero
-                    && (netIdPos - playerPos).sqrMagnitude > buildRadiusSq)
+                    && this.HomelandFarmIsOutsideScanRegion(netIdPos, playerPos, buildRadiusSq))
                 {
                     continue;
                 }
@@ -2329,7 +2329,7 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                if ((target.Position - center).sqrMagnitude > radiusSq)
+                if (this.HomelandFarmIsOutsideScanRegion(target.Position, center, radiusSq))
                 {
                     targets.RemoveAt(i);
                 }
@@ -2502,8 +2502,8 @@ namespace HeartopiaMod
             HashSet<uint> netIds = preCollectedNetIds;
             bool hasPlayerPos = useCapturedScanCenter || useAutoFarmCollectShortcuts
                 ? this.TryGetHomelandFarmScanCenter(out Vector3 playerPos)
-                : this.TryGetHomelandFarmPlayerPosition(out playerPos);
-            float radius = this.homelandFarmWaterRadius;
+                : this.TryGetHomelandFarmRegionCenter(out playerPos);
+            float radius = this.HomelandFarmScanRadius;
             if (netIds == null)
             {
                 netIds = new HashSet<uint>();
@@ -2631,7 +2631,7 @@ namespace HeartopiaMod
                     if (hasPlayerPos
                         && this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 cropPos)
                         && cropPos != Vector3.zero
-                        && (cropPos - playerPos).sqrMagnitude > radiusSq)
+                        && this.HomelandFarmIsOutsideScanRegion(cropPos, playerPos, radiusSq))
                     {
                         continue;
                     }
@@ -2666,7 +2666,7 @@ namespace HeartopiaMod
                     if (hasPlayerPos
                         && this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 plantPos)
                         && plantPos != Vector3.zero
-                        && (plantPos - playerPos).sqrMagnitude > radiusSq)
+                        && this.HomelandFarmIsOutsideScanRegion(plantPos, playerPos, radiusSq))
                     {
                         continue;
                     }
@@ -2724,7 +2724,7 @@ namespace HeartopiaMod
                     if (hasPlayerPos
                         && this.TryHomelandFarmResolveFarmEntityPosition(cropNetId, out Vector3 cropPos)
                         && cropPos != Vector3.zero
-                        && (cropPos - playerPos).sqrMagnitude > radiusSq)
+                        && this.HomelandFarmIsOutsideScanRegion(cropPos, playerPos, radiusSq))
                     {
                         continue;
                     }
@@ -2846,8 +2846,8 @@ namespace HeartopiaMod
             }
 
             HashSet<uint> netIds = new HashSet<uint>();
-            bool hasPlayerPos = this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos);
-            float radius = this.homelandFarmWaterRadius;
+            bool hasPlayerPos = this.TryGetHomelandFarmRegionCenter(out Vector3 playerPos);
+            float radius = this.HomelandFarmScanRadius;
             if (hasPlayerPos)
             {
                 this.TryHomelandFarmCollectFarmEntityNetIds(
@@ -2883,7 +2883,7 @@ namespace HeartopiaMod
                 if (hasPlayerPos
                     && this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 plantPos)
                     && plantPos != Vector3.zero
-                    && (plantPos - playerPos).sqrMagnitude > radiusSq)
+                    && this.HomelandFarmIsOutsideScanRegion(plantPos, playerPos, radiusSq))
                 {
                     continue;
                 }
@@ -2906,6 +2906,7 @@ namespace HeartopiaMod
 
         // Center used by the radius scans. During auto farming this returns the captured
         // planter-zone center so the working set stays fixed even if the player nudges around.
+        // Otherwise the region center: the own plot's center in whole-homeland mode, else the player.
         private bool TryGetHomelandFarmScanCenter(out Vector3 pos)
         {
             if (this.homelandFarmScanCenterOverride.HasValue)
@@ -2914,7 +2915,7 @@ namespace HeartopiaMod
                 return true;
             }
 
-            return this.TryGetHomelandFarmPlayerPosition(out pos);
+            return this.TryGetHomelandFarmRegionCenter(out pos);
         }
 
         private bool TryGetHomelandFarmPlayerPosition(out Vector3 pos)
@@ -6673,7 +6674,7 @@ namespace HeartopiaMod
                         }
 
                         float cachedDistanceSq = (cachedPos - scanCenter).sqrMagnitude;
-                        if (cachedDistanceSq > radiusSq)
+                        if (this.HomelandFarmIsOutsideScanRegion(cachedPos, scanCenter, radiusSq))
                         {
                             continue;
                         }
@@ -6761,7 +6762,7 @@ namespace HeartopiaMod
                     {
                         Vector3 delta = candidatePosition - scanCenter;
                         float distanceSq = delta.sqrMagnitude;
-                        if (distanceSq > radiusSq)
+                        if (this.HomelandFarmIsOutsideScanRegion(candidatePosition, scanCenter, radiusSq))
                         {
                             outOfRadius++;
                             continue;
@@ -7220,9 +7221,9 @@ namespace HeartopiaMod
 
         private bool TryHomelandFarmCollectFarmEntityNetIds(HashSet<uint> output, out string source)
         {
-            if (this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos))
+            if (this.TryGetHomelandFarmRegionCenter(out Vector3 playerPos))
             {
-                float radius = Mathf.Max(this.homelandFarmWaterRadius, HomelandFarmDefaultWaterRadius);
+                float radius = Mathf.Max(this.HomelandFarmScanRadius, HomelandFarmDefaultWaterRadius);
                 return this.TryHomelandFarmCollectFarmEntityNetIds(
                     output,
                     out source,
@@ -7690,7 +7691,7 @@ namespace HeartopiaMod
                 }
 
                 Vector3 pos = snapshot[i].Value;
-                if (pos == Vector3.zero || (pos - center).sqrMagnitude > radiusSq)
+                if (pos == Vector3.zero || this.HomelandFarmIsOutsideScanRegion(pos, center, radiusSq))
                 {
                     continue;
                 }
@@ -7945,7 +7946,7 @@ namespace HeartopiaMod
                 // and do not expose a position); the diagnostic/scan stage applies the final radius gate.
                 if (this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 pos)
                     && pos != Vector3.zero
-                    && (pos - center).sqrMagnitude > radiusSq)
+                    && this.HomelandFarmIsOutsideScanRegion(pos, center, radiusSq))
                 {
                     continue;
                 }
@@ -8916,7 +8917,7 @@ namespace HeartopiaMod
                     // dropped as skippedNoPos AND short-circuits the real entity scan → nothing found.
                     // Capture's world-wide component scan registers many such zero-position boxes.
                     if (registered.LastPosition == Vector3.zero
-                        || (registered.LastPosition - scanCenter).sqrMagnitude > radiusSq)
+                        || this.HomelandFarmIsOutsideScanRegion(registered.LastPosition, scanCenter, radiusSq))
                     {
                         continue;
                     }
@@ -8989,7 +8990,7 @@ namespace HeartopiaMod
                 if (radiusSq > 0f
                     && this.TryHomelandFarmResolveFarmEntityPosition(seedNetId, out Vector3 seedPos)
                     && seedPos != Vector3.zero
-                    && (seedPos - scanCenter).sqrMagnitude > radiusSq)
+                    && this.HomelandFarmIsOutsideScanRegion(seedPos, scanCenter, radiusSq))
                 {
                     continue;
                 }
@@ -9132,7 +9133,7 @@ namespace HeartopiaMod
                 }
 
                 float distanceSq = (candidatePosition - scanCenter).sqrMagnitude;
-                if (distanceSq > radiusSq)
+                if (this.HomelandFarmIsOutsideScanRegion(candidatePosition, scanCenter, radiusSq))
                 {
                     continue;
                 }
@@ -10536,13 +10537,13 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (!this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos))
+            if (!this.TryGetHomelandFarmRegionCenter(out Vector3 playerPos))
             {
                 this.HomelandFarmLog("Water diagnostics: player position unavailable.");
                 return;
             }
 
-            float radius = this.homelandFarmWaterRadius;
+            float radius = this.HomelandFarmScanRadius;
             HashSet<uint> netIds = new HashSet<uint>();
             if (!this.TryHomelandFarmCollectFarmEntityNetIds(
                     netIds,
@@ -10595,7 +10596,7 @@ namespace HeartopiaMod
                 }
 
                 float distance = Vector3.Distance(position, playerPos);
-                if (distance * distance > radiusSq)
+                if (this.HomelandFarmIsOutsideScanRegion(position, playerPos, radiusSq))
                 {
                     skippedOutOfRadius++;
                     continue;
@@ -11724,7 +11725,22 @@ namespace HeartopiaMod
             // otherwise be classified here and crash on an unloaded entity.
             this.ClearHomelandFarmAutoCaches();
 
-            if (!this.TryGetHomelandFarmPlayerPosition(out Vector3 center))
+            // Whole homeland: the player must be on (or right beside) the plot so its planters are
+            // loaded — ECS entities stream around the player, not the plot. The action gate already
+            // resolved the rectangle; this only checks where we stand relative to it.
+            if (!this.TryHomelandFarmIsPlayerNearOwnPlotForCapture(out float plotEdgeDistance))
+            {
+                this.homelandFarmAutoCaptured = false;
+                this.homelandFarmLastStatus = "homeland_farm.whole_plot_capture_far";
+                this.AddMenuNotification(
+                    this.LF("homeland_farm.whole_plot_capture_far_detail", plotEdgeDistance.ToString("F0")),
+                    new Color(1f, 0.75f, 0.45f));
+                this.HomelandFarmLog("Auto capture refused: " + plotEdgeDistance.ToString("F0")
+                    + "m from the own plot edge (limit " + HomelandFarmPlotCaptureMaxEdgeDistanceMeters.ToString("F0") + "m).");
+                return;
+            }
+
+            if (!this.TryGetHomelandFarmRegionCenter(out Vector3 center))
             {
                 this.homelandFarmAutoCaptured = false;
                 this.homelandFarmLastStatus = "Auto farm: could not read player position.";
@@ -11732,7 +11748,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            float radius = this.homelandFarmWaterRadius;
+            float radius = this.HomelandFarmScanRadius;
 
             // NOTE: do NOT force a dictionary rebuild here. TryHomelandFarmCacheAuraLevelObjectPositions
             // with allowDictionaryScan:true clears the cache and re-enumerates LevelObjectManager._dictionary,
@@ -11743,6 +11759,22 @@ namespace HeartopiaMod
             // what crashed Capture immediately with no log.
             HashSet<uint> farmNetIds = new HashSet<uint>();
             this.TryHomelandFarmCollectFarmEntityNetIds(farmNetIds, out _, center, radius + 2f, useAutoFarmCollectShortcuts: false);
+
+            // Whole homeland: the funnel's game-side sphere/cylinder sources are not rectangle-cut
+            // (only the position-filtered ones are), so cut the raw set to the own plot here — every
+            // tier below and the captured no-scan source derive from it. Unknown position → keep.
+            if (this.HomelandFarmPlotModeActive && farmNetIds.Count > 0)
+            {
+                float plotCutRadiusSq = (radius + 2f) * (radius + 2f);
+                int outsidePlot = farmNetIds.RemoveWhere(farmNetId =>
+                    this.TryHomelandFarmResolveFarmEntityPosition(farmNetId, out Vector3 farmPos)
+                    && farmPos != Vector3.zero
+                    && this.HomelandFarmIsOutsideScanRegion(farmPos, center, plotCutRadiusSq));
+                if (outsidePlot > 0)
+                {
+                    this.HomelandFarmLog("Auto capture: dropped " + outsidePlot + " farm entity(ies) outside the own plot.");
+                }
+            }
 
             // Resolve crop boxes with the same tiered logic the sow slot scan uses, taking the
             // UNION of every tier (not just the first that yields) so nothing is dropped:
@@ -11786,13 +11818,13 @@ namespace HeartopiaMod
                 }
 
                 // Match the crop scan's filter semantics: exclude a box ONLY when its position is
-                // known AND provably outside the radius. Crop-box positions live solely in the
-                // level-object cache; if that cache is incomplete the position won't resolve, and
-                // dropping such boxes (the old behaviour) caused the intermittent undercount.
-                // Unknown position → keep it.
+                // known AND provably outside the region (sphere, or the own plot rectangle in
+                // whole-homeland mode). Crop-box positions live solely in the level-object cache;
+                // if that cache is incomplete the position won't resolve, and dropping such boxes
+                // (the old behaviour) caused the intermittent undercount. Unknown position → keep it.
                 if (this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 boxPos)
                     && boxPos != Vector3.zero
-                    && (boxPos - center).sqrMagnitude > captureRadiusSq)
+                    && this.HomelandFarmIsOutsideScanRegion(boxPos, center, captureRadiusSq))
                 {
                     excludedOutsideRadius++;
                     continue;
@@ -11933,7 +11965,10 @@ namespace HeartopiaMod
                 "Auto farm: captured " + planterCount + " planter(s)" + radiusNote,
                 excludedOutsideRadius > 0 ? new Color(1f, 0.85f, 0.4f)
                     : (planterCount > 0 ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.75f, 0.45f)));
-            this.HomelandFarmLog("Auto capture center=" + center + " radius=" + radius.ToString("F0") + " planters=" + planterCount);
+            this.HomelandFarmLog("Auto capture center=" + center + " radius=" + radius.ToString("F0") + " planters=" + planterCount
+                + (this.HomelandFarmPlotModeActive
+                    ? " region=own plot " + this.homelandFarmPlotRegion.Width.ToString("F0") + "x" + this.homelandFarmPlotRegion.Depth.ToString("F0") + "m"
+                    : " region=sphere"));
         }
 
         private void StartHomelandFarmAuto()
@@ -12170,7 +12205,7 @@ namespace HeartopiaMod
             }
 
             HashSet<uint> farmNetIds = new HashSet<uint>();
-            this.TryHomelandFarmCollectFarmEntityNetIds(farmNetIds, out _, center, this.homelandFarmWaterRadius + 2f);
+            this.TryHomelandFarmCollectFarmEntityNetIds(farmNetIds, out _, center, this.HomelandFarmScanRadius + 2f);
             foreach (uint netId in farmNetIds)
             {
                 if (netId != 0U
@@ -12193,7 +12228,7 @@ namespace HeartopiaMod
                     scanNetIds,
                     out _,
                     center,
-                    this.homelandFarmWaterRadius + 2f,
+                    this.HomelandFarmScanRadius + 2f,
                     useAutoFarmCollectShortcuts: false);
             }
 
@@ -12474,7 +12509,7 @@ namespace HeartopiaMod
                     farmNetIds,
                     out _,
                     scanCenter,
-                    this.homelandFarmWaterRadius + 2f,
+                    this.HomelandFarmScanRadius + 2f,
                     useAutoFarmCollectShortcuts: false);
             }
 
@@ -12663,6 +12698,13 @@ namespace HeartopiaMod
                         && currentFieldOwner != this.homelandFarmAutoFieldOwnerNetId)
                     {
                         inHomeland = false;
+                    }
+
+                    // Whole homeland: re-resolve the own plot rectangle while on the field (throttled,
+                    // sequential with the farm's own Aura passes — never from another coroutine).
+                    if (inHomeland)
+                    {
+                        this.HomelandFarmAutoRefreshPlotRegion();
                     }
 
                     // Privacy pause: hold the whole tick while another player stands within the
@@ -13346,7 +13388,7 @@ namespace HeartopiaMod
                     scanNetIds,
                     out _,
                     scanCenter,
-                    this.homelandFarmWaterRadius + 2f,
+                    this.HomelandFarmScanRadius + 2f,
                     useAutoFarmCollectShortcuts: true);
             }
 
@@ -13527,6 +13569,21 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // Whole homeland: the own plot rectangle must resolve in this level (no-op when off).
+            // Before the homeland gate on purpose: off the own homeland the mode-specific message
+            // is the useful one, and the gate's visiting pre-scan would otherwise run against a
+            // rectangle left over from the home level.
+            if (!this.TryHomelandFarmEnsurePlotRegionForAction(out blockReason))
+            {
+                this.HomelandFarmLog("Action blocked: " + blockReason);
+                if (!silent)
+                {
+                    this.AddMenuNotification(this.FormatHomelandFarmBlockNotification(blockReason), new Color(1f, 0.55f, 0.45f));
+                }
+
+                return false;
+            }
+
             if (!this.TryHomelandFarmIsInHomeland(out blockReason, allowVisitingFarmArea))
             {
                 this.HomelandFarmLog("Action blocked: " + blockReason);
@@ -13579,7 +13636,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            this.HomelandFarmLog("Start water mode=" + mode + " radius=" + this.homelandFarmWaterRadius);
+            this.HomelandFarmLog("Start water mode=" + mode + " radius=" + this.HomelandFarmScanRadius);
             this.homelandFarmLastStatus = "Watering homeland farm (" + mode + ")...";
             this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmWaterRoutine(mode, silent));
         }
@@ -13656,6 +13713,18 @@ namespace HeartopiaMod
                 if (!silent)
                 {
                     this.AddMenuNotification("Homeland farm action already running.", new Color(0.45f, 0.88f, 1f));
+                }
+
+                return;
+            }
+
+            // Same whole-homeland gate as TryBeginHomelandFarmAction (this path bypasses it), and
+            // in the same place: ahead of the homeland gate.
+            if (!this.TryHomelandFarmEnsurePlotRegionForAction(out string plotBlockReason))
+            {
+                if (!silent)
+                {
+                    this.AddMenuNotification(this.FormatHomelandFarmBlockNotification(plotBlockReason), new Color(1f, 0.55f, 0.45f));
                 }
 
                 return;
@@ -13805,7 +13874,7 @@ namespace HeartopiaMod
                     || mode == HomelandFarmWaterMode.Friends
                     || localRadius;
                 // InRadius and ForceFlowers only need the local radius scanned — keeps the scan fast (no freeze).
-                float scanRadiusOverride = localRadius ? this.homelandFarmWaterRadius : 0f;
+                float scanRadiusOverride = localRadius ? this.HomelandFarmScanRadius : 0f;
                 // Frame-budgeted scan: drive the sliced routine so the target build never stalls a frame.
                 HomelandFarmWaterScanResult waterScan = new HomelandFarmWaterScanResult();
                 IEnumerator waterScanDrive = this.ScanHomelandFarmWaterTargetsRoutine(waterScan, allowVisitingFarmArea, scanRadiusOverride);
@@ -13834,10 +13903,10 @@ namespace HeartopiaMod
                 {
                     case HomelandFarmWaterMode.InRadius:
                     case HomelandFarmWaterMode.ForceFlowers:
-                        if (this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos))
+                        if (this.TryGetHomelandFarmRegionCenter(out Vector3 playerPos))
                         {
-                            this.FilterHomelandFarmByRadius(targets, playerPos, this.homelandFarmWaterRadius);
-                            this.HomelandFarmLog("Water after radius filter: " + targets.Count + "/" + scannedCount + " radius=" + this.homelandFarmWaterRadius);
+                            this.FilterHomelandFarmByRadius(targets, playerPos, this.HomelandFarmScanRadius);
+                            this.HomelandFarmLog("Water after radius filter: " + targets.Count + "/" + scannedCount + " radius=" + this.HomelandFarmScanRadius);
                         }
                         else
                         {
@@ -17211,8 +17280,8 @@ namespace HeartopiaMod
             this.TryGetHomelandFarmPlayerNetId(out uint playerNetId, out _);
             bool hasPlayerPos = useAutoFarmCollectShortcuts
                 ? this.TryGetHomelandFarmScanCenter(out Vector3 playerPos)
-                : this.TryGetHomelandFarmPlayerPosition(out playerPos);
-            float radius = this.homelandFarmWaterRadius;
+                : this.TryGetHomelandFarmRegionCenter(out playerPos);
+            float radius = this.HomelandFarmScanRadius;
             HashSet<uint> cropNetIds = new HashSet<uint>();
             if (hasPlayerPos)
             {
@@ -17269,6 +17338,22 @@ namespace HeartopiaMod
             if (cropBoxNetIds.Count == 0)
             {
                 this.TryHomelandFarmCollectComponentsNetIds(cropBoxNetIds, "CropBoxComponent(empty)");
+            }
+
+            // Whole homeland: the world-wide component fallback above returns EVERY loaded crop box,
+            // neighbours' included, and the per-box owner read lets an unresolved owner through. Cut
+            // it to the own plot rectangle here (boxes without a known position stay, as everywhere).
+            if (this.HomelandFarmPlotModeActive && hasPlayerPos && cropBoxNetIds.Count > 0)
+            {
+                float plotRadiusSq = radius * radius;
+                int outsidePlot = cropBoxNetIds.RemoveWhere(boxNetId =>
+                    this.TryHomelandFarmResolveFarmEntityPosition(boxNetId, out Vector3 boxPos)
+                    && boxPos != Vector3.zero
+                    && this.HomelandFarmIsOutsideScanRegion(boxPos, playerPos, plotRadiusSq));
+                if (outsidePlot > 0)
+                {
+                    this.HomelandFarmLog("Sow slot scan: dropped " + outsidePlot + " crop box(es) outside the own plot.");
+                }
             }
 
             this.HomelandFarmLog("Sow slot scan: cropBoxes=" + cropBoxNetIds.Count + " marking occupied...");
@@ -17796,7 +17881,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            this.HomelandFarmLog("Start sow all source=" + this.homelandFarmSeedStorage + " radius=" + this.homelandFarmWaterRadius.ToString("F1") + (maxCount == int.MaxValue ? string.Empty : " cap=" + maxCount));
+            this.HomelandFarmLog("Start sow all source=" + this.homelandFarmSeedStorage + " radius=" + this.HomelandFarmScanRadius.ToString("F1") + (maxCount == int.MaxValue ? string.Empty : " cap=" + maxCount));
             this.homelandFarmLastStatus = "Sowing crops...";
             this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmSowAllRoutine(silent, maxCount));
         }
@@ -17821,7 +17906,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            this.HomelandFarmLog("Start fertilize all source=" + this.homelandFarmFertStorage + " radius=" + this.homelandFarmWaterRadius.ToString("F1") + (maxCount == int.MaxValue ? string.Empty : " cap=" + maxCount) + (requiredStaticId > 0 ? " item=" + requiredStaticId : string.Empty) + (requiredEffectType < 0 ? string.Empty : " effect=" + requiredEffectType));
+            this.HomelandFarmLog("Start fertilize all source=" + this.homelandFarmFertStorage + " radius=" + this.HomelandFarmScanRadius.ToString("F1") + (maxCount == int.MaxValue ? string.Empty : " cap=" + maxCount) + (requiredStaticId > 0 ? " item=" + requiredStaticId : string.Empty) + (requiredEffectType < 0 ? string.Empty : " effect=" + requiredEffectType));
             this.homelandFarmLastStatus = requiredEffectType == HomelandFarmFertilizerEffectGrowthRate ? "Applying growth booster..." : "Fertilizing crops...";
             this.homelandFarmCoroutine = ModCoroutines.Start(this.HomelandFarmFertilizeAllRoutine(silent, maxCount, requiredEffectType, requiredStaticId));
         }
@@ -18043,13 +18128,13 @@ namespace HeartopiaMod
                 }
 
                 HashSet<uint> scanNetIds = new HashSet<uint>();
-                if (this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos))
+                if (this.TryGetHomelandFarmRegionCenter(out Vector3 playerPos))
                 {
                     this.TryHomelandFarmCollectFarmEntityNetIds(
                         scanNetIds,
                         out _,
                         playerPos,
-                        this.homelandFarmWaterRadius + 2f,
+                        this.HomelandFarmScanRadius + 2f,
                         useAutoFarmCollectShortcuts: false,
                         allowCapturedFieldShortcut: true);
                 }

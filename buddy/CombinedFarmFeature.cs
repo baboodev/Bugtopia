@@ -1128,8 +1128,8 @@ namespace HeartopiaMod
             sliceEmptySinceAt = -999f;
             switchWantedSinceAt = -999f;
 
-            // Order matters: hand every farm back to itself first, THEN release the broker, so the
-            // farms' own capture/restore stays disabled until the player's tool has been put back.
+            // Resume the farms before releasing the broker; restore the player's tool only when
+            // no farm remains enabled.
             ResumeAll(host);
             FarmToolBroker.Release(host, restoreTool: CountEnabledFarms() == 0);
             FeatureLog.Toggle(LogTag, false, reason);
@@ -1629,7 +1629,7 @@ namespace HeartopiaMod
             string held = "?";
             // Only ask for the held tool once GetTool has answered at least once: that proves the
             // ToolSystem module is resolved and warm, so this cannot trigger a COLD resolve racing
-            // the GC (the crash class documented at BirdNetFarm.CapturePreviousTool).
+            // the GC (the crash previously seen when enabling the bird farm).
             if (toolSystemProbeConfirmed && host.TryGetCurrentToolInfo(out int heldToolId, out string heldToolName, out string _))
             {
                 held = heldToolId + (string.IsNullOrEmpty(heldToolName) ? string.Empty : "/" + heldToolName);

@@ -1011,6 +1011,13 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 - **Notes:** the game's own `FieldComponent.CheckInArea(pos, safeDis)` is deliberately NOT used — it widens the rectangle per axis (Chebyshev), so a player off a corner counts as near at `radius·√2`
 - **Files:** `HomelandFarmPrivacyPauseFeature.cs`
 
+#### `HomelandFarmPlotRegionFeature`
+- **"Whole homeland" scan region:** every Homeland Farm spatial cut (capture, auto loop, manual buttons, hotkeys) runs against the player's OWN plot rectangle instead of the Farm Radius sphere — one predicate, `HomelandFarmIsOutsideScanRegion`
+- **Game types:** `Entities.fieldSystem` → `FieldComponentSystem.GetFieldByOwnerId(selfNetId)`, `FieldComponent.minCorner/maxCorner/fieldZone`, `LevelObject.localToWorldMatrix` (shared resolver `TryResolveHomelandFarmPlotForOwner` in the privacy-pause file)
+- **Access:** **A** (AuraMono only; values copied out under pins, no object pointer cached)
+- **Notes:** a larger radius would NOT mean "only my plot" — neighbours' plots sit metres away in shared towns and the sow owner read lets an unresolved `ownerId` through; with the mode on, a level without the own plot refuses the action rather than falling back to a sphere
+- **Files:** `HomelandFarmPlotRegionFeature.cs`, `HomelandFarmFeature.cs` (`HomelandFarmScanRadius`, `TryGetHomelandFarmRegionCenter`)
+
 ---
 
 ### 3.18 Snow sculpting
@@ -1165,6 +1172,7 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 | Shop buy-all coin | ShopSystem, ShopItemData, ShopShelfProtocolManager, BuyStoreItemCommand, ClothesStoreEntry, ClothesStoreBuyItemsCommand, PlayerServiceSystem | ShopBuyAllFeature.cs | A (+ R listing/buy fallback) |
 | Homeland sow/fertilize | CropProtocolManager, GrowCropNetworkCommand, SeedBagCommand, BuildSingle, CropComponent | HomelandFarmFeature.cs | A + R |
 | Homeland privacy pause | Entities.fieldSystem, FieldComponentSystem.GetFieldByOwnerId, FieldComponent.minCorner/maxCorner, LevelObject.localToWorldMatrix, RemotePlayerComponent | HomelandFarmPrivacyPauseFeature.cs | A |
+| Homeland whole-plot scan region | Entities.fieldSystem, FieldComponentSystem.GetFieldByOwnerId(self), FieldComponent.minCorner/maxCorner/fieldZone, LevelObject.localToWorldMatrix | HomelandFarmPlotRegionFeature.cs | A |
 | Puzzle | JigsawPuzzleSystem, JigsawPuzzleProtocolManager, DataCenter | PuzzleNetFeature.cs | R + A |
 | NPC teleport | TableData.TableNpcs | HC | A + R + N |
 | Noclip / TP | Unity CharacterController, Transform | *Patch.cs | I + H |
