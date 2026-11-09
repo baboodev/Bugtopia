@@ -257,10 +257,6 @@ namespace HeartopiaMod
         // (which holds homelandFarmCoroutine). While it is set, the auto loop defers its own AuraMono
         // scans so the two never scan concurrently (back-to-back Aura passes crash).
         private object homelandFarmHotkeyCoroutine = null;
-        // Event-driven auto-farm (default ON): read crop/box state from the detour-fed event cache and
-        // skip the per-tick empty-slot radius scan when the field is full. Flip OFF to fall back to the
-        // proven always-rescan behaviour if the event path ever misbehaves in-game.
-        private bool homelandFarmAutoEventDriven = true;
         private float homelandFarmAutoNextFullFieldSowSweepAt = 0f;
         // Realtime stamp of the first ripe crop in the current burst. Negative means no burst is open.
         private float homelandFarmAutoWaveFirstRipeAt = -1f;
@@ -12910,7 +12906,7 @@ namespace HeartopiaMod
                     // growth hitch. A harvest shrinks the count so the very next tick re-enables sowing;
                     // a slow safety sweep still forces an occasional reconciling scan.
                     bool sowScanSkipped = false;
-                    if (this.homelandFarmAutoEventDriven && this.homelandFarmAutoPlanterCount > 0)
+                    if (this.homelandFarmAutoPlanterCount > 0)
                     {
                         int occupiedEstimate = this.homelandFarmAutoCropNetIds.Count + this.homelandFarmAutoPendingSowBoxNetIds.Count;
                         if (occupiedEstimate >= this.homelandFarmAutoPlanterCount
@@ -12969,7 +12965,6 @@ namespace HeartopiaMod
                     }
                     else if (!seedsExhausted
                         && !inHomeland
-                        && this.homelandFarmAutoEventDriven
                         && this.homelandFarmAutoCropNetIds.Count == 0
                         && this.homelandFarmAutoPendingSowBoxNetIds.Count == 0
                         && this.homelandFarmCapturedSowPointByBoxNetId.Count > 0

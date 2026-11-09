@@ -358,6 +358,7 @@ namespace HeartopiaMod
             data.MasterLogFurnitureAutoRepair = MasterLogFurnitureAutoRepair;
             data.MasterLogFurnitureLightRadius = MasterLogFurnitureLightRadius;
             data.MasterLogTutorialBlock = MasterLogTutorialBlock;
+            data.MasterLogHomelandFarmEventDiag = MasterLogHomelandFarmEventDiag;
             // chatTranslateVerboseLog is deliberately NOT persisted — it is a diagnostic that
             // floods the log, so it always starts OFF and must be re-armed per session.
             data.autoIceSkatingEnabled = this.autoIceSkatingEnabled;
@@ -822,6 +823,7 @@ namespace HeartopiaMod
             MasterLogFurnitureAutoRepair = data.MasterLogFurnitureAutoRepair;
             MasterLogFurnitureLightRadius = data.MasterLogFurnitureLightRadius;
             MasterLogTutorialBlock = data.MasterLogTutorialBlock;
+            MasterLogHomelandFarmEventDiag = data.MasterLogHomelandFarmEventDiag;
             this.chatTranslateVerboseLog = false; // session-only diagnostic; never restored from config
             this.autoIceSkatingEnabled = data.autoIceSkatingEnabled;
             this.autoIceSkatingMinUltimateScore = Mathf.Clamp(data.autoIceSkatingMinUltimateScore, 0, AutoIceSkatingMinUltimateScoreSliderMax);

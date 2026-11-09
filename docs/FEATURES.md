@@ -2086,13 +2086,12 @@ Crop-box (planter) farming inside your homeland. All operations are **radius-bas
 
 Tab layout (top → bottom):
 
-1. **Auto Farming** — Capture planters + Reset capture + Start / Stop. **Harvest delay** (1–5 s, default 3) is a row inside this block, shown only while auto farm is running.
+1. **Auto Farming** — Capture planters + Reset capture + Start / Stop. **Privacy Pause** (0–100 m, **0 = off**, default off, **persisted to config**) is a row inside this block, under Start / Stop, with no separate card. **Harvest delay** (1–5 s, default 3) is a row under that, shown only while auto farm is running.
 2. **Farm Radius** — single slider (1–80 m) driving every operation below; **persisted to config**.
-3. **Privacy Pause** — single slider (0–100 m, **0 = off**, default off); **persisted to config**.
-4. **Crops** — seed source (Backpack / Warehouse / Both), Refresh seeds, seed selector.
-5. **Fertilizer** — fertilizer source, Refresh fertilizers, fertilizer selector.
-6. **Operations** — buttons: Water in radius · **Force water flowers** · Harvest · Weed · Collect seeds · **Sow** · **Fertilize** · Log diagnostics.
-7. Status panel + **Stop** (cancels the running operation).
+3. **Crops** — seed source (Backpack / Warehouse / Both), Refresh seeds, seed selector.
+4. **Fertilizer** — fertilizer source, Refresh fertilizers, fertilizer selector.
+5. **Operations** — buttons: Water in radius · **Force water flowers** · Harvest · Weed · Collect seeds · **Sow** · **Fertilize** · Log diagnostics.
+6. Status panel + **Stop** (cancels the running operation).
 
 ### Manual operations (radius)
 
@@ -2122,6 +2121,8 @@ Item names in the seed/fertilizer selectors resolve through the same game-table 
 Enable `MasterLogHomelandFarm` for per-tick logs (`Auto crop timing`, `Auto poll`, `next ripe in …`).
 
 ### Privacy Pause
+
+The slider is a row inside **Auto Farming**, directly under Start / Stop, with no card of its own.
 
 Holds auto farming while **another player stands within N metres of your home plot**. The distance is
 measured to the nearest **edge of the plot rectangle**, not to a point, so it means the same thing at

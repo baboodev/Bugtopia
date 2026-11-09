@@ -154,6 +154,7 @@ namespace HeartopiaMod
         private static bool MasterLogPetFeed = false;
         private static bool MasterLogWildAnimalFeed = false;
         private static bool MasterLogHomelandFarm = false;
+        private static bool MasterLogHomelandFarmEventDiag = false;
         private static bool MasterLogPadBuild = false;
         private static bool MasterLogWildAnimalGift = false;
         private static bool MasterLogAutoIceSkating = false;

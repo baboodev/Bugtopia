@@ -374,6 +374,7 @@ namespace HeartopiaMod
             // would be a regression. The initializer must live on the CONFIG field too — an old
             // Config.xml has no element, and XmlSerializer only overwrites what is present.
             public bool MasterLogTutorialBlock = true;
+            public bool MasterLogHomelandFarmEventDiag;
             public bool autoIceSkatingEnabled;
             public int autoIceSkatingMinUltimateScore = 900;
             // Absent on an old Config.xml. The initializer is what XmlSerializer keeps, so an

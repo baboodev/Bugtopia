@@ -20,8 +20,9 @@ namespace HeartopiaMod
         // parameters BEFORE wiring any actions.
         //
         // Safety properties (mirrors the NetCook OnUpdateCookerStatus detour):
-        // - OFF by default; detours install lazily on the first toggle-on with an attempted-guard,
-        //   so a failed install is inert (no retry loop, nothing at startup).
+        // - OFF by default; detours install lazily the first time diagnostics or auto-farm needs
+        //   them, with an attempted-guard, so a failed install is inert (no retry loop, nothing
+        //   at startup). They are not installed unconditionally.
         // - Detour bodies are allocation-free, never throw, never call Mono: they push (tag, netId)
         //   value types into a fixed ring and forward via the trampoline. The `in T` data pointer
         //   is forwarded verbatim and NEVER dereferenced (GC/pointer hazard).
@@ -38,8 +39,10 @@ namespace HeartopiaMod
         private const int HomelandFarmEventDiagTagPlant = 2;
         private const int HomelandFarmEventDiagTagCropBox = 3;
 
-        // Toggle (in-session, like netCookStatusDiagEnabled; OFF by default).
-        private bool homelandFarmEventDiagEnabled = false;
+        // Last value of MasterLogHomelandFarmEventDiag observed by the pump. Starts false, so the
+        // first time the flag is true — including a value restored from config — is a rising edge
+        // and runs the ON path. A flag that stays false does not log OFF at startup.
+        private bool homelandFarmEventDiagLastSeen;
         private bool homelandFarmEventDiagDetourAttempted;
 
         // Per-component detours + keep-alives (delegate must outlive the native splice).
@@ -351,12 +354,14 @@ namespace HeartopiaMod
             }
         }
 
-        // Called from the UI when the toggle flips. Resets the dedupe/summary state so a fresh
-        // session logs a clean baseline; the detours themselves stay installed once placed
-        // (undoing a native detour at runtime is the riskier operation).
+        // Side effects of MasterLogHomelandFarmEventDiag changing. Called from the pump, not from
+        // the Logging-tab binding (that setter is a bare assignment). Resets the dedupe/summary
+        // state so a fresh session logs a clean baseline. The detours themselves stay installed
+        // once placed (undoing a native detour at runtime is the riskier operation), and the
+        // crop-state cache is left alone — flag OFF only stops the per-line logs and the summary.
         private void OnHomelandFarmEventDiagToggled()
         {
-            if (this.homelandFarmEventDiagEnabled)
+            if (MasterLogHomelandFarmEventDiag)
             {
                 this.homelandFarmEventDiagLastLoggedState.Clear();
                 this.homelandFarmEventDiagNextSummaryAt = Time.unscaledTime + 60f;
@@ -374,13 +379,21 @@ namespace HeartopiaMod
         }
 
         // Pump: installs the detours on first enable (attempted-guard) and drains the ring. Called
-        // every frame from UpdateHomelandFarmBackground; a single bool check when the toggle is off.
+        // every frame from UpdateHomelandFarmBackground. A false flag that has not changed returns
+        // before any install when auto-farm is also stopped.
         private void PumpHomelandFarmEventDiag()
         {
-            // Run when the diagnostics toggle is on OR auto-farm is running: the detour + drain feed the
-            // crop-state cache that the event-driven auto-farm reads instead of radius-rescanning. When
-            // only auto-farm needs it, the drain updates the cache but does NOT emit per-line logs.
-            bool diag = this.homelandFarmEventDiagEnabled;
+            // Run when the diagnostics flag is on OR auto-farm is running: the detour + drain feed the
+            // crop-state cache that auto-farm reads instead of radius-rescanning. The flag only enables
+            // per-line logs and the 60s summary. Turning it off does not uninstall detours and does not
+            // stop the cache while auto-farm is still running.
+            bool diag = MasterLogHomelandFarmEventDiag;
+            if (diag != this.homelandFarmEventDiagLastSeen)
+            {
+                this.homelandFarmEventDiagLastSeen = diag;
+                this.OnHomelandFarmEventDiagToggled();
+            }
+
             bool auto = this.homelandFarmAutoRunning;
             if (!diag && !auto)
             {
