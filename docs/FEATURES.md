@@ -2082,18 +2082,20 @@ Implementation: `UgcTextureCacheFeature.cs` (backend) + the "UGC TEXTURE CACHE" 
 
 ## New Features — Homeland Farm
 
-Crop-box (planter) farming inside your homeland. All operations are **radius-based** around the player and send real server commands. Implemented in `HomelandFarmFeature.cs` (resolved via reflection + **AuraMono** native path — managed component types are absent under BepInEx).
+Crop-box (planter) farming inside your homeland. Operations are **radius-based** around the player unless Whole plot is on, and they send real server commands. Implemented in `HomelandFarmFeature.cs` (resolved via reflection + **AuraMono** native path — managed component types are absent under BepInEx).
 
 Tab layout (top → bottom):
 
 1. **Auto Farming** — Capture planters + Reset capture + Start / Stop. **Privacy Pause** (0–100 m, **0 = off**, default off, **persisted to config**) is a row inside this block, under Start / Stop, with no separate card. **Harvest delay** (1–5 s, default 3) is a row under that, shown only while auto farm is running.
-2. **Farm Radius** — single slider (1–80 m) driving every operation below; **persisted to config**.
+2. **Farm Radius** — slider (1–80 m) driving every operation below, plus a **Whole plot** checkbox (`homelandFarmWholePlot`, **persisted to config**, default off). The radius slider stays enabled while the checkbox is on.
 3. **Crops** — seed source (Backpack / Warehouse / Both), Refresh seeds, seed selector.
 4. **Fertilizer** — fertilizer source, Refresh fertilizers, fertilizer selector.
 5. **Operations** — buttons: Water in radius · **Force water flowers** · Harvest · Weed · Collect seeds · **Sow** · **Fertilize** · Log diagnostics.
 6. Status panel + **Stop** (cancels the running operation).
 
 ### Manual operations (radius)
+
+On your own field with Whole plot on, capture and the actions below include every loaded own crop box and flower and ignore the slider. Off your field, while visiting, or when the owner cannot be read, the slider still applies. Only entities already loaded around the player are included, so a second distant field of the same homeland stays out until it streams in.
 
 | Button | Action | Owner filter |
 |--------|--------|--------------|

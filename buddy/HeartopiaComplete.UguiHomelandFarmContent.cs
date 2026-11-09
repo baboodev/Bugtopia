@@ -45,6 +45,9 @@ namespace HeartopiaMod
     //    first-draw sentinel is LastSeen < 0 (adopts without scheduling). A change re-arms
     //    SaveAt = now + HomelandFarmRadiusSaveDebounceSeconds, and
     //    PersistHomelandFarmAutoSyncDelay() fires only when the timer lapses. Whole seconds.
+    //  - Whole-plot checkbox → immediate persist via PersistHomelandFarmWholePlotSetting.
+    //    Click writes the field, same shape as auto-fertilize, not the radius debounce machine.
+    //    The radius slider stays enabled.
     //  - Seed/fert storage pickers + inventory selectors → NO persistence at all: picking just
     //    writes the in-memory field (:22351-22354 / :22388-22391 — a guarded plain assignment,
     //    zero side effects). Do not add a save.
@@ -97,16 +100,16 @@ namespace HeartopiaMod
     //                  the privacy row (never between Start and the privacy slider).
     //                  Collapsed 222 = privacy row ends at 208 + 14 bottom pad.
     //                  Expanded 272 = harvest row ends at 258 + 14 bottom pad.
-    //   radius card    y=242  h=88   (labels 34, slider 54)
-    //   crops card     y=342  h=160  (storage lbl 36, picker 58, refresh 90, sel 122)
-    //   fert card      y=514  h=160  (same rows; refresh 140w, count lbl at 166)
-    //   ops card       y=686  h=274  (rows 40/78/116/154 two-col + 192/230 full-width)
-    //   status card    y=972  h=52   (label 16,10, wrapped 11pt @ .82)
-    //   stop button    y=1034 (160×30); + 40 → content height 1074.
-    //                  running content height is 1124 (1074 + 50)
-    // NOTE (2026-07-22): the radius card is 88, not the source's 70 — its slider runs y=54..74 and
-    // was overflowing the card. Don't "restore" the card to source parity; the 12px inter-card
-    // gap is unchanged.
+    //   radius card    y=242  h=116  (labels 34, slider 54, whole-plot checkbox 80)
+    //   crops card     y=370  h=160  (storage lbl 36, picker 58, refresh 90, sel 122)
+    //   fert card      y=542  h=160  (same rows; refresh 140w, count lbl at 166)
+    //   ops card       y=714  h=274  (rows 40/78/116/154 two-col + 192/230 full-width)
+    //   status card    y=1000 h=52   (label 16,10, wrapped 11pt @ .82)
+    //   stop button    y=1062 (160×30); + 40 → content height 1102.
+    //                  running content height is 1152 (1102 + 50)
+    // NOTE: the radius card is 116. The slider runs y=54..74 and the whole-plot checkbox is
+    // y=80 h=22 (row ends at 102, bottom pad 14). The slider stays enabled. The 12px inter-card
+    // gap is unchanged. Don't shrink the card back to 88.
     // NOTE (2026-07-29 / 2026-10-23): the ops card is 274. Force water flowers is a full-width row
     // above the diagnostics button (that button ends at 260; +14 pad). Don't shrink the card.
     // NOTE (2026-11-04): Reset capture joined the auto card's y=38 row — CaptureButton is 140px,
@@ -198,6 +201,7 @@ namespace HeartopiaMod
             public Slider RadiusSlider;
             public GameObject RadiusValueLabel;
             public string RadiusValueShown;
+            public Toggle WholePlotToggle;
 
             // PRIVACY PAUSE row inside the auto card — 0 shows as "Off". No panel of its own.
             public Slider PrivacySlider;
@@ -248,12 +252,13 @@ namespace HeartopiaMod
         private const float UguiHomelandFarmAutoCardExpandedH = 272f;
         private const float UguiHomelandFarmRunningShift = 50f;
         private const float UguiHomelandFarmRadiusY = 242f;
-        private const float UguiHomelandFarmCropsY = 342f;
-        private const float UguiHomelandFarmFertY = 514f;
-        private const float UguiHomelandFarmOpsY = 686f;
-        private const float UguiHomelandFarmStatusY = 972f;
-        private const float UguiHomelandFarmStopY = 1034f;
-        private const float UguiHomelandFarmContentH = 1074f;
+        private const float UguiHomelandFarmRadiusH = 116f;
+        private const float UguiHomelandFarmCropsY = 370f;
+        private const float UguiHomelandFarmFertY = 542f;
+        private const float UguiHomelandFarmOpsY = 714f;
+        private const float UguiHomelandFarmStatusY = 1000f;
+        private const float UguiHomelandFarmStopY = 1062f;
+        private const float UguiHomelandFarmContentH = 1102f;
 
         // ----------------------------------------------------------------------------------------
         // Small local helpers
@@ -649,29 +654,21 @@ namespace HeartopiaMod
                 true, new System.Action<float>(this.OnUguiHomelandFarmSyncDelayChanged));
             PlaceUguiTopLeft(handle.SyncDelaySlider.gameObject, 0f, 22f, rowW, 20f);
 
-            // -------- 2. FARM RADIUS card (y=242 — :22300-22337) --------
-            // 2026-07-22: h was 70, but the slider inside runs y=54..74 — it OVERFLOWED the card by
-            // 4px and sat visually welded to its bottom edge. 88 clears the slider and leaves the
-            // same ~14px breathing room the other cards have. Every scrollContent child below moved
-            // down by the same +18 so the uniform 12px inter-card gap is preserved.
+            // -------- 2. FARM RADIUS card (y=242, h=116) --------
+            // Slider at local y=54. Whole-plot checkbox at local y=80 h=22 (ends at 102, pad 14).
+            // The slider stays enabled while the checkbox is on.
             GameObject radiusCard = this.CreateUguiSettingsMainPanel(scrollContent, "RadiusPanel",
                 this.L("homeland_farm.radius_section"));
             handle.RadiusPanel = radiusCard;
-            PlaceUguiTopLeft(radiusCard, 8f, UguiHomelandFarmRadiusY, panelW, 88f);
+            PlaceUguiTopLeft(radiusCard, 8f, UguiHomelandFarmRadiusY, panelW, UguiHomelandFarmRadiusH);
 
-            // sliderLabelStyle: bold 11 @ 0.78 (:22303-22304).
-            GameObject sliderName = this.CreateUguiLabel(radiusCard.transform, "SliderLabel",
-                this.L("homeland_farm.radius_slider_label"), 11f,
-                new Color(textColor.r, textColor.g, textColor.b, 0.78f), false);
-            this.TrySetUguiLabelBold(sliderName);
-            PlaceUguiTopLeft(sliderName, 16f, 34f, rowW * 0.55f, 18f);
-
-            // valueLabelStyle: 12pt, right-aligned (:22301-22302).
+            // The card header already says FARM RADIUS. A second "Radius" caption on this row
+            // repeated it, so only the right-aligned value (30m) stays.
             handle.RadiusValueShown = string.Empty;
             handle.RadiusValueLabel = this.CreateUguiLabel(radiusCard.transform, "SliderValue",
                 string.Empty, 12f, textColor, false);
             this.TrySetUguiLabelRightAligned(handle.RadiusValueLabel);
-            PlaceUguiTopLeft(handle.RadiusValueLabel, 16f + rowW * 0.55f, 34f, rowW * 0.45f, 18f);
+            PlaceUguiTopLeft(handle.RadiusValueLabel, 16f, 34f, rowW, 18f);
 
             // wholeNumbers = the UGUI twin of the source's Mathf.Round snap (:22315); the change
             // handler Rounds again anyway (belt and braces, and source-verbatim).
@@ -680,7 +677,12 @@ namespace HeartopiaMod
                 true, new System.Action<float>(this.OnUguiHomelandFarmRadiusChanged));
             PlaceUguiTopLeft(handle.RadiusSlider.gameObject, 16f, 54f, rowW, 20f);
 
-            // -------- 3. CROPS card (y=342, h=160 — :22340-22375) --------
+            handle.WholePlotToggle = this.CreateUguiCheckbox(radiusCard.transform, "WholePlot",
+                this.L("homeland_farm.whole_plot"), this.homelandFarmWholePlot,
+                new System.Action<bool>(this.OnUguiHomelandFarmWholePlotToggled));
+            PlaceUguiTopLeft(handle.WholePlotToggle.gameObject, 16f, 80f, rowW, 22f);
+
+            // -------- 3. CROPS card (y=370, h=160) --------
             GameObject cropsCard = this.CreateUguiSettingsMainPanel(scrollContent, "CropsPanel",
                 this.L("homeland_farm.sow_section"));
             handle.CropsPanel = cropsCard;
@@ -711,7 +713,7 @@ namespace HeartopiaMod
                 () => this.homelandFarmSelectedSeedIndex,
                 v => this.homelandFarmSelectedSeedIndex = v);
 
-            // -------- 4. FERTILIZER card (y=514, h=160 — :22377-22412) --------
+            // -------- 4. FERTILIZER card (y=542, h=160) --------
             GameObject fertCard = this.CreateUguiSettingsMainPanel(scrollContent, "FertPanel",
                 this.L("homeland_farm.fertilize_section"));
             handle.FertPanel = fertCard;
@@ -797,7 +799,7 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.OpsButtons[9], 16f, 230f, rowW, 30f);
             this.TrySetUguiButtonLabelSize(handle.OpsButtons[9], 12f);
 
-            // -------- 6. Status card (y=972, h=52 — :22501-22508) --------
+            // -------- 6. Status card (y=1000, h=52) --------
             // Headerless panel (the source box carries no label — Animal Care's "" precedent).
             GameObject statusCard = this.CreateUguiSettingsMainPanel(scrollContent, "StatusPanel",
                 string.Empty);
@@ -813,14 +815,14 @@ namespace HeartopiaMod
             this.TrySetUguiLabelWrapped(handle.StatusLabel);
             PlaceUguiTopLeft(handle.StatusLabel, 16f, 10f, rowW, 36f);
 
-            // -------- 7. Stop button (y=1034 — :22510-22515) --------
+            // -------- 7. Stop button (y=1062, 160×30) --------
             handle.StopButton = this.CreateUguiPrimaryButton(scrollContent, "StopButton",
                 this.L("homeland_farm.stop"),
                 new System.Action(this.OnUguiHomelandFarmStopClicked));
             PlaceUguiTopLeft(handle.StopButton, 8f, UguiHomelandFarmStopY, 160f, 30f);
 
-            // Cursor chain end (file header): stop button 1034 + the trailing 40 = 1074.
-            // A running auto farm adds UguiHomelandFarmRunningShift (50) in the sync pass.
+            // Cursor chain end (file header): stop button 1062 + the trailing 40 = 1102.
+            // A running auto farm adds UguiHomelandFarmRunningShift (50) → 1152.
             this.SetUguiScrollContentHeight(scrollContent, UguiHomelandFarmContentH);
 
             // Seed every dynamic state once (texts, interactables, segment styles, selector
@@ -1008,6 +1010,7 @@ namespace HeartopiaMod
             }
             this.SyncUguiSelfLabelText(handle.RadiusValueLabel, ref handle.RadiusValueShown,
                 $"{this.homelandFarmWaterRadius:F0}m"); // :22313
+            this.SyncUguiToggleFromField(handle.WholePlotToggle, this.homelandFarmWholePlot);
 
             // -------- HARVEST DELAY --------
             if (handle.SyncDelaySlider != null
@@ -1156,6 +1159,18 @@ namespace HeartopiaMod
             this.homelandFarmWaterRadius = Mathf.Round(value);
         }
 
+        // Immediate persist. Not the radius debounce machine.
+        private void OnUguiHomelandFarmWholePlotToggled(bool value)
+        {
+            if (value == this.homelandFarmWholePlot)
+            {
+                return;
+            }
+
+            this.homelandFarmWholePlot = value;
+            this.PersistHomelandFarmWholePlotSetting();
+        }
+
         // Privacy-pause radius. Same shape as the farm-radius handler: a plain rounded field
         // write, with the debounce machine in the processor picking the change up.
         private void OnUguiHomelandFarmPrivacyRadiusChanged(float value)
@@ -1179,7 +1194,7 @@ namespace HeartopiaMod
             float panelW = handle.PanelW;
             float cardH = shown ? UguiHomelandFarmAutoCardExpandedH : UguiHomelandFarmAutoCardCollapsedH;
             PlaceUguiTopLeft(handle.AutoPanel, 8f, 8f, panelW, cardH);
-            PlaceUguiTopLeft(handle.RadiusPanel, 8f, UguiHomelandFarmRadiusY + shift, panelW, 88f);
+            PlaceUguiTopLeft(handle.RadiusPanel, 8f, UguiHomelandFarmRadiusY + shift, panelW, UguiHomelandFarmRadiusH);
             PlaceUguiTopLeft(handle.CropsPanel, 8f, UguiHomelandFarmCropsY + shift, panelW, 160f);
             PlaceUguiTopLeft(handle.FertPanel, 8f, UguiHomelandFarmFertY + shift, panelW, 160f);
             PlaceUguiTopLeft(handle.OpsPanel, 8f, UguiHomelandFarmOpsY + shift, panelW, 274f);

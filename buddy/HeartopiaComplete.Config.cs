@@ -409,6 +409,7 @@ namespace HeartopiaMod
             data.netCookUseAllIngredients = this.netCookUseAllIngredients;
             data.netCookCookQuantity = 1;
             data.homelandFarmWaterRadius = this.homelandFarmWaterRadius;
+            data.homelandFarmWholePlot = this.homelandFarmWholePlot;
             data.homelandFarmAutoFertilizeEnabled = this.homelandFarmAutoFertilizeEnabled;
             data.homelandFarmPrivacyRadius = this.homelandFarmPrivacyRadius;
             data.homelandFarmAutoSyncDelaySeconds = this.homelandFarmAutoSyncDelaySeconds;
@@ -884,6 +885,7 @@ namespace HeartopiaMod
             this.netCookUseAllIngredients = data.netCookUseAllIngredients;
             this.ResetNetCookDishLimitToDefault();
             this.homelandFarmWaterRadius = Mathf.Clamp(data.homelandFarmWaterRadius > 0f ? data.homelandFarmWaterRadius : HomelandFarmDefaultWaterRadius, HomelandFarmMinWaterRadius, HomelandFarmMaxWaterRadius);
+            this.homelandFarmWholePlot = data.homelandFarmWholePlot;
             this.homelandFarmAutoFertilizeEnabled = data.homelandFarmAutoFertilizeEnabled;
             this.homelandFarmPrivacyRadius = Mathf.Clamp(data.homelandFarmPrivacyRadius, HomelandFarmPrivacyMinRadius, HomelandFarmPrivacyMaxRadius);
             this.homelandFarmAutoSyncDelaySeconds = HomelandFarmAutoWave.ClampSyncDelaySeconds(

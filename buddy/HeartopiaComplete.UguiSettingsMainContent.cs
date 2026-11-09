@@ -235,7 +235,7 @@ namespace HeartopiaMod
                 new UguiLoggingToggleBinding(() => MasterLogFurnitureAutoRepair, v => MasterLogFurnitureAutoRepair = v, "Furniture Auto Repair"),
                 new UguiLoggingToggleBinding(() => MasterLogFurnitureLightRadius, v => MasterLogFurnitureLightRadius = v, "Furniture Lights"),
                 new UguiLoggingToggleBinding(() => MasterLogTutorialBlock, v => MasterLogTutorialBlock = v, "Tutorial Block"),
-                new UguiLoggingToggleBinding(() => MasterLogHomelandFarmEventDiag, v => MasterLogHomelandFarmEventDiag = v, "Event Diagnostics (log)")
+                new UguiLoggingToggleBinding(() => MasterLogHomelandFarmEventDiag, v => MasterLogHomelandFarmEventDiag = v, "Homeland Farm Events")
             };
         }
 

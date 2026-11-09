@@ -203,6 +203,9 @@ namespace HeartopiaMod
         private static readonly string[] HomelandFarmStorageNames = { "Backpack", "Warehouse" };
 
         private float homelandFarmWaterRadius = HomelandFarmDefaultWaterRadius;
+        // Whole plot ignores the radius slider, but only while the player is standing in their own
+        // field (TryHomelandFarmUseWholeOwnPlot). Default off; a missing config element stays false.
+        private bool homelandFarmWholePlot = false;
         // Debounced persistence of the radius slider: sliders fire every frame while dragging, so we
         // save to config a short moment after the value settles instead of on every change.
         private float homelandFarmWaterRadiusLastSeen = -1f;
@@ -242,6 +245,10 @@ namespace HeartopiaMod
         private bool homelandFarmAutoCaptured = false;
         private Vector3 homelandFarmAutoCenter = Vector3.zero;
         private float homelandFarmAutoCaptureRadius = 0f;
+        // True when this capture snapshot was taken in whole-plot mode. The captured-field shortcut
+        // may serve it only while the current gate matches; a radius capture must not satisfy a
+        // whole-plot request, and a whole-plot capture must not satisfy a radius request.
+        private bool homelandFarmAutoCaptureWholePlot = false;
         private int homelandFarmAutoPlanterCount = 0;
         // WorldReadyEpoch at the moment the planters were captured (0 = no stamp). Lazy-epoch idiom
         // (PetPoopFeature.RefreshPetPoopEntries): when the epoch moved on while the snapshot idled,
@@ -2223,6 +2230,16 @@ namespace HeartopiaMod
             string scanSource = string.Empty;
             bool hasPlayerPos = this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos);
             float buildRadiusSq = -1f;
+            // scanRadiusOverride == 0 still means "not narrower than 30 m". Whole plot is a
+            // separate flag: the collect still receives a real radius so AuraProximity is never
+            // handed 0 or a giant stand-in, and only the distance drop is skipped.
+            bool skipRadiusFilter = this.TryHomelandFarmUseWholeOwnPlot();
+            uint wholePlotPlayerNetId = 0U;
+            if (skipRadiusFilter)
+            {
+                this.TryGetHomelandFarmPlayerNetId(out wholePlotPlayerNetId, out _);
+            }
+
             if (hasPlayerPos)
             {
                 // For a small InRadius request, scan only the requested radius (+small border)
@@ -2237,7 +2254,8 @@ namespace HeartopiaMod
                         playerPos,
                         radius,
                         useAutoFarmCollectShortcuts: false,
-                        allowCapturedFieldShortcut: true))
+                        allowCapturedFieldShortcut: true,
+                        skipRadiusFilter: skipRadiusFilter))
                 {
                     result.Status = string.IsNullOrEmpty(scanSource) ? "No homeland farm entities found." : scanSource;
                     yield break;
@@ -2246,7 +2264,7 @@ namespace HeartopiaMod
                 // For radius requests, drop far netIds before the expensive BuildWaterTarget step
                 // (which does several component resolves each). The cheap cached position check
                 // keeps build work proportional to the targets actually in range.
-                if (scanRadiusOverride > 0f)
+                if (scanRadiusOverride > 0f && !skipRadiusFilter)
                 {
                     buildRadiusSq = (scanRadiusOverride + 2f) * (scanRadiusOverride + 2f);
                 }
@@ -2271,7 +2289,8 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                if (buildRadiusSq >= 0f
+                if (!skipRadiusFilter
+                    && buildRadiusSq >= 0f
                     && this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 netIdPos)
                     && netIdPos != Vector3.zero
                     && (netIdPos - playerPos).sqrMagnitude > buildRadiusSq)
@@ -2280,6 +2299,11 @@ namespace HeartopiaMod
                 }
 
                 if (!this.TryHomelandFarmTryNormalizeWaterNetId(netId, netIds, out uint waterNetId))
+                {
+                    continue;
+                }
+
+                if (skipRadiusFilter && this.HomelandFarmWholePlotOwnerIsForeign(waterNetId, wholePlotPlayerNetId))
                 {
                     continue;
                 }
@@ -2500,11 +2524,13 @@ namespace HeartopiaMod
                 ? this.TryGetHomelandFarmScanCenter(out Vector3 playerPos)
                 : this.TryGetHomelandFarmPlayerPosition(out playerPos);
             float radius = this.homelandFarmWaterRadius;
+            bool skipRadiusFilter = this.TryHomelandFarmUseWholeOwnPlot();
             if (netIds == null)
             {
                 netIds = new HashSet<uint>();
                 float collectRadius = radius + 2f;
-                if (!useAutoFarmCollectShortcuts
+                if (!skipRadiusFilter
+                    && !useAutoFarmCollectShortcuts
                     && hasPlayerPos
                     && this.TryHomelandFarmTryReuseManualRadiusCollect(playerPos, collectRadius, netIds))
                 {
@@ -2522,7 +2548,8 @@ namespace HeartopiaMod
                         // own field use the captured set — no per-press GetComponents scan. Auto-farm
                         // callers pass useAutoFarmCollectShortcuts:true and pre-collected sets, so the
                         // discovery scans are unaffected.
-                        allowCapturedFieldShortcut: !useAutoFarmCollectShortcuts);
+                        allowCapturedFieldShortcut: !useAutoFarmCollectShortcuts,
+                        skipRadiusFilter: skipRadiusFilter);
                 }
                 else
                 {
@@ -2531,7 +2558,8 @@ namespace HeartopiaMod
                         out _,
                         Vector3.zero,
                         0f,
-                        useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts);
+                        useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts,
+                        skipRadiusFilter: skipRadiusFilter);
                 }
             }
 
@@ -2581,6 +2609,13 @@ namespace HeartopiaMod
             }
 
             float radiusSq = radius * radius;
+            bool skipRadiusFilter = this.TryHomelandFarmUseWholeOwnPlot();
+            uint wholePlotPlayerNetId = 0U;
+            if (skipRadiusFilter)
+            {
+                this.TryGetHomelandFarmPlayerNetId(out wholePlotPlayerNetId, out _);
+            }
+
             HashSet<uint> seenCrops = new HashSet<uint>();
             HomelandFarmScanSlicer slicer = new HomelandFarmScanSlicer();
             foreach (uint netId in netIds)
@@ -2624,10 +2659,16 @@ namespace HeartopiaMod
                         }
                     }
 
-                    if (hasPlayerPos
+                    if (!skipRadiusFilter
+                        && hasPlayerPos
                         && this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 cropPos)
                         && cropPos != Vector3.zero
                         && (cropPos - playerPos).sqrMagnitude > radiusSq)
+                    {
+                        continue;
+                    }
+
+                    if (skipRadiusFilter && this.HomelandFarmWholePlotOwnerIsForeign(netId, wholePlotPlayerNetId))
                     {
                         continue;
                     }
@@ -2659,10 +2700,16 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    if (hasPlayerPos
+                    if (!skipRadiusFilter
+                        && hasPlayerPos
                         && this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 plantPos)
                         && plantPos != Vector3.zero
                         && (plantPos - playerPos).sqrMagnitude > radiusSq)
+                    {
+                        continue;
+                    }
+
+                    if (skipRadiusFilter && this.HomelandFarmWholePlotOwnerIsForeign(netId, wholePlotPlayerNetId))
                     {
                         continue;
                     }
@@ -2717,10 +2764,16 @@ namespace HeartopiaMod
                         }
                     }
 
-                    if (hasPlayerPos
+                    if (!skipRadiusFilter
+                        && hasPlayerPos
                         && this.TryHomelandFarmResolveFarmEntityPosition(cropNetId, out Vector3 cropPos)
                         && cropPos != Vector3.zero
                         && (cropPos - playerPos).sqrMagnitude > radiusSq)
+                    {
+                        continue;
+                    }
+
+                    if (skipRadiusFilter && this.HomelandFarmWholePlotOwnerIsForeign(cropNetId, wholePlotPlayerNetId))
                     {
                         continue;
                     }
@@ -2844,6 +2897,13 @@ namespace HeartopiaMod
             HashSet<uint> netIds = new HashSet<uint>();
             bool hasPlayerPos = this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos);
             float radius = this.homelandFarmWaterRadius;
+            bool skipRadiusFilter = this.TryHomelandFarmUseWholeOwnPlot();
+            uint wholePlotPlayerNetId = 0U;
+            if (skipRadiusFilter)
+            {
+                this.TryGetHomelandFarmPlayerNetId(out wholePlotPlayerNetId, out _);
+            }
+
             if (hasPlayerPos)
             {
                 this.TryHomelandFarmCollectFarmEntityNetIds(
@@ -2852,7 +2912,8 @@ namespace HeartopiaMod
                     playerPos,
                     radius + 2f,
                     useAutoFarmCollectShortcuts: false,
-                    allowCapturedFieldShortcut: true);
+                    allowCapturedFieldShortcut: true,
+                    skipRadiusFilter: skipRadiusFilter);
             }
             else
             {
@@ -2876,10 +2937,16 @@ namespace HeartopiaMod
                     continue;
                 }
 
-                if (hasPlayerPos
+                if (!skipRadiusFilter
+                    && hasPlayerPos
                     && this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 plantPos)
                     && plantPos != Vector3.zero
                     && (plantPos - playerPos).sqrMagnitude > radiusSq)
+                {
+                    continue;
+                }
+
+                if (skipRadiusFilter && this.HomelandFarmWholePlotOwnerIsForeign(netId, wholePlotPlayerNetId))
                 {
                     continue;
                 }
@@ -6332,6 +6399,79 @@ namespace HeartopiaMod
                 && fieldOwnerNetId == playerNetId;
         }
 
+        // Whole plot covers every loaded own crop box and flower. Entities.GetComponents only
+        // returns entities streamed in around the player, so a second distant field of the same
+        // homeland is not included until it streams in.
+        // Fail closed: the checkbox alone is not enough. Visiting, standing outside a field, or a
+        // failed owner read keeps the radius slider.
+        private bool TryHomelandFarmUseWholeOwnPlot()
+        {
+            if (!this.homelandFarmWholePlot)
+            {
+                return false;
+            }
+
+            return this.TryGetHomelandFarmPlayerNetId(out uint playerNetId, out _)
+                && this.TryHomelandFarmIsOnOwnFarmField(playerNetId);
+        }
+
+        // Caller has already established whole-plot mode. ownerId == 0 stays (treated as own on
+        // the player's field, the same rule harvest already uses). A nonzero owner that is not
+        // the local player is foreign. This does not apply requireOwn to water, weed, seeds, or flowers.
+        private bool HomelandFarmWholePlotOwnerIsForeign(uint netId, uint playerNetId)
+        {
+            if (playerNetId == 0U || netId == 0U)
+            {
+                return false;
+            }
+
+            if (!this.TryHomelandFarmTryReadOwnerId(netId, out uint ownerId) || ownerId == 0U)
+            {
+                return false;
+            }
+
+            return ownerId != playerNetId;
+        }
+
+        private void HomelandFarmDropWholePlotForeignOwners(HashSet<uint> netIds)
+        {
+            if (netIds == null || netIds.Count == 0 || !this.TryHomelandFarmUseWholeOwnPlot())
+            {
+                return;
+            }
+
+            if (!this.TryGetHomelandFarmPlayerNetId(out uint playerNetId, out _) || playerNetId == 0U)
+            {
+                return;
+            }
+
+            List<uint> drop = null;
+            foreach (uint netId in netIds)
+            {
+                if (!this.HomelandFarmWholePlotOwnerIsForeign(netId, playerNetId))
+                {
+                    continue;
+                }
+
+                if (drop == null)
+                {
+                    drop = new List<uint>();
+                }
+
+                drop.Add(netId);
+            }
+
+            if (drop == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < drop.Count; i++)
+            {
+                netIds.Remove(drop[i]);
+            }
+        }
+
         private bool TryHomelandFarmTryQuickAcceptFarmNetId(uint netId, HashSet<uint> output, bool includeLinkedCrops = true)
         {
             if (netId == 0U || output == null)
@@ -7216,6 +7356,7 @@ namespace HeartopiaMod
 
         private bool TryHomelandFarmCollectFarmEntityNetIds(HashSet<uint> output, out string source)
         {
+            bool skipRadiusFilter = this.TryHomelandFarmUseWholeOwnPlot();
             if (this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos))
             {
                 float radius = Mathf.Max(this.homelandFarmWaterRadius, HomelandFarmDefaultWaterRadius);
@@ -7224,7 +7365,8 @@ namespace HeartopiaMod
                     out source,
                     playerPos,
                     radius,
-                    useAutoFarmCollectShortcuts: false);
+                    useAutoFarmCollectShortcuts: false,
+                    skipRadiusFilter: skipRadiusFilter);
             }
 
             return this.TryHomelandFarmCollectFarmEntityNetIds(
@@ -7232,7 +7374,8 @@ namespace HeartopiaMod
                 out source,
                 Vector3.zero,
                 0f,
-                useAutoFarmCollectShortcuts: false);
+                useAutoFarmCollectShortcuts: false,
+                skipRadiusFilter: skipRadiusFilter);
         }
 
         private bool TryHomelandFarmCollectFarmEntityNetIds(
@@ -7241,7 +7384,8 @@ namespace HeartopiaMod
             Vector3 scanCenter,
             float scanRadius,
             bool useAutoFarmCollectShortcuts = true,
-            bool allowCapturedFieldShortcut = false)
+            bool allowCapturedFieldShortcut = false,
+            bool skipRadiusFilter = false)
         {
             return this.TryHomelandFarmCollectFarmEntityNetIds(
                 output,
@@ -7254,7 +7398,8 @@ namespace HeartopiaMod
                 proximityBudgetSeconds: HomelandFarmAuraProximityComponentScanBudgetSeconds,
                 allowAuraEntityFunnel: true,
                 useAutoFarmCollectShortcuts: useAutoFarmCollectShortcuts,
-                allowCapturedFieldShortcut: allowCapturedFieldShortcut);
+                allowCapturedFieldShortcut: allowCapturedFieldShortcut,
+                skipRadiusFilter: skipRadiusFilter);
         }
 
         // Runs on the Unity main thread (event drain). Any backpack mutation (storageType==Backpack)
@@ -7292,6 +7437,13 @@ namespace HeartopiaMod
                 return false;
             }
 
+            // A whole-plot snapshot spans the loaded field. The center + (capture radius + 15)
+            // margin cuts off the far side, so the zone test is the owner check above.
+            if (this.homelandFarmAutoCaptureWholePlot)
+            {
+                return true;
+            }
+
             float margin = this.homelandFarmAutoCaptureRadius + 15f;
             return (scanCenter - this.homelandFarmAutoCenter).sqrMagnitude <= margin * margin;
         }
@@ -7305,7 +7457,8 @@ namespace HeartopiaMod
             float proximityBudgetSeconds = HomelandFarmAuraProximityComponentScanBudgetSeconds,
             bool allowAuraEntityFunnel = true,
             bool useAutoFarmCollectShortcuts = true,
-            bool allowCapturedFieldShortcut = false)
+            bool allowCapturedFieldShortcut = false,
+            bool skipRadiusFilter = false)
         {
             source = string.Empty;
             if (output == null)
@@ -7320,6 +7473,8 @@ namespace HeartopiaMod
             this.ResolveAuraFarmRuntimeMethods();
             List<string> sources = new List<string>(8);
             bool spatialScan = scanRadius > 0f && scanCenter != Vector3.zero;
+            // A radius snapshot must not satisfy a whole-plot request, and the reverse.
+            bool captureModeMatches = skipRadiusFilter == this.homelandFarmAutoCaptureWholePlot;
 
             if (useAutoFarmCollectShortcuts
                 && spatialScan
@@ -7356,6 +7511,7 @@ namespace HeartopiaMod
             // that is how newly planted flowers/boxes become visible without a re-capture.
             if (allowCapturedFieldShortcut
                 && spatialScan
+                && captureModeMatches
                 && Time.realtimeSinceStartup < this.homelandFarmCapturedFieldFreshUntil
                 && this.TryHomelandFarmIsOnCapturedOwnField(scanCenter))
             {
@@ -7414,8 +7570,9 @@ namespace HeartopiaMod
                     scanRadius,
                     output,
                     out int componentRadiusAdded,
-                    allowUnsafeAuraMonoGetComponents)
-                && componentRadiusAdded > 0)
+                    allowUnsafeAuraMonoGetComponents,
+                    skipRadiusFilter)
+                && (componentRadiusAdded > 0 || skipRadiusFilter))
             {
                 componentRadiusSucceeded = true;
                 sources.Add("ComponentRadius(" + componentRadiusAdded + ")");
@@ -7423,10 +7580,18 @@ namespace HeartopiaMod
                 // Re-fresh the captured-field snapshot from this REAL scan: newly planted flowers/boxes
                 // exist only here, and replacing the set also drops entities the player removed. The
                 // captured shortcut then serves scan-free actions for the next freshness window.
+                // Mode must match: a whole-plot scan must not overwrite a radius snapshot.
                 if (allowCapturedFieldShortcut
+                    && captureModeMatches
+                    && output.Count > 0
                     && this.homelandFarmCapturedSowPointByBoxNetId.Count > 0
                     && this.TryHomelandFarmIsOnCapturedOwnField(scanCenter))
                 {
+                    if (skipRadiusFilter)
+                    {
+                        this.HomelandFarmDropWholePlotForeignOwners(output);
+                    }
+
                     this.homelandFarmCapturedFarmNetIds.Clear();
                     foreach (uint refreshedId in output)
                     {
@@ -7539,7 +7704,7 @@ namespace HeartopiaMod
 
             // Radius actions already have fast spatial sources (Aura entities/cylinder/sphere).
             // Skip full-world component scans unless spatial sources found nothing.
-            if (!spatialScan || output.Count == 0)
+            if ((!spatialScan || output.Count == 0) && !componentRadiusSucceeded)
             {
                 before = output.Count;
                 this.TryHomelandFarmCollectComponentsNetIds(output, "CropBoxComponent");
@@ -7556,7 +7721,13 @@ namespace HeartopiaMod
                 return false;
             }
 
-            if (!useAutoFarmCollectShortcuts && spatialScan && output.Count > 0)
+            if (skipRadiusFilter)
+            {
+                this.HomelandFarmDropWholePlotForeignOwners(output);
+                this.HomelandFarmDropWholePlotForeignOwners(this.homelandFarmLastScanCropBoxNetIds);
+            }
+
+            if (!useAutoFarmCollectShortcuts && spatialScan && output.Count > 0 && !skipRadiusFilter)
             {
                 this.HomelandFarmRememberManualRadiusCollect(output, scanCenter, scanRadius);
             }
@@ -7567,6 +7738,13 @@ namespace HeartopiaMod
 
         private void HomelandFarmRememberManualRadiusCollect(HashSet<uint> netIds, Vector3 center, float radius)
         {
+            // A whole-plot result must not be stored under the radius cache. A later radius
+            // action would otherwise receive the whole plot.
+            if (this.TryHomelandFarmUseWholeOwnPlot())
+            {
+                return;
+            }
+
             this.homelandFarmLastManualRadiusCollectNetIds.Clear();
             if (netIds != null)
             {
@@ -7591,6 +7769,13 @@ namespace HeartopiaMod
 
         private bool TryHomelandFarmTryReuseManualRadiusCollect(Vector3 center, float radius, HashSet<uint> output)
         {
+            // Whole-plot requests must not reuse a radius collect, and a whole-plot result is
+            // never stored here (HomelandFarmRememberManualRadiusCollect).
+            if (this.TryHomelandFarmUseWholeOwnPlot())
+            {
+                return false;
+            }
+
             if (output == null
                 || this.homelandFarmLastManualRadiusCollectNetIds.Count == 0
                 || Time.realtimeSinceStartup - this.homelandFarmLastManualRadiusCollectAt > HomelandFarmManualRadiusCollectReuseSeconds)
@@ -7855,9 +8040,12 @@ namespace HeartopiaMod
             float radius,
             HashSet<uint> output,
             out int added,
-            bool allowUnsafeAuraMonoGetComponents)
+            bool allowUnsafeAuraMonoGetComponents,
+            bool skipRadiusFilter)
         {
             added = 0;
+            // radius <= 0 means "no scan", not whole plot. Whole plot passes the real slider
+            // radius and sets skipRadiusFilter so only the sqrMagnitude drop below is skipped.
             if (output == null || radius <= 0f || center == Vector3.zero)
             {
                 return false;
@@ -7930,6 +8118,12 @@ namespace HeartopiaMod
             }
 
             float radiusSq = radius * radius;
+            uint wholePlotPlayerNetId = 0U;
+            if (skipRadiusFilter)
+            {
+                this.TryGetHomelandFarmPlayerNetId(out wholePlotPlayerNetId, out _);
+            }
+
             foreach (uint netId in componentNetIds)
             {
                 if (netId == 0U || netId >= 0x80000000U)
@@ -7939,9 +8133,16 @@ namespace HeartopiaMod
 
                 // Keep entities whose world position cannot be resolved (some crop boxes are parented
                 // and do not expose a position); the diagnostic/scan stage applies the final radius gate.
-                if (this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 pos)
+                // Whole plot skips only this distance drop. GetComponents still ran above.
+                if (!skipRadiusFilter
+                    && this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 pos)
                     && pos != Vector3.zero
                     && (pos - center).sqrMagnitude > radiusSq)
+                {
+                    continue;
+                }
+
+                if (skipRadiusFilter && this.HomelandFarmWholePlotOwnerIsForeign(netId, wholePlotPlayerNetId))
                 {
                     continue;
                 }
@@ -7959,7 +8160,9 @@ namespace HeartopiaMod
                 }
             }
 
-            return added > 0;
+            // Whole plot still counts as a completed GetComponents pass when every loaded entity
+            // was foreign, so the caller can skip the proximity walk instead of re-adding by radius.
+            return added > 0 || (skipRadiusFilter && componentNetIds.Count > 0);
         }
 
         private bool TryHomelandFarmCollectComponentsNetIds(HashSet<uint> output, string label)
@@ -11648,6 +11851,7 @@ namespace HeartopiaMod
             this.homelandFarmAutoPlanterCount = 0;
             this.homelandFarmAutoCenter = Vector3.zero;
             this.homelandFarmAutoCaptureRadius = 0f;
+            this.homelandFarmAutoCaptureWholePlot = false;
             this.homelandFarmAutoCaptureExcludedOutsideRadius = 0;
             this.homelandFarmAutoFieldOwnerNetId = 0U;
             this.homelandFarmCaptureWorldEpoch = 0;
@@ -11738,7 +11942,20 @@ namespace HeartopiaMod
             // RegisteredCache / level-object cache. Reading cached (possibly stale/foreign) netIds is
             // what crashed Capture immediately with no log.
             HashSet<uint> farmNetIds = new HashSet<uint>();
-            this.TryHomelandFarmCollectFarmEntityNetIds(farmNetIds, out _, center, radius + 2f, useAutoFarmCollectShortcuts: false);
+            bool skipRadiusFilter = this.TryHomelandFarmUseWholeOwnPlot();
+            uint wholePlotPlayerNetId = 0U;
+            if (skipRadiusFilter)
+            {
+                this.TryGetHomelandFarmPlayerNetId(out wholePlotPlayerNetId, out _);
+            }
+
+            this.TryHomelandFarmCollectFarmEntityNetIds(
+                farmNetIds,
+                out _,
+                center,
+                radius + 2f,
+                useAutoFarmCollectShortcuts: false,
+                skipRadiusFilter: skipRadiusFilter);
 
             // Resolve crop boxes with the same tiered logic the sow slot scan uses, taking the
             // UNION of every tier (not just the first that yields) so nothing is dropped:
@@ -11785,12 +12002,18 @@ namespace HeartopiaMod
                 // known AND provably outside the radius. Crop-box positions live solely in the
                 // level-object cache; if that cache is incomplete the position won't resolve, and
                 // dropping such boxes (the old behaviour) caused the intermittent undercount.
-                // Unknown position → keep it.
-                if (this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 boxPos)
+                // Unknown position → keep it. Whole plot skips this distance drop only.
+                if (!skipRadiusFilter
+                    && this.TryHomelandFarmResolveFarmEntityPosition(netId, out Vector3 boxPos)
                     && boxPos != Vector3.zero
                     && (boxPos - center).sqrMagnitude > captureRadiusSq)
                 {
                     excludedOutsideRadius++;
+                    continue;
+                }
+
+                if (skipRadiusFilter && this.HomelandFarmWholePlotOwnerIsForeign(netId, wholePlotPlayerNetId))
+                {
                     continue;
                 }
 
@@ -11812,6 +12035,7 @@ namespace HeartopiaMod
 
             this.homelandFarmAutoCenter = center;
             this.homelandFarmAutoCaptureRadius = radius;
+            this.homelandFarmAutoCaptureWholePlot = skipRadiusFilter;
             this.homelandFarmAutoPlanterCount = planterCount;
             this.homelandFarmAutoCaptured = true;
             // Stamp the world this snapshot belongs to; written in the same commit block as the
@@ -12166,7 +12390,12 @@ namespace HeartopiaMod
             }
 
             HashSet<uint> farmNetIds = new HashSet<uint>();
-            this.TryHomelandFarmCollectFarmEntityNetIds(farmNetIds, out _, center, this.homelandFarmWaterRadius + 2f);
+            this.TryHomelandFarmCollectFarmEntityNetIds(
+                farmNetIds,
+                out _,
+                center,
+                this.homelandFarmWaterRadius + 2f,
+                skipRadiusFilter: this.TryHomelandFarmUseWholeOwnPlot());
             foreach (uint netId in farmNetIds)
             {
                 if (netId != 0U
@@ -12190,7 +12419,8 @@ namespace HeartopiaMod
                     out _,
                     center,
                     this.homelandFarmWaterRadius + 2f,
-                    useAutoFarmCollectShortcuts: false);
+                    useAutoFarmCollectShortcuts: false,
+                    skipRadiusFilter: this.TryHomelandFarmUseWholeOwnPlot());
             }
 
             return this.TryHomelandFarmBuildOccupiedFromScanNetIds(scanNetIds, out occupiedBoxes);
@@ -12471,7 +12701,8 @@ namespace HeartopiaMod
                     out _,
                     scanCenter,
                     this.homelandFarmWaterRadius + 2f,
-                    useAutoFarmCollectShortcuts: false);
+                    useAutoFarmCollectShortcuts: false,
+                    skipRadiusFilter: this.TryHomelandFarmUseWholeOwnPlot());
             }
 
             List<uint> crops = this.ScanHomelandFarmCropsByRadius(
@@ -13342,7 +13573,8 @@ namespace HeartopiaMod
                     out _,
                     scanCenter,
                     this.homelandFarmWaterRadius + 2f,
-                    useAutoFarmCollectShortcuts: true);
+                    useAutoFarmCollectShortcuts: true,
+                    skipRadiusFilter: this.TryHomelandFarmUseWholeOwnPlot());
             }
 
             yield return null;
@@ -13831,8 +14063,15 @@ namespace HeartopiaMod
                     case HomelandFarmWaterMode.ForceFlowers:
                         if (this.TryGetHomelandFarmPlayerPosition(out Vector3 playerPos))
                         {
-                            this.FilterHomelandFarmByRadius(targets, playerPos, this.homelandFarmWaterRadius);
-                            this.HomelandFarmLog("Water after radius filter: " + targets.Count + "/" + scannedCount + " radius=" + this.homelandFarmWaterRadius);
+                            if (this.TryHomelandFarmUseWholeOwnPlot())
+                            {
+                                this.HomelandFarmLog("Water whole plot: radius filter skipped, targets=" + targets.Count);
+                            }
+                            else
+                            {
+                                this.FilterHomelandFarmByRadius(targets, playerPos, this.homelandFarmWaterRadius);
+                                this.HomelandFarmLog("Water after radius filter: " + targets.Count + "/" + scannedCount + " radius=" + this.homelandFarmWaterRadius);
+                            }
                         }
                         else
                         {
@@ -17211,9 +17450,11 @@ namespace HeartopiaMod
             HashSet<uint> cropNetIds = new HashSet<uint>();
             if (hasPlayerPos)
             {
-                // Use the exact sow radius (no +2 padding): padding pulls in occupied planters
-                // outside the intended zone, and the server then rejects the whole batch with
-                // PlantBoxHasCrop even though the planters the player is standing on are empty.
+                // Exact slider radius, no +2 padding, when the gate is off: padding pulls in occupied
+                // planters outside the intended zone, and the server then rejects the whole batch
+                // with PlantBoxHasCrop. Whole plot keeps this same radius argument and only sets
+                // skipRadiusFilter — never radius 0.
+                bool skipRadiusFilter = this.TryHomelandFarmUseWholeOwnPlot();
                 this.TryHomelandFarmCollectFarmEntityNetIds(
                     cropNetIds,
                     out _,
@@ -17224,7 +17465,8 @@ namespace HeartopiaMod
                     // scan). Same young-crop blindness as the scan path (fresh sows are invisible to
                     // BOTH for a while — that's what the pending-box set guards); occupancy still runs
                     // on live per-box data below.
-                    allowCapturedFieldShortcut: !useAutoFarmCollectShortcuts);
+                    allowCapturedFieldShortcut: !useAutoFarmCollectShortcuts,
+                    skipRadiusFilter: skipRadiusFilter);
             }
             else
             {
@@ -18046,7 +18288,8 @@ namespace HeartopiaMod
                         playerPos,
                         this.homelandFarmWaterRadius + 2f,
                         useAutoFarmCollectShortcuts: false,
-                        allowCapturedFieldShortcut: true);
+                        allowCapturedFieldShortcut: true,
+                        skipRadiusFilter: this.TryHomelandFarmUseWholeOwnPlot());
                 }
 
                 yield return null;
@@ -18269,6 +18512,21 @@ namespace HeartopiaMod
             catch (Exception ex)
             {
                 this.HomelandFarmLog("Failed to save auto fertilize setting: " + ex.Message);
+            }
+        }
+
+        private void PersistHomelandFarmWholePlotSetting()
+        {
+            try
+            {
+                UnifiedConfigData data = this.LoadOrCreateUnifiedConfig();
+                this.PopulateAllConfigSections(data);
+                this.SaveUnifiedConfig(data);
+                this.HomelandFarmLog("Saved whole plot=" + this.homelandFarmWholePlot + " to config.");
+            }
+            catch (Exception ex)
+            {
+                this.HomelandFarmLog("Failed to save whole plot setting: " + ex.Message);
             }
         }
 
