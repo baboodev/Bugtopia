@@ -87,6 +87,18 @@ namespace HeartopiaMod
             public Toggle DisableOobToggle;
             public Toggle InstantTeleportToggle;
             public Toggle InstantTeleportWaitFieldToggle;
+            public Toggle UseGameTeleportToggle;
+            public GameObject UseGameTeleportRiskMark; // shown while Use Game Teleport is off
+            public float UseGameTeleportRowY;
+            public Toggle InterpolateTeleportJumpsToggle;
+            public GameObject InterpolateTeleportJumpsRiskMark; // shown while the hop chain is on
+            public float InterpolateTeleportJumpsRowY;
+            public GameObject TeleportJumpLabel;       // only visible while Interpolate Teleport Jumps is on
+            public string TeleportJumpShown;
+            public Slider TeleportJumpSlider;
+            public GameObject TeleportJumpDelayLabel;
+            public string TeleportJumpDelayShown;
+            public Slider TeleportJumpDelaySlider;
             public Toggle VehicleBypassToggle;
             public GameObject NoclipSpeedLabel; // only visible while Noclip is on
             public string NoclipSpeedShown;
@@ -305,6 +317,26 @@ namespace HeartopiaMod
             handle.InstantTeleportWaitFieldToggle = this.CreateUguiCheckbox(scrollContent, "InstantTeleportWaitFieldToggle",
                 this.L("Instant Teleport: Wait For Field Load"), this.instantTeleportWaitFieldLoaded,
                 new System.Action<bool>(this.OnUguiSelfInstantTeleportWaitFieldToggled));
+            handle.UseGameTeleportToggle = this.CreateUguiCheckbox(scrollContent, "UseGameTeleportToggle",
+                this.L("Use Game Teleport"), this.useGameTeleport,
+                new System.Action<bool>(this.OnUguiSelfUseGameTeleportToggled));
+            handle.UseGameTeleportRiskMark = this.CreateUguiRiskMark(handle.UseGameTeleportToggle);
+            SyncUguiRiskMark(handle.UseGameTeleportRiskMark, null, 0f, 0f, !this.useGameTeleport);
+            handle.InterpolateTeleportJumpsToggle = this.CreateUguiCheckbox(scrollContent, "InterpolateTeleportJumpsToggle",
+                this.L("Interpolate Teleport Jumps"), this.interpolateTeleportJumps,
+                new System.Action<bool>(this.OnUguiSelfInterpolateTeleportJumpsToggled));
+            handle.InterpolateTeleportJumpsRiskMark = this.CreateUguiRiskMark(handle.InterpolateTeleportJumpsToggle);
+            SyncUguiRiskMark(handle.InterpolateTeleportJumpsRiskMark, null, 0f, 0f, this.interpolateTeleportJumps);
+            handle.TeleportJumpShown = this.LF("Teleport Jump: {0:F0} m", this.interpolateTeleportJumpMeters);
+            handle.TeleportJumpLabel = this.CreateUguiBodyLabel(scrollContent, "TeleportJumpLabel", handle.TeleportJumpShown, 13f);
+            handle.TeleportJumpSlider = this.CreateUguiSlider(scrollContent, "TeleportJumpSlider",
+                1f, 45f, this.interpolateTeleportJumpMeters, true,
+                new System.Action<float>(this.OnUguiSelfTeleportJumpMetersChanged));
+            handle.TeleportJumpDelayShown = this.LF("Teleport Jump Delay: {0:F1} s", this.interpolateTeleportJumpDelay);
+            handle.TeleportJumpDelayLabel = this.CreateUguiBodyLabel(scrollContent, "TeleportJumpDelayLabel", handle.TeleportJumpDelayShown, 13f);
+            handle.TeleportJumpDelaySlider = this.CreateUguiSlider(scrollContent, "TeleportJumpDelaySlider",
+                0.1f, 5f, this.interpolateTeleportJumpDelay, false,
+                new System.Action<float>(this.OnUguiSelfTeleportJumpDelayChanged));
             handle.VehicleBypassToggle = this.CreateUguiCheckbox(scrollContent, "VehicleBypassToggle",
                 this.L("Vehicle Bypass"), this.vehicleBypassEnabled,
                 new System.Action<bool>(this.OnUguiSelfVehicleBypassToggled));
@@ -473,7 +505,9 @@ namespace HeartopiaMod
             return (this.mouseLookEnabled ? 1 : 0)
                  | (this.noclipEnabled ? 2 : 0)
                  | (this.antiAfkEnabled ? 4 : 0)
-                 | (this.chatForceTranslateEnabled ? 8 : 0);
+                 | (this.chatForceTranslateEnabled ? 8 : 0)
+                 | (this.interpolateTeleportJumps ? 16 : 0)
+                 | (this.useGameTeleport ? 32 : 0);
         }
 
         // Positions every Main control from the CURRENT conditional state — the UGUI analog of
@@ -567,6 +601,48 @@ namespace HeartopiaMod
                 PlaceUguiTopLeft(handle.InstantTeleportWaitFieldToggle.gameObject, rowX, yCur, rowW, 24f);
             }
             yCur += 30f;
+            handle.UseGameTeleportRowY = yCur;
+            if (handle.UseGameTeleportToggle != null)
+            {
+                PlaceUguiTopLeft(handle.UseGameTeleportToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+            // Game teleport is one server warp. The hop chain is the mod-teleport path, so the
+            // switch and its sliders stay hidden while Use Game Teleport is on.
+            bool showInterpolate = !this.useGameTeleport;
+            SetUguiGoActive(handle.InterpolateTeleportJumpsToggle != null ? handle.InterpolateTeleportJumpsToggle.gameObject : null, showInterpolate);
+            if (showInterpolate && handle.InterpolateTeleportJumpsToggle != null)
+            {
+                handle.InterpolateTeleportJumpsRowY = yCur;
+                PlaceUguiTopLeft(handle.InterpolateTeleportJumpsToggle.gameObject, rowX, yCur, rowW, 24f);
+                yCur += 30f;
+            }
+            bool interpolateJumps = showInterpolate && this.interpolateTeleportJumps;
+            SetUguiGoActive(handle.TeleportJumpLabel, interpolateJumps);
+            SetUguiGoActive(handle.TeleportJumpSlider != null ? handle.TeleportJumpSlider.gameObject : null, interpolateJumps);
+            SetUguiGoActive(handle.TeleportJumpDelayLabel, interpolateJumps);
+            SetUguiGoActive(handle.TeleportJumpDelaySlider != null ? handle.TeleportJumpDelaySlider.gameObject : null, interpolateJumps);
+            if (interpolateJumps)
+            {
+                if (handle.TeleportJumpLabel != null)
+                {
+                    PlaceUguiTopLeft(handle.TeleportJumpLabel, rowX, yCur + 2f, labelW, 20f);
+                }
+                if (handle.TeleportJumpSlider != null)
+                {
+                    PlaceUguiTopLeft(handle.TeleportJumpSlider.gameObject, sliderX, yCur + 3f, sliderW, 20f);
+                }
+                yCur += 28f;
+                if (handle.TeleportJumpDelayLabel != null)
+                {
+                    PlaceUguiTopLeft(handle.TeleportJumpDelayLabel, rowX, yCur + 2f, labelW, 20f);
+                }
+                if (handle.TeleportJumpDelaySlider != null)
+                {
+                    PlaceUguiTopLeft(handle.TeleportJumpDelaySlider.gameObject, sliderX, yCur + 3f, sliderW, 20f);
+                }
+                yCur += 28f;
+            }
             if (handle.VehicleBypassToggle != null)
             {
                 PlaceUguiTopLeft(handle.VehicleBypassToggle.gameObject, rowX, yCur, rowW, 24f);
@@ -837,6 +913,24 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.DisableOobToggle, this.disableOobTeleportEnabled);
                 this.SyncUguiToggleFromField(handle.InstantTeleportToggle, this.instantTeleportEnabled);
                 this.SyncUguiToggleFromField(handle.InstantTeleportWaitFieldToggle, this.instantTeleportWaitFieldLoaded);
+                this.SyncUguiToggleFromField(handle.UseGameTeleportToggle, this.useGameTeleport);
+                SyncUguiRiskMark(handle.UseGameTeleportRiskMark, handle.ScrollContent, handle.UseGameTeleportRowY, 24f,
+                    !this.useGameTeleport);
+                this.SyncUguiToggleFromField(handle.InterpolateTeleportJumpsToggle, this.interpolateTeleportJumps);
+                SyncUguiRiskMark(handle.InterpolateTeleportJumpsRiskMark, handle.ScrollContent, handle.InterpolateTeleportJumpsRowY, 24f,
+                    this.interpolateTeleportJumps);
+                if (handle.TeleportJumpSlider != null && Mathf.Abs(handle.TeleportJumpSlider.value - this.interpolateTeleportJumpMeters) > 0.0005f)
+                {
+                    handle.TeleportJumpSlider.SetValueWithoutNotify(this.interpolateTeleportJumpMeters);
+                }
+                this.SyncUguiSelfLabelText(handle.TeleportJumpLabel, ref handle.TeleportJumpShown,
+                    this.LF("Teleport Jump: {0:F0} m", this.interpolateTeleportJumpMeters));
+                if (handle.TeleportJumpDelaySlider != null && Mathf.Abs(handle.TeleportJumpDelaySlider.value - this.interpolateTeleportJumpDelay) > 0.0005f)
+                {
+                    handle.TeleportJumpDelaySlider.SetValueWithoutNotify(this.interpolateTeleportJumpDelay);
+                }
+                this.SyncUguiSelfLabelText(handle.TeleportJumpDelayLabel, ref handle.TeleportJumpDelayShown,
+                    this.LF("Teleport Jump Delay: {0:F1} s", this.interpolateTeleportJumpDelay));
                 this.SyncUguiToggleFromField(handle.VehicleBypassToggle, this.vehicleBypassEnabled);
                 this.SyncUguiToggleFromField(handle.AntiAfkToggle, this.antiAfkEnabled);
                 this.SyncUguiToggleFromField(handle.WarehouseToggle, this.warehouseBypassEnabled);
@@ -1032,6 +1126,92 @@ namespace HeartopiaMod
             this.AddMenuNotification(
                 this.L("Instant Teleport: Wait For Field Load") + " " + (this.instantTeleportWaitFieldLoaded ? "Enabled" : "Disabled"),
                 this.instantTeleportWaitFieldLoaded ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+        }
+
+        // Use Game Teleport (ModTeleportFeature). On = the game warp. Off = the mod pin.
+        // The detours stay installed either way; this only selects which warp the next teleport uses.
+        private void OnUguiSelfUseGameTeleportToggled(bool value)
+        {
+            if (value == this.useGameTeleport)
+            {
+                return;
+            }
+
+            this.useGameTeleport = value;
+            if (this.useGameTeleport && this.teleportJumpChainActive)
+            {
+                if (IsSelfPlayerRespawnGap)
+                {
+                    this.teleportJumpChainFinishAfterGap = true;
+                }
+                else
+                {
+                    this.LandTeleportJumpChainAtTarget();
+                }
+            }
+
+            this.AddMenuNotification(
+                this.L(this.useGameTeleport ? "Use Game Teleport Enabled" : "Use Game Teleport Disabled"),
+                this.useGameTeleport ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+            this.SaveKeybinds(false);
+        }
+
+        // Interpolate Teleport Jumps. Off mid-chain warps once to the stored final target so the
+        // player is not left on an intermediate hop. During a respawn gap the warp waits until
+        // the player entity exists again.
+        private void OnUguiSelfInterpolateTeleportJumpsToggled(bool value)
+        {
+            if (value == this.interpolateTeleportJumps)
+            {
+                return;
+            }
+
+            this.interpolateTeleportJumps = value;
+            if (this.interpolateTeleportJumps)
+            {
+                this.teleportJumpChainFinishAfterGap = false;
+            }
+            else if (this.teleportJumpChainActive)
+            {
+                // The player entity is gone. Warp once it is back; warping now pins a deleted move.
+                if (IsSelfPlayerRespawnGap)
+                {
+                    this.teleportJumpChainFinishAfterGap = true;
+                }
+                else
+                {
+                    this.LandTeleportJumpChainAtTarget();
+                }
+            }
+
+            this.AddMenuNotification(
+                this.L(this.interpolateTeleportJumps ? "Interpolate Teleport Jumps Enabled" : "Interpolate Teleport Jumps Disabled"),
+                this.interpolateTeleportJumps ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+            this.SaveKeybinds(false);
+        }
+
+        private void OnUguiSelfTeleportJumpMetersChanged(float value)
+        {
+            value = Mathf.Clamp(value, 1f, 45f);
+            if (Mathf.Abs(value - this.interpolateTeleportJumpMeters) <= 0.0001f)
+            {
+                return;
+            }
+
+            this.interpolateTeleportJumpMeters = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfTeleportJumpDelayChanged(float value)
+        {
+            value = Mathf.Clamp(value, 0.1f, 5f);
+            if (Mathf.Abs(value - this.interpolateTeleportJumpDelay) <= 0.0001f)
+            {
+                return;
+            }
+
+            this.interpolateTeleportJumpDelay = value;
+            try { this.SaveKeybinds(false); } catch { }
         }
 
         // Gui.cs:1623-1630 — notification only, both directions; no save in the source.

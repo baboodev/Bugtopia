@@ -407,6 +407,15 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Field-load hold, or a teleport jump chain: pinned on an unloaded landing or an
+            // intermediate hop. Do not seed and do not fly off it. The frame the hold ends, and
+            // the frame the chain ends, clears noclipFootHoldValid. Vehicle noclip already
+            // returned above.
+            if (this.instantTeleportHoldActive || this.teleportJumpChainActive)
+            {
+                return;
+            }
+
             // Foot noclip: drive the game's own move component EVERY frame — horizontal, the
             // vertical-only (space/ctrl) case AND the idle hover. SetPositionAndRotation /
             // WorldPlaceTo disable the native XDCharacterController around the write (no

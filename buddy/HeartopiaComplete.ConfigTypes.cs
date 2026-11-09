@@ -109,6 +109,13 @@ namespace HeartopiaMod
             // The wait-for-field companion defaults to ON (old configs keep the initializer).
             public bool instantTeleportEnabled;
             public bool instantTeleportWaitFieldLoaded = true;
+            // Self → Main warp. True = game EntityHelper teleport. Old configs keep this initializer.
+            public bool useGameTeleport = true;
+            // Interpolate Teleport Jumps. Off = one warp. Metres and delay keep these initializers
+            // when the element is missing; a stored 0 is treated as "never edited" on load.
+            public bool interpolateTeleportJumps;
+            public float interpolateTeleportJumpMeters = 15f;
+            public float interpolateTeleportJumpDelay = 0.5f;
             // Custom Swim Sprint (underwater dash SwimSprintConfig override). Duration 0/absent =
             // "use default 0.5s"; slider max (30) = Infinite. Cooldown 0 = instant re-dash.
             public bool swimSprintTweakEnabled;

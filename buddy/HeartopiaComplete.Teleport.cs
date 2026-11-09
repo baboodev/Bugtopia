@@ -1249,6 +1249,8 @@ namespace HeartopiaMod
             Breadcrumbs.Drop("Teleport", targetPos.ToString("F1"));
             if (this.IsPlayerDrivingVehicle())
             {
+                // The vehicle warp replaces a foot chain. Do not keep hopping after it.
+                this.FinishTeleportJumpChain();
                 if (this.TryTeleportVehicleToLocation(targetPos, null))
                 {
                     return;
@@ -1259,11 +1261,17 @@ namespace HeartopiaMod
             }
 
             this.NoteSelfTeleportTarget(targetPos);
+            // Longer than the jump slider: hops from OnUpdate. The single-warp body below is unchanged.
+            if (this.TryStartTeleportJumpChain(targetPos, false, Quaternion.identity))
+            {
+                return;
+            }
+
             // Prove the skeleton while it and the entity still share a pose. After the warp the
             // 2.5 m fallback compares a stale visual against the new entity position and rejects
             // our own body on any hop longer than that.
             GameObject gameObject = this.GetVerifiedLocalPlayerSkeleton();
-            bool warped = this.TryGameTeleportAuraMono(targetPos, false, Quaternion.identity);
+            bool warped = this.WarpSelfTo(targetPos, false, Quaternion.identity);
             if (gameObject == null)
             {
                 this.ClearTeleportSkeletonSettle();
@@ -1271,6 +1279,18 @@ namespace HeartopiaMod
                 {
                     ModLogger.Msg("Player not found!");
                 }
+                else if (this.FootNoclipOwnsTeleportLanding())
+                {
+                    this.noclipFootHoldValid = false;
+                }
+            }
+            else if (warped && this.FootNoclipOwnsTeleportLanding())
+            {
+                // The entity write already happened inside the warp. Noclip reseeds next tick.
+                // A skeleton settle here would run before noclip and pull the pose back.
+                this.teleportFramesRemaining = 0;
+                this.playerRotationFramesRemaining = 0;
+                this.noclipFootHoldValid = false;
             }
             else
             {
@@ -1297,6 +1317,7 @@ namespace HeartopiaMod
         {
             if (this.IsPlayerDrivingVehicle())
             {
+                this.FinishTeleportJumpChain();
                 if (this.TryTeleportVehicleToLocation(targetPos, targetRot))
                 {
                     return;
@@ -1307,8 +1328,13 @@ namespace HeartopiaMod
             }
 
             this.NoteSelfTeleportTarget(targetPos);
+            if (this.TryStartTeleportJumpChain(targetPos, true, targetRot))
+            {
+                return;
+            }
+
             GameObject gameObject = this.GetVerifiedLocalPlayerSkeleton();
-            bool warped = this.TryGameTeleportAuraMono(targetPos, true, targetRot);
+            bool warped = this.WarpSelfTo(targetPos, true, targetRot);
             if (gameObject == null)
             {
                 this.ClearTeleportSkeletonSettle();
@@ -1316,6 +1342,16 @@ namespace HeartopiaMod
                 {
                     ModLogger.Msg("Player not found!");
                 }
+                else if (this.FootNoclipOwnsTeleportLanding())
+                {
+                    this.noclipFootHoldValid = false;
+                }
+            }
+            else if (warped && this.FootNoclipOwnsTeleportLanding())
+            {
+                this.teleportFramesRemaining = 0;
+                this.playerRotationFramesRemaining = 0;
+                this.noclipFootHoldValid = false;
             }
             else
             {
@@ -1344,8 +1380,23 @@ namespace HeartopiaMod
         private void TeleportTo(Vector3 targetPos)
         {
             GameObject p = this.GetVerifiedLocalPlayerSkeleton();
-            this.TryGameTeleportAuraMono(targetPos, false, Quaternion.identity);
+            bool warped = this.WarpSelfTo(targetPos, false, Quaternion.identity);
+            // A repair step-back must not open a settle over an in-flight hop chain. The countdown
+            // would reach 0 between hops and disarm the pin.
+            if (this.teleportJumpChainActive)
+            {
+                return;
+            }
+
             this.teleportSyncPosition = targetPos;
+            if (warped && this.FootNoclipOwnsTeleportLanding())
+            {
+                this.teleportFramesRemaining = 0;
+                this.playerRotationFramesRemaining = 0;
+                this.noclipFootHoldValid = false;
+                return;
+            }
+
             this.noclipFootHoldValid = false; // noclip hover re-seeds at the warp target
             if (p == null)
             {
@@ -1369,6 +1420,13 @@ namespace HeartopiaMod
             if (teleportFramesRemaining > 0)
             {
                 teleportFramesRemaining--;
+                // The field hold reasserts the pin on its own interval. Disarming on this
+                // countdown while that hold is up would drop the pin about half a second in.
+                if (teleportFramesRemaining == 0 && !this.instantTeleportHoldActive)
+                {
+                    this.DisarmModTeleportPin();
+                }
+
                 GameObject p = this.teleportSyncSkeleton;
                 if (p == null)
                 {

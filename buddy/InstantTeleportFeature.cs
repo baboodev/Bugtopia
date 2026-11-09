@@ -553,7 +553,15 @@ namespace HeartopiaMod
             // makes the transfer duration look odd.
             if (owesTransferEnd)
             {
-                this.SendInstantTeleportTransferEnd();
+                // A chain is still walking. End on the landing, not on hop 0.
+                if (this.teleportJumpChainActive)
+                {
+                    this.instantTeleportDeferredTransferEnd = true;
+                }
+                else
+                {
+                    this.SendInstantTeleportTransferEnd();
+                }
             }
 
             if (this.instantTeleportWaitFieldLoaded)
@@ -586,6 +594,13 @@ namespace HeartopiaMod
             if (now >= this.instantTeleportHoldUntil)
             {
                 this.instantTeleportHoldActive = false;
+                // The hop chain still owns the pin. Disarming it here lets locomotion run between hops.
+                if (!this.teleportJumpChainActive)
+                {
+                    this.noclipFootHoldValid = false;
+                    this.DisarmModTeleportPin();
+                }
+
                 return;
             }
 
@@ -609,12 +624,21 @@ namespace HeartopiaMod
                 }
 
                 this.instantTeleportHoldActive = false;
+                this.noclipFootHoldValid = false;
                 return;
             }
 
-            // Hold: the bare game-native warp, no frame settle — re-arming a 30-frame direct-write
+            // A chain is already walking toward this target in capped hops. An uncapped reassert
+            // would jump the rest of the way and trip the server respawn the hops exist to avoid.
+            if (this.teleportJumpChainActive)
+            {
+                return;
+            }
+
+            // Hold: re-assert the selected warp, no frame settle — re-arming a 30-frame direct-write
             // window every 0.15 s would keep writing the transform after the hold is released.
-            this.TryGameTeleportAuraMono(this.instantTeleportTargetPos,
+            // Game mode calls the AuraMono warp. Mod mode refreshes the pin in place.
+            this.WarpSelfTo(this.instantTeleportTargetPos,
                 this.instantTeleportHasRot, this.instantTeleportTargetRot);
         }
 

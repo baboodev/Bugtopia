@@ -1952,7 +1952,8 @@ Weighted preference for specific forage types when multiple markers compete (fid
 
 - **Preset lists:** home, animal care, NPCs (runtime cache), fast travel, events, houses.
 - **Custom teleports:** add current position, name entry, persist to unified config.
-- Teleport implementation sets `OverridePosition` + frame counter to hold player at destination through patched movement.
+- **Use Game Teleport** (Self → Main, default on, `ModTeleportFeature.cs`, red `!` while off): on uses the game warp (`EntityHelper.AutoMoveTransfer` / `TransferAndLookAtForEditor`) plus the short skeleton settle. Off skips those methods and pins the local player with two embedded-Mono `NativeDetour`s. Foot noclip keeps hovering from the destination: the entity is written before the hover reseeds, and there is no settle and no pin while foot noclip is on and the instant-teleport field hold is off. The field-load hold is the only time the pin freezes noclip — foot integration is suspended while the hold is active, and the frame the hold ends clears the hover seed.
+- **Interpolate Teleport Jumps** (Self → Main, directly under Use Game Teleport, hidden while that switch is on, default off, red `!` while on): when it is on, a foot teleport whose straight-line distance is longer than the jump slider is a sequence of hops. Each hop is at most the slider length, the first hop is immediate, and the delay slider is the pause between hops. **Teleport Jump** is 1–45 m in whole metres (default 15). **Teleport Jump Delay** is 0.1–5 s in tenths (default 0.5). A hop is capped at 45 m because a faster move of about 50 m makes the server delete the player. Off keeps a single warp.
 - NPC list rebuilt from game data when available.
 
 ---

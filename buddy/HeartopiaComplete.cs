@@ -887,7 +887,9 @@ namespace HeartopiaMod
             this.ProcessActivityAutoDeclineOnUpdate();
             this.ProcessActivityRewardAutoClaimOnUpdate();
             Breadcrumbs.Phase("ou.teleport");
+            this.RequestModTeleportHooks();
             this.ProcessInstantTeleportOnUpdate();
+            this.ProcessTeleportJumpChainOnUpdate();
             this.ProcessSelfRespawnGuardOnUpdate();
             this.ProcessVehicleBypassOnUpdate();
             this.ProcessEntityEventDebugOnUpdate();

@@ -152,6 +152,10 @@ namespace HeartopiaMod
             data.noclipSyncPositionEnabled = this.noclipSyncPositionEnabled;
             data.instantTeleportEnabled = this.instantTeleportEnabled;
             data.instantTeleportWaitFieldLoaded = this.instantTeleportWaitFieldLoaded;
+            data.useGameTeleport = this.useGameTeleport;
+            data.interpolateTeleportJumps = this.interpolateTeleportJumps;
+            data.interpolateTeleportJumpMeters = this.interpolateTeleportJumpMeters;
+            data.interpolateTeleportJumpDelay = this.interpolateTeleportJumpDelay;
             data.swimSprintTweakEnabled = this.swimSprintTweakEnabled;
             data.swimSprintDurationSeconds = this.swimSprintDurationSeconds;
             data.swimSprintCooldownSeconds = this.swimSprintCooldownSeconds;
@@ -556,6 +560,14 @@ namespace HeartopiaMod
             this.noclipSyncPositionEnabled = data.noclipSyncPositionEnabled;
             this.instantTeleportEnabled = data.instantTeleportEnabled;
             this.instantTeleportWaitFieldLoaded = data.instantTeleportWaitFieldLoaded;
+            this.useGameTeleport = data.useGameTeleport;
+            this.interpolateTeleportJumps = data.interpolateTeleportJumps;
+            this.interpolateTeleportJumpMeters = data.interpolateTeleportJumpMeters <= 0f
+                ? 15f
+                : Mathf.Clamp(data.interpolateTeleportJumpMeters, 1f, 45f);
+            this.interpolateTeleportJumpDelay = data.interpolateTeleportJumpDelay <= 0f
+                ? 0.5f
+                : Mathf.Clamp(data.interpolateTeleportJumpDelay, 0.1f, 5f);
             this.swimSprintTweakEnabled = data.swimSprintTweakEnabled;
             this.swimSprintDurationSeconds = data.swimSprintDurationSeconds <= 0f
                 ? SwimSprintDurationDefault
