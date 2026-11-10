@@ -2708,6 +2708,19 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (this.autoEatSkipLastPortionEnabled)
+            {
+                bool countsKnown = this.TryGetAutoEatFoodUseCounts(this.cachedFoodNetId, out int left, out int eatCount);
+                if (countsKnown && AutoEatSkipsLastPortion(true, true, eatCount, left))
+                {
+                    FeatureLog.Once("AutoEat", "lastportion:" + this.cachedFoodNetId,
+                        "[Auto Eat] Skipping cached last portion staticId=" + this.cachedFoodStaticId
+                        + " netId=" + this.cachedFoodNetId + " left=" + left + "/" + eatCount);
+                    this.ClearCachedFood();
+                    return false;
+                }
+            }
+
             this.lastDirectBackpackMatchedNetId = this.cachedFoodNetId;
             this.lastDirectBackpackMatchedStaticId = this.cachedFoodStaticId;
             this.lastDirectBackpackMatchedEntityType = this.cachedFoodEntityType;
@@ -3251,6 +3264,9 @@ namespace HeartopiaMod
         private readonly HashSet<long> autoEatEnergyMissKeys = new HashSet<long>();
         private readonly Dictionary<uint, int> autoEatStarByNetId = new Dictionary<uint, int>();
         private IntPtr autoEatGetEatableMethod = IntPtr.Zero;
+        private IntPtr autoEatGetNetworkEntityMethod = IntPtr.Zero;
+        private IntPtr autoEatGetFoodEatCountMethod = IntPtr.Zero;
+        private float nextAutoEatFoodCountResolveAt = -999f;
         private float nextAutoEatGetEatableResolveAt = -999f;
         private uint autoEatRankLoggedNetId;
         // "Normal Food" option — event/season dish detection via TableEntity.tags +
@@ -3910,6 +3926,145 @@ namespace HeartopiaMod
             return candidate.BagIndex < current.BagIndex;
         }
 
+        // enabled && counts were actually read && multi-use && exactly one eat left.
+        // eatCount == 1 is a normal single bite and stays eligible. A failed read
+        // (countsKnown false) stays eligible.
+        private static bool AutoEatSkipsLastPortion(bool enabled, bool countsKnown, int eatCount, int left)
+        {
+            return enabled && countsKnown && eatCount > 1 && left == 1;
+        }
+
+        private bool EnsureAutoEatFoodCountMethods()
+        {
+            if (this.autoEatGetNetworkEntityMethod != IntPtr.Zero
+                && this.autoEatGetFoodEatCountMethod != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            if (Time.unscaledTime < this.nextAutoEatFoodCountResolveAt)
+            {
+                return false;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread() || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            if (this.autoEatGetNetworkEntityMethod == IntPtr.Zero)
+            {
+                IntPtr protocolClass = this.FindAuraMonoClassByFullName(
+                    "XDTDataAndProtocol.ProtocolService.Animal.AnimalProtocolManager");
+                if (protocolClass == IntPtr.Zero)
+                {
+                    protocolClass = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                        "XDTDataAndProtocol.ProtocolService.Animal",
+                        "AnimalProtocolManager");
+                }
+
+                if (protocolClass != IntPtr.Zero)
+                {
+                    IntPtr method = this.FindAuraMonoMethodOnHierarchy(protocolClass, "GetNetworkEntity", 1);
+                    if (method != IntPtr.Zero && AuraMonoMethodParamCountIs(method, 1))
+                    {
+                        this.autoEatGetNetworkEntityMethod = method;
+                    }
+                }
+            }
+
+            if (this.autoEatGetFoodEatCountMethod == IntPtr.Zero)
+            {
+                IntPtr cookClass = this.FindAuraMonoClassByFullName("EcsClient.Utils.CookingSharedUtility");
+                if (cookClass == IntPtr.Zero)
+                {
+                    cookClass = this.FindAuraMonoClassInImages(
+                        "EcsClient.Utils",
+                        "CookingSharedUtility",
+                        new[] { "EcsClient", "EcsClient.dll" });
+                }
+
+                if (cookClass != IntPtr.Zero)
+                {
+                    IntPtr method = this.FindAuraMonoMethodOnHierarchy(cookClass, "GetFoodEatCountData", 3);
+                    if (method != IntPtr.Zero && AuraMonoMethodParamCountIs(method, 3))
+                    {
+                        this.autoEatGetFoodEatCountMethod = method;
+                    }
+                }
+            }
+
+            if (this.autoEatGetNetworkEntityMethod == IntPtr.Zero
+                || this.autoEatGetFoodEatCountMethod == IntPtr.Zero)
+            {
+                this.nextAutoEatFoodCountResolveAt = Time.unscaledTime + 3f;
+                return false;
+            }
+
+            this.nextAutoEatFoodCountResolveAt = -999f;
+            return true;
+        }
+
+        private unsafe bool TryGetAutoEatFoodUseCounts(uint netId, out int left, out int eatCount)
+        {
+            left = 0;
+            eatCount = 0;
+            if (netId == 0U || !this.EnsureAutoEatFoodCountMethods())
+            {
+                return false;
+            }
+
+            uint id = netId;
+            IntPtr exc = IntPtr.Zero;
+            IntPtr* args = stackalloc IntPtr[3];
+            args[0] = (IntPtr)(&id);
+            IntPtr boxedEntity = auraMonoRuntimeInvoke(
+                this.autoEatGetNetworkEntityMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero || boxedEntity == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            uint pin = AuraMonoPinNew(boxedEntity);
+            try
+            {
+                IntPtr pinned = pin != 0U ? AuraMonoPinTarget(pin) : boxedEntity;
+                if (pinned == IntPtr.Zero || auraMonoObjectUnbox == null)
+                {
+                    return false;
+                }
+
+                IntPtr unboxed = auraMonoObjectUnbox(pinned);
+                if (unboxed == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                int leftSlot = 0;
+                int totalSlot = 0;
+                args[0] = unboxed;
+                args[1] = (IntPtr)(&leftSlot);
+                args[2] = (IntPtr)(&totalSlot);
+                exc = IntPtr.Zero;
+                IntPtr boxedOk = auraMonoRuntimeInvoke(
+                    this.autoEatGetFoodEatCountMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc != IntPtr.Zero || boxedOk == IntPtr.Zero
+                    || !this.TryUnboxMonoBoolean(boxedOk, out bool ok) || !ok
+                    || totalSlot <= 0)
+                {
+                    return false;
+                }
+
+                left = leftSlot;
+                eatCount = totalSlot;
+                return true;
+            }
+            finally
+            {
+                AuraMonoPinFree(pin);
+            }
+        }
+
         private bool TryPickBestAutoEatFood(List<AutoEatFoodRow> rows, out AutoEatFoodPick best, bool normalFoodMode)
         {
             best = default;
@@ -3920,6 +4075,23 @@ namespace HeartopiaMod
                 if (normalFoodMode && !this.IsNormalAutoEatFoodCandidate(row))
                 {
                     continue;
+                }
+
+                if (this.autoEatSkipLastPortionEnabled)
+                {
+                    bool countsKnown = this.TryGetAutoEatFoodUseCounts(row.NetId, out int left, out int eatCount);
+                    if (!countsKnown)
+                    {
+                        FeatureLog.Once("AutoEat", "lastportion-unread",
+                            "[Auto Eat] Last-portion count unread; that stack stays eligible.");
+                    }
+                    else if (AutoEatSkipsLastPortion(true, true, eatCount, left))
+                    {
+                        FeatureLog.Once("AutoEat", "lastportion:" + row.NetId,
+                            "[Auto Eat] Skipping last portion staticId=" + row.StaticId
+                            + " netId=" + row.NetId + " left=" + left + "/" + eatCount);
+                        continue;
+                    }
                 }
 
                 int starIndex = row.StarRate > 0 ? row.StarRate - 1 : 0;

@@ -237,6 +237,10 @@ namespace HeartopiaMod
         // Auto Eat sends CharacterProtocolManager.EatFood directly (server consume, no client
         // animation clip) instead of the BagModule Eat function; falls back automatically.
         private bool autoEatNoAnimationEnabled = true;
+        // When on, a matching stack whose TableEatable.eatCount is greater than 1 and whose
+        // remaining eats are exactly 1 is left for the player. Default off: old configs keep
+        // eating the last bite.
+        private bool autoEatSkipLastPortionEnabled = false;
         private int autoRepairTriggerPercent = 10;
         private int autoEatTriggerPercent = 20;
         private const string AUTO_EAT_FOOD_KEY = "food_bluejam";
