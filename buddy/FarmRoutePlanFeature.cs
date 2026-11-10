@@ -941,7 +941,8 @@ namespace HeartopiaMod
                 || this.farmWalkUnstickPhase != FarmWalkUnstickIdle
                 || this.farmWalkPendingCleanse
                 || this.farmWalkPendingPriority
-                || this.CleanupEventFarmHoldActive)
+                || this.CleanupEventFarmHoldActive
+                || this.CleanupEventFarmModeActive)
             {
                 return false;
             }
