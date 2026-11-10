@@ -37,7 +37,7 @@ namespace HeartopiaMod
     // Everything here is scalar state on the main thread — no AuraMono pointers, no coroutines.
     public partial class HeartopiaComplete
     {
-        // Persisted toggle. OFF = vanilla farm hops (default).
+        // Persisted toggle. OFF = no dive (default). A Rare Tree hop still lands 1.1 m beside the trunk.
         private bool stealthForagingEnabled;
 
         // Did WE turn noclip on for this run? Only then is it turned back off, and only while it

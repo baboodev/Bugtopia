@@ -3442,7 +3442,7 @@ namespace HeartopiaMod
                     ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": " + reason + progress
                         + " — within " + FarmWalkRescueTeleportRange.ToString("F0")
                         + "m and jumps are spent, taking the once-a-minute rescue teleport.");
-                    this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(this.farmWalkTrueTarget, this.farmWalkLabel),
+                    this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(this.farmWalkTrueTarget, this.farmWalkDwellLabel),
                         "node:walk-rescue", this.farmWalkTrueTarget);
                 }
                 else if (this.farmWalkConsecutiveSkips < FarmWalkMaxConsecutiveSkips)
@@ -3480,7 +3480,7 @@ namespace HeartopiaMod
                     this.farmWalkConsecutiveSkips = 0;
                     ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": " + reason + progress
                         + " — " + FarmWalkMaxConsecutiveSkips + " nodes skipped in a row, teleporting to break the deadlock.");
-                    this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(this.farmWalkTrueTarget, this.farmWalkLabel),
+                    this.FarmTeleportTo(this.ApplyForagingNodeTeleportOffset(this.farmWalkTrueTarget, this.farmWalkDwellLabel),
                         "node:walk-fallback", this.farmWalkTrueTarget);
                 }
             }

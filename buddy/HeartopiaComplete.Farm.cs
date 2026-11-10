@@ -1306,30 +1306,133 @@ namespace HeartopiaMod
         // checkpoints (farm-location waypoints, priority-area anchors, cleansing corals) — those
         // are area arrivals that must land where the world streams in normally.
         //   * Stealth Foraging engaged -> contamination -3m hosted / +4m point-anchored, every
-        //     other resource -1.5m (StealthForagingFeature.cs).
-        //   * Otherwise -> NO Y adjustment at all. Contamination used to take the vanilla
-        //     SeaCleanTeleportYOffset (+7m) lift here; that lift now lives only on the
-        //     cleansing-coral hop (CorruptionCleanseFeature.cs), which is a different target.
+        //     other resource -1.5m (StealthForagingFeature.cs). This return is first: the
+        //     rare-tree stand-off below does not run while the hop is diving.
+        //   * Otherwise -> no move, except Rare Tree, whose wide trunk needs a
+        //     FarmWalkCollectStandoff landing beside the pivot. Other nodes, including
+        //     Apple Tree and Mandarin Tree, land on the pivot. Contamination used to take
+        //     the vanilla SeaCleanTeleportYOffset (+7m) lift here; that lift now lives only
+        //     on the cleansing-coral hop (CorruptionCleanseFeature.cs), a different target.
+
         private Vector3 ApplyForagingNodeTeleportOffset(Vector3 position, string nodeLabel)
         {
-            if (!this.StealthForagingActive)
+            if (this.StealthForagingActive)
+            {
+                if (string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal))
+                {
+                    this.TryGetContaminatedAnchorClass(position, out bool hosted);
+                    position.y += hosted
+                        ? -StealthForagingContaminationDepth
+                        : StealthForagingContaminationPointLift;
+                }
+                else
+                {
+                    position.y -= StealthForagingNodeDepth;
+                }
+
+                return position;
+            }
+
+            if (!IsRareTreeTrunkStandoffLabel(nodeLabel))
             {
                 return position;
             }
 
-            if (string.Equals(nodeLabel, "Contaminated", StringComparison.Ordinal))
+            return this.ApplyRareTreeTrunkStandoff(position, nodeLabel);
+        }
+
+        private const float RareTreeTrunkLift = 0.3f;
+        private const float RareTreeTrunkSelfRadius = 0.5f;
+        private const float RareTreeTrunkClearanceCap = 2.5f;
+        private const float RareTreeTrunkTieEpsilon = 0.05f;
+
+        private static bool IsRareTreeTrunkStandoffLabel(string nodeLabel)
+        {
+            return string.Equals(nodeLabel, "Rare Tree", StringComparison.Ordinal);
+        }
+
+        // Horizontal direction from the tree toward the player. XZ only: a player above the
+        // canopy still names the side they are standing on. On the pivot, or with no player
+        // position, world forward is the approach side.
+        private Vector3 ResolveRareTreeApproachDirection(Vector3 treePosition)
+        {
+            if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos))
             {
-                this.TryGetContaminatedAnchorClass(position, out bool hosted);
-                position.y += hosted
-                    ? -StealthForagingContaminationDepth
-                    : StealthForagingContaminationPointLift;
-            }
-            else
-            {
-                position.y -= StealthForagingNodeDepth;
+                return Vector3.forward;
             }
 
-            return position;
+            Vector3 fromTree = playerPos - treePosition;
+            fromTree.y = 0f;
+            if (fromTree.sqrMagnitude < 0.0001f)
+            {
+                return Vector3.forward;
+            }
+
+            return fromTree.normalized;
+        }
+
+        // Minimum horizontal distance from the landing to any other scanned gatherable, capped
+        // at RareTreeTrunkClearanceCap. An entry within RareTreeTrunkSelfRadius of the pivot
+        // is this tree and is ignored. An empty mapResEntities scores the cap for every
+        // candidate, so the approach side wins.
+        private float ScoreRareTreeTrunkClearance(Vector3 treePosition, Vector3 landing)
+        {
+            float best = RareTreeTrunkClearanceCap;
+            float selfRadiusSqr = RareTreeTrunkSelfRadius * RareTreeTrunkSelfRadius;
+            for (int i = 0; i < this.mapResEntities.Count; i++)
+            {
+                Vector3 entry = this.mapResEntities[i].Position;
+                if (HorizontalDistanceSqr(entry, treePosition) <= selfRadiusSqr)
+                {
+                    continue;
+                }
+
+                float horiz = Mathf.Sqrt(HorizontalDistanceSqr(entry, landing));
+                if (horiz < best)
+                {
+                    best = horiz;
+                }
+            }
+
+            return best;
+        }
+
+        // Eight landings around the trunk, fanning out from the approach side. The stand-off is
+        // FarmWalkCollectStandoff itself: that value must stay above the 0.5 m self-radius and
+        // inside the 1.5 m aura (FarmWalkAuraReach). A learned narrower distance would put the
+        // body back in the trunk, so this does not call ResolveFarmWalkCollectStandoff.
+        private Vector3 ApplyRareTreeTrunkStandoff(Vector3 position, string nodeLabel)
+        {
+            Vector3 approach = this.ResolveRareTreeApproachDirection(position);
+            float bestScore = -1f;
+            int bestDegrees = 0;
+            Vector3 bestLanding = position;
+            for (int i = 0; i < 8; i++)
+            {
+                int step = (i + 1) / 2;
+                int degrees = step * 45;
+                if ((i & 1) == 0)
+                {
+                    degrees = -degrees;
+                }
+
+                Vector3 landing = position + (Quaternion.Euler(0f, degrees, 0f) * approach * FarmWalkCollectStandoff);
+                landing.y = position.y + RareTreeTrunkLift;
+                float score = this.ScoreRareTreeTrunkClearance(position, landing);
+                if (score > bestScore + RareTreeTrunkTieEpsilon)
+                {
+                    bestScore = score;
+                    bestDegrees = degrees;
+                    bestLanding = landing;
+                }
+            }
+
+            this.AutoFarmLog("Rare tree stand-off " + nodeLabel
+                + " deg=" + bestDegrees
+                + " clearance=" + bestScore.ToString("0.00")
+                + " pivot=" + position
+                + " landing=" + bestLanding);
+            return bestLanding;
         }
 
         // ---- Foraging teleport trace (MasterLogForagingTeleport) -------------------------------

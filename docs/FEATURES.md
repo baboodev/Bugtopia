@@ -1156,9 +1156,11 @@ While engaged:
   **hosted −3 m** (permanent, stuck to a coral on the ground) vs **point-anchored +4 m**
   (temporary, spawned at a sub-area point and floating in open water — diving under one of those
   is what pushed the player back to the surface). Unknown class falls back to the hosted dive.
-  **With Stealth Foraging off the node hop no longer adjusts Y at all** — contamination used to
-  take a +7 m lift here; that lift now applies only to the cleansing-coral hop
-  (`ApplyForagingNodeTeleportOffset`). **Area/zone arrivals dive too** (−1.5 m,
+  **With Stealth Foraging off, only a Rare Tree hop moves:** **1.1 m** beside the trunk and
+  **0.3 m** above the pivot (Rare-tree landing, below). Apple Tree, Mandarin Tree and every other
+  node land on the pivot.
+  Contamination used to take a +7 m lift on the node hop; that lift is only the cleansing-coral hop.
+  **Area/zone arrivals dive too** (−1.5 m,
   `ApplyForagingAreaTeleportOffset`): the farm-location waypoints, the priority-area anchors and the
   startup routing hop. They used to keep their exact Y, which left the player standing in the open
   for the whole area-load + node-scan window — the most visible moment of a run. Streaming is
@@ -1172,8 +1174,19 @@ While engaged:
 
 The offset applies to the **teleport argument only**: `lastNodePosition` and every marker / cooldown /
 dwell check keep the true node position, so radar matching and the collect confirmation are unchanged.
-With the mode off, contamination keeps its vanilla sea-floor **lift** (`SeaCleanTeleportYOffset`, +7 m,
-shared with the cleansing-coral hop).
+The +7 m sea-floor lift (`SeaCleanTeleportYOffset`) is only the cleansing-coral hop. It is not applied
+by `ApplyForagingNodeTeleportOffset`.
+
+#### Rare-tree landing
+
+With Stealth Foraging off, a **Rare Tree** hop does not land on the entity pivot. That pivot sits
+inside a wide trunk. The teleport argument is moved **1.1 m** out horizontally
+(`FarmWalkCollectStandoff`, inside the 1.5 m aura) and **0.3 m** above the pivot. Eight candidates fan
+from the side the player is approaching; the first side that is clearly clearer of other scanned
+gatherables wins, and a tie within 0.05 m stays on the approach side. 0.5 m is the radius of the tree's
+own scan point, not the landing distance. Apple Tree, Mandarin Tree and every other node keep the
+pivot landing. `lastNodePosition`, marker matching, cooldown stamping, and the collect wait keep the
+true tree position. Stealth Foraging does not use this offset; that hop still dives under the node.
 
 #### Stealth Block
 
@@ -1299,7 +1312,7 @@ Tree/stone **patrol automation**:
 
 Behavior:
 
-1. Ensures fishing rod equipped (restores previous tool on disable).
+1. Ensures the fishing rod is equipped while enabled. Stopping leaves the rod in hand. Player-tool restore is only `FarmToolBroker.Release` when the combined-farm coordinator stops and no farm is still enabled.
 2. Scans for fish shadows within detect range (15–200 m, default 60 m).
 3. Resolves targets via server/netId-aware game APIs on `HeartopiaComplete`.
 4. Casts, waits for bite, handles hook and **reel minigame** via `TrySetFishingPressed` (not legacy Input patches).
@@ -1355,7 +1368,7 @@ is not available at all (a boss run) or every spot refused in a row.
 
 ### Insects (`InsectNetFarm`)
 
-- Auto equips insect net; restores previous tool on stop.
+- Auto equips the insect net while enabled. Stopping leaves the net in hand. Player-tool restore is only `FarmToolBroker.Release` when the combined-farm coordinator stops and no farm is still enabled.
 - Scans catchable insects in range (default 50 m).
 - Batch catch (default 3 per tick).
 - Optional **patrol teleport** through ~50 predefined world coordinates when no targets nearby.
@@ -1364,7 +1377,7 @@ is not available at all (a boss run) or every spot refused in a row.
 
 ### Birds (`BirdNetFarm`)
 
-- Auto equips bird scanner; multi-catch support (1–10, default 1).
+- Auto equips the bird scanner while enabled. Stopping leaves the scanner in hand. Multi-catch support (1–10, default 1).
 - Capture modes: **Safe Capture** vs **Spam Capture**.
 - Perfect photo / auto-scare options.
 - Safety stop after 90 s continuous run; 60 s re-enable cooldown.
