@@ -963,6 +963,30 @@ namespace HeartopiaMod
                 return false;
             }
 
+            bool tourHasTransient = false;
+            for (int t = 0; t < this.farmTourStops.Count; t++)
+            {
+                if (IsTransientFarmTourStop(this.farmTourStops[t].Label))
+                {
+                    tourHasTransient = true;
+                    break;
+                }
+            }
+
+            if (!tourHasTransient)
+            {
+                for (int t = 0; t < this.farmTourCandidates.Count; t++)
+                {
+                    if (IsTransientFarmTourStop(this.farmTourCandidates[t].Label))
+                    {
+                        tourHasTransient = true;
+                        break;
+                    }
+                }
+            }
+
+            bool tourAtCap = this.farmTourStops.Count >= FarmTourMaxStops;
+
             float remaining = Distance3D(selfPos, this.farmWalkTrueTarget);
             int bestIndex = -1;
             float bestDistance = float.MaxValue;
@@ -970,6 +994,34 @@ namespace HeartopiaMod
             {
                 FarmTourStop candidate = this.farmTourCandidates[i];
                 if (nodeHaul && IsSameFarmTourStop(candidate.Position, this.farmWalkTrueTarget))
+                {
+                    continue;
+                }
+
+                if (this.IsFarmTargetUnconfirmed(candidate.Position, out _))
+                {
+                    continue;
+                }
+
+                if (tourAtCap)
+                {
+                    bool alreadyInTour = false;
+                    for (int j = 0; j < this.farmTourStops.Count; j++)
+                    {
+                        if (IsSameFarmTourStop(candidate.Position, this.farmTourStops[j].Position))
+                        {
+                            alreadyInTour = true;
+                            break;
+                        }
+                    }
+
+                    if (!alreadyInTour)
+                    {
+                        continue;
+                    }
+                }
+
+                if (tourHasTransient && !IsTransientFarmTourStop(candidate.Label))
                 {
                     continue;
                 }
@@ -1015,6 +1067,12 @@ namespace HeartopiaMod
             this.farmWalkSkipToScan = true;
             this.farmTourHasHeadLock = false;
             this.farmTourHasTransientLock = false;
+
+            if (areaHaul && this.farmLocations.Count > 0 && this.currentLocationIndex >= 0)
+            {
+                this.currentLocationIndex = (this.currentLocationIndex - 1 + this.farmLocations.Count)
+                    % this.farmLocations.Count;
+            }
 
             ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": radar marker " + taken.Label
                 + " " + bestDistance.ToString("F1") + "m away, " + remaining.ToString("F1")
