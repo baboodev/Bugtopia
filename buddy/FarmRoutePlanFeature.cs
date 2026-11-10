@@ -930,6 +930,13 @@ namespace HeartopiaMod
 
         private bool TryRetargetNearerSwimNode(Vector3 selfPos, float now)
         {
+            if (!this.autoFarmActive
+                || this.farmState != HeartopiaComplete.AutoFarmState.WalkingToNode
+                || this.farmWalkLabel.StartsWith("area:Fishing", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
             if (!this.farmWalkIsSwimming
                 || this.farmWalkUnstickPhase != FarmWalkUnstickIdle
                 || this.farmWalkPendingCleanse
