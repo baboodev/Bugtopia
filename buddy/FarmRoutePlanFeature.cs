@@ -912,31 +912,41 @@ namespace HeartopiaMod
             }
         }
 
-        // ⚠️ UNDERWATER, "NEAREST" HAS TO BE RE-ASKED WHILE SWIMMING, NOT ONLY AT THE START.
+        // ⚠️ UNDERWATER, A MARKER THAT APPEARS MID-SWIM IS THE NEXT TARGET.
         //
-        // The head of the tour is chosen when a walk begins and then left alone on purpose — a
-        // target that moves under the walker is what made routes thrash. On land that is right: the
-        // walker follows corners and passes nothing it could have taken instead.
+        // The tour head is chosen when the walk starts and then held, so a long swim keeps going
+        // after the radar has already drawn something else. A zone haul is the empty case of the
+        // same hole: the label is "area:", the old retarget returned immediately, and the arrival
+        // path treats the end of the walk as LoadingArea plus ResetFarmTour. Measured 2026-11-10:
+        // candidates=0, then "zone haul to Sea Area 2: 136m", no FarmTour line for 80 s, then two
+        // Contaminated stops planned only after arrival.
         //
-        // A swim is different. It is a straight line through open water, thirty or forty metres of
-        // it, and the plan was made before any of it happened — so the player sails past resources
-        // that were not the nearest when they set off and are now five metres away.
-        //
-        // The switch is deliberately hard to trigger: a candidate has to be BOTH a good few metres
-        // nearer AND a fraction of what is left, and only while there is real distance still to
-        // swim. Anything looser turns a swim into a tour of second thoughts.
+        // The candidate list is the scan the tour already trusts. A zone haul leaves for any of
+        // them. A node swim leaves only for one that is closer in 3-D, which includes one behind
+        // the swimmer. The old 6 m / 60 % / 12 m gates are what ignored a marker at 70 m with
+        // 100 m still to swim.
         private const float FarmSwimRetargetInterval = 2f;
-        private const float FarmSwimRetargetMinRemaining = 12f;
-        private const float FarmSwimRetargetMinGain = 6f;
-        private const float FarmSwimRetargetFraction = 0.6f;
         private float farmSwimRetargetNextAt;
 
         private bool TryRetargetNearerSwimNode(Vector3 selfPos, float now)
         {
             if (!this.farmWalkIsSwimming
-                || !this.farmWalkLabel.StartsWith("node:", StringComparison.Ordinal)
                 || this.farmWalkUnstickPhase != FarmWalkUnstickIdle
-                || this.farmTourStops.Count == 0)
+                || this.farmWalkPendingCleanse
+                || this.farmWalkPendingPriority
+                || this.CleanupEventFarmHoldActive)
+            {
+                return false;
+            }
+
+            if (this.farmWalkLabel.IndexOf("priority location", StringComparison.Ordinal) >= 0)
+            {
+                return false;
+            }
+
+            bool areaHaul = this.farmWalkPendingArea;
+            bool nodeHaul = this.farmWalkLabel.StartsWith("node:", StringComparison.Ordinal);
+            if (!areaHaul && !nodeHaul)
             {
                 return false;
             }
@@ -948,49 +958,72 @@ namespace HeartopiaMod
 
             this.farmSwimRetargetNextAt = now + FarmSwimRetargetInterval;
 
-            float remaining = Distance3D(selfPos, this.farmWalkTrueTarget);
-            if (remaining < FarmSwimRetargetMinRemaining)
-            {
-                return false;   // close enough that switching would just waste the approach
-            }
-
-            float bestDistance = float.MaxValue;
-            Vector3 best = Vector3.zero;
-            bool found = false;
-            for (int i = 0; i < this.farmTourStops.Count; i++)
-            {
-                Vector3 stop = this.farmTourStops[i].Position;
-                if (IsSameFarmTourStop(stop, this.farmWalkTrueTarget))
-                {
-                    continue;
-                }
-
-                float d = Distance3D(selfPos, stop);
-                if (d < bestDistance)
-                {
-                    bestDistance = d;
-                    best = stop;
-                    found = true;
-                }
-            }
-
-            if (!found
-                || bestDistance > remaining * FarmSwimRetargetFraction
-                || remaining - bestDistance < FarmSwimRetargetMinGain)
+            if (!this.TryCollectFarmTourCandidates(selfPos))
             {
                 return false;
             }
 
-            ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": passing a nearer node — "
-                + bestDistance.ToString("F1") + "m away against " + remaining.ToString("F1")
-                + "m still to swim; taking that one instead.");
+            float remaining = Distance3D(selfPos, this.farmWalkTrueTarget);
+            int bestIndex = -1;
+            float bestDistance = float.MaxValue;
+            for (int i = 0; i < this.farmTourCandidates.Count; i++)
+            {
+                FarmTourStop candidate = this.farmTourCandidates[i];
+                if (nodeHaul && IsSameFarmTourStop(candidate.Position, this.farmWalkTrueTarget))
+                {
+                    continue;
+                }
 
-            // Not stamped as visited: the target we are leaving is perfectly good, it is simply
-            // further. It goes back into the plan and gets collected on the way through.
+                float d = Distance3D(selfPos, candidate.Position);
+                if (nodeHaul)
+                {
+                    // A bubble drifts. Any-closer against another bubble, or against the node we
+                    // are already swimming to, flips the chase every poll. A solid marker does not
+                    // drift, so any closer distance is enough, including one behind the swimmer.
+                    float need = IsTransientFarmTourStop(candidate.Label)
+                        ? remaining - FarmTourTransientSwitchMargin
+                        : remaining;
+                    if (d >= need)
+                    {
+                        continue;
+                    }
+                }
+
+                if (d < bestDistance)
+                {
+                    bestDistance = d;
+                    bestIndex = i;
+                }
+            }
+
+            if (bestIndex < 0)
+            {
+                return false;
+            }
+
+            FarmTourStop taken = this.farmTourCandidates[bestIndex];
+
+            // ⚠️ BEFORE FinishFarmWalk. FinishFarmWalk(teleport: false) does not clear
+            // farmWalkPendingArea. EnterFarmCollectingAfterWalk reads that flag first and, when
+            // it is set, drops farmWalkSkipToScan, resets the tour, and enters LoadingArea.
+            // Clearing it here is what makes a zone haul return to the scan at the current spot.
+            //
+            // The head lock would then undo the abort: TryGetNextFarmTourStop keeps the old stop
+            // unless the new one is FarmTourHeadSwitchMargin (12 m) closer. The marker we just
+            // accepted may be only a few metres closer, or, on a zone haul, the list was empty.
+            this.farmWalkPendingArea = false;
             this.farmWalkSkipToScan = true;
-            this.FinishFarmWalk("a nearer node is " + bestDistance.ToString("F1")
-                + "m away — switching to it", false);
-            _ = best;
+            this.farmTourHasHeadLock = false;
+            this.farmTourHasTransientLock = false;
+
+            ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": radar marker " + taken.Label
+                + " " + bestDistance.ToString("F1") + "m away, " + remaining.ToString("F1")
+                + "m still on this transit — leaving it to farm the marker.");
+
+            // Not stamped visited. The transit we leave is still a real destination; the scan
+            // starts a new one after this pocket is empty.
+            this.FinishFarmWalk("radar marker " + taken.Label + " is " + bestDistance.ToString("F1")
+                + "m away — leaving this transit", false);
             return true;
         }
 

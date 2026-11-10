@@ -1646,6 +1646,7 @@ namespace HeartopiaMod
             // "Is this target still worth walking to" does not depend on any of that machinery, so
             // it is answered before it.
             // Underwater only: a long swim can sail past something nearer than where it is going.
+            // The check also covers a zone haul, and it reads live radar candidates, not farmTourStops.
             if (this.TryRetargetNearerSwimNode(selfPos, Time.unscaledTime))
             {
                 return true;
@@ -3611,7 +3612,7 @@ namespace HeartopiaMod
 
                 this.farmState = HeartopiaComplete.AutoFarmState.ScanningForNodes;
                 this.autoFarmTimer = 0f;
-                this.autoFarmStatus = "Node unreachable, finding another...";
+                this.autoFarmStatus = "Finding another node...";
                 return;
             }
 
