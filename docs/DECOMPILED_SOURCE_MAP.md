@@ -448,7 +448,7 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 
 #### `ToolSystem`
 - **Dump:** `XDTGameSystem/GameplaySystem/Tool/ToolSystem.cs`
-- **Features:** Equip rod/axe/net, auto repair durability, fishing tool restore
+- **Features:** Equip rod/axe/net, auto repair durability. Player-tool restore for the three farms lives in `FarmToolBroker`, not in the farm `SetEnabled` path.
 - **Access:** **R**, **A**
 - **How:**
   - **R:** `DataModule<ToolSystem>.Instance`, `GetCurrentTool()` → tool id, durability fields

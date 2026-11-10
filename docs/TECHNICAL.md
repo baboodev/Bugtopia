@@ -455,8 +455,8 @@ Reflection / Il2Cpp calls on `HeartopiaComplete` (representative):
 
 ### Tool management
 
-- Saves `previousToolEquipType` before equipping rod.
-- `RestorePreviousTool` on disable.
+- Enable and disable do not read or write the player tool. The rod stays in hand when fishing stops.
+- Player-tool restore is only `FarmToolBroker.Release`, and only when the combined-farm coordinator stops and no farm is still enabled.
 - Retry equip every 3.25 s if rod missing.
 
 ### Instant Catch (optional toggle)
@@ -521,7 +521,7 @@ Failure sets `auraLastError`; UI can surface via status helpers. Verbose trace: 
 
 Both static modules share design with fishing:
 
-- Enable/disable with tool restore
+- Enable and disable do not change the held tool. Equip-while-running stays.
 - Session counters, cooldowns, status strings for overlay
 - Config loaded from unified `KeybindConfigData` / `BirdFarmConfigData`
 

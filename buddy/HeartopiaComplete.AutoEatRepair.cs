@@ -692,9 +692,8 @@ namespace HeartopiaMod
 
                 // Pin the freshly-invoked tool object across the field reads. It is not cached/pinned
                 // otherwise, so bdwgc can move/collect it between the invoke and these reads — a window
-                // wide enough under a debugger to fault (the Auto Bird Farm enable crash, via
-                // CapturePreviousTool -> TryGetCurrentToolInfo). Pin immediately (no managed alloc in
-                // between), free in finally.
+                // wide enough under a debugger to fault (a cold current-tool read racing the GC).
+                // Pin immediately (no managed alloc in between), free in finally.
                 uint toolPin = AuraMonoPinNew(toolObj);
                 try
                 {

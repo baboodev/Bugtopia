@@ -372,10 +372,9 @@ namespace HeartopiaMod
             this.EquipHandTool(5);
         }
 
-        // InsectNetFarm.cs:248-253 — SetEnabled MUST get the host: enabling captures the
-        // previously-equipped tool, disabling restores it (and resets sessionCatchCount); a null
-        // host would silently break the tool capture/restore. No save (source parity — SetEnabled
-        // itself is the whole block).
+        // SetEnabled does not read or write the handhold. The host argument stays so existing
+        // callers remain source-compatible. Session counters still reset on disable. No save
+        // (source parity — SetEnabled itself is the whole block).
         private void OnUguiInsectsEnabledToggled(bool value)
         {
             if (value == InsectNetFarm.IsEnabled)

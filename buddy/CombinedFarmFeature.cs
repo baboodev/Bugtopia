@@ -1128,8 +1128,9 @@ namespace HeartopiaMod
             sliceEmptySinceAt = -999f;
             switchWantedSinceAt = -999f;
 
-            // Order matters: hand every farm back to itself first, THEN release the broker, so the
-            // farms' own capture/restore stays disabled until the player's tool has been put back.
+            // Farms are already disabled by the caller before this runs, so CountEnabledFarms()
+            // sees the post-SetEnabled flags. ResumeAll only unsuspends. Release is the only
+            // player-tool write, and only when the count is 0. SetEnabled does not equip or unequip.
             ResumeAll(host);
             FarmToolBroker.Release(host, restoreTool: CountEnabledFarms() == 0);
             FeatureLog.Toggle(LogTag, false, reason);
@@ -1629,7 +1630,7 @@ namespace HeartopiaMod
             string held = "?";
             // Only ask for the held tool once GetTool has answered at least once: that proves the
             // ToolSystem module is resolved and warm, so this cannot trigger a COLD resolve racing
-            // the GC (the crash class documented at BirdNetFarm.CapturePreviousTool).
+            // the GC (the same class FarmToolBroker.Tick defers).
             if (toolSystemProbeConfirmed && host.TryGetCurrentToolInfo(out int heldToolId, out string heldToolName, out string _))
             {
                 held = heldToolId + (string.IsNullOrEmpty(heldToolName) ? string.Empty : "/" + heldToolName);

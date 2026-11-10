@@ -2,25 +2,26 @@ using UnityEngine;
 
 namespace HeartopiaMod
 {
-    // Single owner of the handhold slot while Combined Farming is active.
+    // Single owner of the player-tool snapshot. Clients are Combined Farming and foraging
+    // animations (Acquire("ForagingAnim")). The three standalone farms do not snapshot or restore.
     // Plan: docs/plans/2026-07-27-combined-farm-coordinator.md §3.2
     //
     // The problem it solves is NOT "who calls EquipHandTool" — with the coordinator suspending every
     // farm but one, only the active farm ever asks for a tool, and it does so through its own tested
     // equip path (rod/scanner/net each have their own confirmation reader and retry cadence). What
-    // needs a single owner is the pair around that: the "previous tool" capture and restore.
+    // needs a single owner is the pair around that: the player-tool capture and restore.
     //
-    // Each farm captures the equipped tool when it is switched on and re-equips it when switched off.
-    // Run two farms and that snapshot is another farm's tool, so disabling one yanks the handhold out
-    // from under the other (conflict #2 in the plan). While this broker is active, the three farms
-    // skip their own capture/restore (they check IsActive) and the broker holds the one snapshot:
-    // taken once when the coordinator takes over, replayed once when it lets go.
+    // A client Acquires once. Tick captures once, after the deferral. Release replays that id only
+    // when restoreTool is true and the captured id is non-zero. A stopped standalone farm does not
+    // write the handhold. Foraging animations Acquire before taking the axe, Release with
+    // restoreTool false when the take fails, and Release with restoreTool true when a run that
+    // took the axe stops.
     //
     // The capture is DEFERRED by design. Reading the current tool goes through
     // TryGetCurrentToolInfo → a cold AuraMono ToolSystem resolve if the module is not warm yet, which
-    // is the enumeration that native-AVs when it races the GC — the crash that made BirdNetFarm stop
-    // capturing on its enable frame. So activation only arms the capture; the tick performs it once
-    // the deferral has elapsed, and skips it entirely if the read fails.
+    // is the enumeration that native-AVs when it races the GC — a cold resolve on an enable frame.
+    // Activation only arms the capture; the tick performs it once the deferral has elapsed, and
+    // skips it entirely if the read fails.
     public static class FarmToolBroker
     {
         private const float CaptureDeferralSeconds = 0.75f;
@@ -81,9 +82,8 @@ namespace HeartopiaMod
 
             if (IsFarmTool(toolId))
             {
-                // A farm tool was already out (the farms were enabled before the coordinator took
-                // over). Restoring it later would be meaningless, so treat it as "nothing to put
-                // back" and release with an unequip instead.
+                // A farm tool (rod, scanner, or net) is not a player tool. capturedToolId stays 0,
+                // and Release leaves the handhold unchanged.
                 capturedToolId = 0;
                 Log("Player tool capture: farm tool " + toolId + " was equipped — nothing to restore.");
                 return;
@@ -93,10 +93,10 @@ namespace HeartopiaMod
             Log("Player tool captured: " + toolId + (string.IsNullOrEmpty(toolName) ? string.Empty : "/" + toolName) + ".");
         }
 
-        // restoreTool=false when a farm is STILL enabled after the coordinator lets go: that farm is
-        // about to equip its own tool on its next tick, so putting the player's tool back first would
-        // only add a round-trip of churn. The capture is dropped either way — the coordinator is no
-        // longer the owner, and each farm's own capture/restore is live again from here.
+        // restoreTool false drops the snapshot and does not equip or unequip. Combined Farming
+        // passes false while a farm is still enabled: that farm re-equips later through its own
+        // Ensure* path. Foraging animations pass false when the axe take fails, and true when a
+        // run that took the axe stops. There is no per-farm snapshot to revive.
         public static void Release(HeartopiaComplete host, bool restoreTool)
         {
             if (!active)
@@ -118,8 +118,8 @@ namespace HeartopiaMod
                 return;
             }
 
-            // Clearing `active` BEFORE the restore is deliberate: any farm still enabled is free to
-            // take the handhold back on its next tick, and its own capture/restore is live again.
+            // Clearing `active` BEFORE the restore is deliberate: a still-enabled farm may take
+            // the handhold back on its next tick.
             if (restoreToolId != 0)
             {
                 host.EquipHandTool(restoreToolId);
@@ -127,9 +127,9 @@ namespace HeartopiaMod
                 return;
             }
 
-            // Nothing worth restoring. Leave whatever the last slice held: any farm that is still
-            // enabled will re-equip what it needs, and if none is, its own SetEnabled(false) path
-            // already unequipped. Unequipping here would fight both cases.
+            // Nothing worth restoring, so leave the handhold as the last writer left it. A
+            // still-enabled farm re-equips on its next tick. A stopped farm keeps the rod, net,
+            // or scanner. Foraging's failed axe take lands here too. Do not unequip.
             FeatureLog.Life("FarmToolBroker", "handhold released — no player tool to restore" + (hadCapture ? string.Empty : " (capture never ran)"));
         }
 

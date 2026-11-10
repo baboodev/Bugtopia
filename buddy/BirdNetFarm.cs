@@ -31,8 +31,6 @@ namespace HeartopiaMod
         private static float lastKnownScannerToolStatusAt = -999f;
         private const float ScannerEquipRetryInterval = 3.25f;
         private static float nextScannerEquipAttemptAt = -999f;
-        private static int previousToolId = 0;
-        private static bool previousToolRestorePending = false;
         private static int sessionCatchCount = 0;
         private static int sessionScaredCount = 0;
         private static int consecutiveNoTargetTicks = 0;
@@ -94,13 +92,6 @@ namespace HeartopiaMod
             int endScared = sessionScaredCount;
 
             Breadcrumbs.Drop("bf.setenabled.begin", value.ToString());
-            if (value && !enabled)
-            {
-                Breadcrumbs.Drop("bf.capturetool.begin");
-                CapturePreviousTool(host);
-                Breadcrumbs.Drop("bf.capturetool.ok");
-            }
-
             if (!value)
             {
                 suspended = false; // a stopped farm must never stay paused — see ForceStop
@@ -130,7 +121,6 @@ namespace HeartopiaMod
             multiCatchBurstTarget = 0;
             if (!enabled)
             {
-                RestorePreviousTool(host);
                 host?.ClearBirdFarmRuntimeState();
                 sessionCatchCount = 0;
                 sessionScaredCount = 0;
@@ -144,8 +134,6 @@ namespace HeartopiaMod
                 lastScannerEquipped = false;
                 lastKnownScannerToolStatusAt = -999f;
                 nextScannerEquipAttemptAt = -999f;
-                previousToolId = 0;
-                previousToolRestorePending = false;
                 _pendingConfirmNetIds.Clear();
                 _pendingTimeoutStrikes.Clear();
                 _pendingConfirmExpiresAt = -999f;
@@ -1040,51 +1028,6 @@ namespace HeartopiaMod
             lastStatus = "Waiting for Bird Scanner equip...";
         }
 
-        private static void CapturePreviousTool(HeartopiaComplete host)
-        {
-            previousToolId = 0;
-            previousToolRestorePending = false;
-
-            // NOTE: deliberately does NOT read the current tool here. Enabling Auto Bird Farm runs on
-            // the hotkey frame, and TryGetCurrentToolInfo can trigger a cold AuraMono ToolSystem module
-            // resolve — a heavy enumeration of live mono game objects that races the game's GC and
-            // native-AVs when an object is freed mid-walk (reliably under a debugger, the no-crashlog
-            // crash localized to bf.capturetool.begin). The "restore previous tool after bird farm"
-            // convenience is dropped to keep enabling crash-safe; RestorePreviousTool falls back to the
-            // bird-scanner tool status when nothing was captured.
-        }
-
-        private static void RestorePreviousTool(HeartopiaComplete host)
-        {
-            // FarmToolBroker.IsActive: while the coordinator owns the handhold it does the restore —
-            // see AutoFishingFarm.CapturePreviousTool. (This farm never captures anything anyway, so
-            // the guard only stops the "unequip the scanner" branch from firing mid-rotation.)
-            if (host == null || FarmToolBroker.IsActive)
-            {
-                previousToolId = 0;
-                previousToolRestorePending = false;
-                return;
-            }
-
-            if (!previousToolRestorePending || previousToolId == 0)
-            {
-                if (host.TryGetBirdScannerToolStatus(out bool scannerEquipped, out _) && scannerEquipped)
-                {
-                    host.EquipHandTool(0);
-                    Log("No previous supported tool captured; unequipping Bird Scanner.");
-                }
-
-                previousToolId = 0;
-                previousToolRestorePending = false;
-                return;
-            }
-
-            host.EquipHandTool(previousToolId);
-            Log("Restoring previous toolId=" + previousToolId);
-            previousToolId = 0;
-            previousToolRestorePending = false;
-        }
-
         public static void ForceStop(HeartopiaComplete host = null)
         {
             enabled = false;
@@ -1101,8 +1044,6 @@ namespace HeartopiaMod
             lastToolStatus = "Unknown";
             lastKnownScannerToolStatusAt = -999f;
             nextScannerEquipAttemptAt = -999f;
-            previousToolId = 0;
-            previousToolRestorePending = false;
             sessionCatchCount = 0;
             sessionScaredCount = 0;
             consecutiveNoTargetTicks = 0;

@@ -408,9 +408,8 @@ namespace HeartopiaMod
             this.EquipHandTool(4);
         }
 
-        // BirdNetFarm.cs:479-484 — SetEnabled MUST get the host: enabling captures the
-        // previously-equipped tool, disabling restores it (and resets both session counters); a
-        // null host would silently break the tool capture/restore. No save (source parity —
+        // SetEnabled gets the host so disable can clear bird runtime state. It does not capture
+        // or restore a tool. A null host would skip that clear. No save (source parity —
         // SetEnabled itself is the whole block).
         private void OnUguiBirdsEnabledToggled(bool value)
         {
