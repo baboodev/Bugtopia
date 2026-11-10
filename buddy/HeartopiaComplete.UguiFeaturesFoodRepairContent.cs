@@ -190,6 +190,7 @@ namespace HeartopiaMod
             public Toggle RepairTrimAnimToggle;    // applies to the GAME path â€” greyed while RepairNoAnimation is ON
             public Toggle EatAutoTriggerToggle;
             public Toggle EatNoAnimationToggle;
+            public Toggle SkipLastPortionToggle;
 
             public GameObject EatTriggerLabel;
             public string EatTriggerShown;
@@ -261,12 +262,13 @@ namespace HeartopiaMod
         // the block height on top when it is showing).
         private const float UguiFoodRepairEatAutoTriggerRowY = 371f;
         private const float UguiFoodRepairEatNoAnimRowY = 401f;
-        private const float UguiFoodRepairEatTriggerRowY = 431f;
-        private const float UguiFoodRepairRepairTriggerRowY = 459f;
-        private const float UguiFoodRepairRepairUsesRowY = 487f;
-        private const float UguiFoodRepairDropdownRowY = 515f;      // 425 + the 90 the three added repair-throw toggles cost
-        private const float UguiFoodRepairFoodDropdownRowY = 551f;  // was 461
-        private const float UguiFoodRepairDropdownsBottomY = 591f;  // food row 551 + field h 40
+        private const float UguiFoodRepairSkipLastPortionRowY = 431f;
+        private const float UguiFoodRepairEatTriggerRowY = 461f;
+        private const float UguiFoodRepairRepairTriggerRowY = 489f;
+        private const float UguiFoodRepairRepairUsesRowY = 517f;
+        private const float UguiFoodRepairDropdownRowY = 545f;
+        private const float UguiFoodRepairFoodDropdownRowY = 581f;
+        private const float UguiFoodRepairDropdownsBottomY = 621f;
         private const float UguiFoodRepairPickerTopY = UguiFoodRepairDropdownRowY + 80f;
         private const float UguiFoodRepairListWidth = 300f;        // :899 scrollViewRect width
         private const float UguiFoodRepairListInnerWidth = UguiFoodRepairListWidth - 22f; // kit viewport insets â‰ˆ the :900 280px content
@@ -506,6 +508,10 @@ namespace HeartopiaMod
                 this.L("Eat Without Animation"), this.autoEatNoAnimationEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesFoodRepairEatNoAnimationToggled));
             PlaceUguiTopLeft(handle.EatNoAnimationToggle.gameObject, rowX, UguiFoodRepairEatNoAnimRowY, rowW, 24f);
+            handle.SkipLastPortionToggle = this.CreateUguiCheckbox(scrollContent, "SkipLastPortionToggle",
+                this.L("Eat food set until 1/4"), this.autoEatSkipLastPortionEnabled,
+                new System.Action<bool>(this.OnUguiFeaturesFoodRepairSkipLastPortionToggled));
+            PlaceUguiTopLeft(handle.SkipLastPortionToggle.gameObject, rowX, UguiFoodRepairSkipLastPortionRowY, rowW, 24f);
 
             // -------- 3 sliders (:691-716 â€” side-by-side rows per the Main-round conversion;
             // wholeNumbers = TRUE, int contract â€” file header) --------
@@ -683,6 +689,8 @@ namespace HeartopiaMod
                 UguiFoodRepairEatAutoTriggerRowY + extraY, rowW, 24f);
             PlaceUguiTopLeftIfSet(UguiGoOf(handle.EatNoAnimationToggle), rowX,
                 UguiFoodRepairEatNoAnimRowY + extraY, rowW, 24f);
+            PlaceUguiTopLeftIfSet(UguiGoOf(handle.SkipLastPortionToggle), rowX,
+                UguiFoodRepairSkipLastPortionRowY + extraY, rowW, 24f);
 
             PlaceUguiTopLeftIfSet(handle.EatTriggerLabel, rowX, UguiFoodRepairEatTriggerRowY + extraY + 2f, 230f, 20f);
             PlaceUguiTopLeftIfSet(UguiGoOf(handle.EatTriggerSlider), sliderX,
@@ -1021,6 +1029,7 @@ namespace HeartopiaMod
                 this.SetUguiToggleInteractable(handle.RepairTrimAnimToggle, !this.autoRepairNoAnimationEnabled);
                 this.SyncUguiToggleFromField(handle.EatAutoTriggerToggle, this.autoEatAutoTriggerEnabled);
                 this.SyncUguiToggleFromField(handle.EatNoAnimationToggle, this.autoEatNoAnimationEnabled);
+                this.SyncUguiToggleFromField(handle.SkipLastPortionToggle, this.autoEatSkipLastPortionEnabled);
 
                 // Slider re-syncs â€” RoundToInt compare against the int fields (Settingsâ†’Main
                 // FpsSlider shape) + per-frame value labels (Main-round precedent).
@@ -1277,6 +1286,17 @@ namespace HeartopiaMod
                 return;
             }
             this.autoEatNoAnimationEnabled = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiFeaturesFoodRepairSkipLastPortionToggled(bool value)
+        {
+            if (value == this.autoEatSkipLastPortionEnabled)
+            {
+                return;
+            }
+
+            this.autoEatSkipLastPortionEnabled = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 

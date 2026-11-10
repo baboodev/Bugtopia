@@ -493,6 +493,7 @@ namespace HeartopiaMod
             data.autoEatOnToastEnabled = this.autoEatOnToastEnabled;
             data.autoEatAutoTriggerEnabled = FishingRouteFeature.Active ? FishingRouteFeature.SnapshotAutoEatPanel : this.autoEatAutoTriggerEnabled;
             data.autoEatNoAnimationEnabled = this.autoEatNoAnimationEnabled;
+            data.autoEatSkipLastPortionEnabled = this.autoEatSkipLastPortionEnabled;
             data.autoRepairTriggerPercent = this.autoRepairTriggerPercent;
             data.autoEatTriggerPercent = this.autoEatTriggerPercent;
             data.autoSellEnabled = this.autoSellEnabled;
@@ -1043,6 +1044,7 @@ namespace HeartopiaMod
             this.autoEatAutoTriggerEnabled = hasAutoEatTriggerConfig && data.autoEatAutoTriggerEnabled;
             this.autoEatTriggerPercent = Mathf.Clamp(hasAutoEatTriggerConfig ? data.autoEatTriggerPercent : 20, 1, 100);
             this.autoEatNoAnimationEnabled = data.autoEatNoAnimationEnabled;
+            this.autoEatSkipLastPortionEnabled = data.autoEatSkipLastPortionEnabled;
             bool hasAutoSellConfig = data.autoSellMaxPerStack > 0 || data.autoSellReserveCount > 0 || !string.IsNullOrWhiteSpace(data.autoSellItemKey);
             // Never auto-resume selling on boot/lobby load. The network sell path is only safe after the
             // player is fully in-world, so the user must enable it each session from the panel.

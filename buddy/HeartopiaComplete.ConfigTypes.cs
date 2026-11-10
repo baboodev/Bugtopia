@@ -534,6 +534,7 @@ namespace HeartopiaMod
             public bool autoEatOnToastEnabled;
             public bool autoEatAutoTriggerEnabled;
             public bool autoEatNoAnimationEnabled = true;
+            public bool autoEatSkipLastPortionEnabled = false;
             public int autoRepairTriggerPercent;
             public int autoEatTriggerPercent;
             public bool autoSellEnabled;
