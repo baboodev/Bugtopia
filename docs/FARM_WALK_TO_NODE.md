@@ -201,6 +201,7 @@ The back-off line is unconditional and prints the round: `backed off 5,0m (clear
   zeroed the movement axis and the character stood there jumping on the spot.
 - Sprint: `TryStartSprint()` on hops of 25 m or more, cancelled at 15 m by **turning** — the game
   itself drops the sprint on a turn larger than `LargeTurnAngleThreshold`.
+- A swim to a node or a zone point stops when the radar draws something the farm can collect and the tour picker would take next. The check is every 2 s, 3-D distance, and it turns around for a marker behind the swimmer. A zone haul stops for any such marker. A node swim stops only for a closer one. A bubble already in the tour keeps priority over a solid marker; a bubble itself must be 25 m closer. The next scan picks the marker. Aborting a zone haul does not skip that zone: the location index is stepped back so the next relocation retries it. Fishing route legs are not part of this check.
 - The repair kit is **an entity on the seabed** with an aura sphere. After throwing it you must
   **descend into it** or the repair will not start. It is held in every farm state, not only in the
   cleaning dwell.

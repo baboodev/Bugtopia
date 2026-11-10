@@ -178,6 +178,10 @@ is zero for an oscillation at any speed.
 
 ## 3. Following the route, every frame
 
+### 3.0. Radar interrupt, before steering
+
+`RunFarmWalkTick` calls `TryRetargetNearerSwimNode` before arrival, steering, and re-path. Only an Auto Farm swim in `WalkingToNode` (`autoFarmActive`, not a label starting `area:Fishing`). The candidates are `TryCollectFarmTourCandidates` (the same `FindClosestAvailableNode` filter as the tour), then the ones the picker would refuse are dropped: unconfirmed targets, markers past the 48-stop cap, and solid markers while a bubble is in the tour. On a hit it steps the zone index back when the walk is a zone haul, clears `farmWalkPendingArea`, `farmTourHasHeadLock`, and `farmTourHasTransientLock`, sets `farmWalkSkipToScan`, and `FinishFarmWalk(..., teleport: false)`. Clearing the area flag first is required: `EnterFarmCollectingAfterWalk` would otherwise enter `LoadingArea` and `ResetFarmTour`.
+
 ### 3.1. Advancing through corners
 
 The same `reached || passed` rule as for choosing the starting corner. On an advance:

@@ -453,9 +453,7 @@ bet, not a measurement. **[J]**
 nodes against 1745 on land, with 20–30 m between them, and an order computed from distances is
 worthless there. **[M]**
 
-**4.5** During a swim, every 2 s it is checked whether something has become materially nearer.
-Switching requires: the candidate is ≥6 m nearer **and** within 60 % of what remains **and** there is
-still ≥12 m to swim. The abandoned target is not stamped visited. **[J]**
+**4.5** During an Auto Farm swim (`autoFarmActive`, state WalkingToNode), every 2 s the live radar scan is asked again. Fishing legs (`area:Fishing`), cleanup-boss walks, quest walks, priority hauls, cleanse swims, and unstick do not take this branch. A zone haul (`area:`) ends as soon as that scan lists an enabled marker the tour picker would actually take, even when the marker is farther than the zone anchor and even when it is behind the swimmer. A `node:` swim ends when some other such marker is closer in 3-D than the distance still left. A marker farther than the current node stays in the plan. If a Bubble is already in the tour or in the scan, a solid marker cannot win, because the picker always takes the bubble; a Bubble marker must be closer by 25 m. Unconfirmed targets are skipped, and a marker that would not fit under the 48-stop cap is skipped. The walk returns to the scan: the zone-arrival flag and the tour head lock are cleared first, the abandoned point is not stamped visited, and the tour is not reset. Aborting a zone haul steps the location index back one, so the next empty scan retries that same zone. **[J]**
 
 **4.6** Passability checks and waypoint bans **do not apply** underwater: the vertical is free there,
 a 2.65 m ledge is not an obstacle, and the sweep's verdict would ban perfectly good nodes. **[M]**
