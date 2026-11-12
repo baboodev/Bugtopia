@@ -34,6 +34,8 @@ namespace HeartopiaMod
 
         private static Dictionary<int, string> radarInsectItemIconKeys;
         private static Dictionary<int, string> radarBirdItemIconKeys;
+        private static int radarSpeciesIconKeysVersion = -1;
+        private int radarSpeciesCatalogKeysVersion = -1;
 
         private sealed class RadarSpeciesFilterEntry
         {
@@ -164,7 +166,7 @@ namespace HeartopiaMod
             return this.IsInsectSpeciesAllowed(itemId);
         }
 
-        // The filter stores bag item ids (InsectSuffixToItemId). EntityUtil.GetEntityResId(uint)
+        // The filter stores bag item ids (the insect suffix maps). EntityUtil.GetEntityResId(uint)
         // is the overload that reads garbage and returns 0, so a non-empty filter rejected every
         // insect. The entity-object overload is the one MapSpots already uses.
         private bool TryResolveInsectFilterItemId(uint netId, out int itemId)
@@ -294,10 +296,8 @@ namespace HeartopiaMod
                 return false;
             }
 
-            int suffix = GetTrailingNumber(target.name);
             int itemId;
-            return suffix > 0
-                && InsectSuffixToItemId.TryGetValue(suffix, out itemId)
+            return TryGetInsectItemIdFromPrefabName(target.name, out itemId)
                 && this.radarInsectSpeciesFilter.Contains(itemId);
         }
 
@@ -370,35 +370,44 @@ namespace HeartopiaMod
             }
         }
 
+        // Rebuilt whenever the working species maps change (live table fill), not only once.
         private static void EnsureRadarSpeciesIconKeys()
         {
-            if (radarInsectItemIconKeys != null)
+            if (radarInsectItemIconKeys != null && radarSpeciesIconKeysVersion == speciesMapsVersion)
             {
                 return;
             }
 
-            radarInsectItemIconKeys = new Dictionary<int, string>(InsectSuffixToItemId.Count);
-            foreach (KeyValuePair<int, int> pair in InsectSuffixToItemId)
+            radarSpeciesIconKeysVersion = speciesMapsVersion;
+            radarInsectItemIconKeys = BuildRadarSpeciesIconKeys("p_insect_insect",
+                insectSuffixToItemIdWorking, insectPrefabTailToItemIdWorking, insectLiveTailByItemId);
+            radarBirdItemIconKeys = BuildRadarSpeciesIconKeys("p_bird_bird",
+                birdSuffixToItemIdWorking, birdPrefabTailToItemIdWorking, birdLiveTailByItemId);
+        }
+
+        private static Dictionary<int, string> BuildRadarSpeciesIconKeys(string prefix,
+            Dictionary<int, int> suffixMap, Dictionary<string, int> tailMap, Dictionary<int, string> liveTailById)
+        {
+            Dictionary<int, string> keys = new Dictionary<int, string>(suffixMap.Count + tailMap.Count);
+            foreach (KeyValuePair<int, int> pair in suffixMap)
             {
-                if (!radarInsectItemIconKeys.ContainsKey(pair.Value))
+                if (!keys.ContainsKey(pair.Value))
                 {
-                    radarInsectItemIconKeys.Add(pair.Value, "p_insect_insect" + pair.Key.ToString());
+                    keys.Add(pair.Value, prefix + pair.Key.ToString());
                 }
             }
 
-            radarBirdItemIconKeys = new Dictionary<int, string>(BirdSuffixToItemId.Count + BirdPrefabTailToItemId.Count);
-            foreach (KeyValuePair<int, int> pair in BirdSuffixToItemId)
+            foreach (KeyValuePair<string, int> pair in tailMap)
             {
-                if (!radarBirdItemIconKeys.ContainsKey(pair.Value))
-                {
-                    radarBirdItemIconKeys.Add(pair.Value, "p_bird_bird" + pair.Key.ToString());
-                }
+                keys[pair.Value] = prefix + pair.Key;
             }
 
-            foreach (KeyValuePair<string, int> pair in BirdPrefabTailToItemId)
+            foreach (KeyValuePair<int, string> pair in liveTailById)
             {
-                radarBirdItemIconKeys[pair.Value] = "p_bird_bird" + pair.Key;
+                keys[pair.Key] = prefix + pair.Value;
             }
+
+            return keys;
         }
 
         private void EnsureRadarSpeciesCatalog()
@@ -406,11 +415,14 @@ namespace HeartopiaMod
             EnsureRadarSpeciesIconKeys();
             string language = this.selectedLanguage ?? string.Empty;
             if (this.radarInsectCatalog != null
+                && this.radarSpeciesCatalogKeysVersion == radarSpeciesIconKeysVersion
                 && string.Equals(language, this.radarSpeciesCatalogLanguage, StringComparison.Ordinal))
             {
                 return;
             }
 
+            this.radarSpeciesCatalogKeysVersion = radarSpeciesIconKeysVersion;
+            this.radarSpeciesEntryById.Clear();
             this.radarSpeciesCatalogLanguage = language;
             this.radarInsectCatalog = this.BuildRadarSpeciesCatalog(radarInsectItemIconKeys, "Insect");
             this.radarBirdCatalog = this.BuildRadarSpeciesCatalog(radarBirdItemIconKeys, "Bird");

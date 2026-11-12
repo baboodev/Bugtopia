@@ -377,6 +377,9 @@ namespace HeartopiaMod
             this.RegisterWorldReadyCallback(LocalizationFallbackWorldReadyCallbackName, this.ApplyLocalizationFallbackOnWorldReady);
             // Settings -> "Switch language", hidden by the China build (LanguageSwitchButtonFeature.cs).
             this.RegisterLanguageSwitchButtonReveal();
+            // Bird/Insect prefab -> species id maps and the open-certification list from the live
+            // tables, over the baked fallbacks (HeartopiaComplete.MapSpots.cs).
+            this.RegisterWorldReadyCallback("SpeciesTables", this.SyncSpeciesTablesOnWorldReady);
 
             // Diagnostic only: reports whether the two ClassInjector hooks that look like dead code
             // really are (InjectionGateCanary.cs). Counts only ever grow, so one sample per world

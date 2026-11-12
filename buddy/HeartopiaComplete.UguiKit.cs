@@ -3035,13 +3035,12 @@ namespace HeartopiaMod
                 try
                 {
                     ColorBlock tabColors = btn.colors;
-                    tabColors.normalColor = new Color(1f, 1f, 1f, 0f);
-                    tabColors.highlightedColor = new Color(1f, 1f, 1f, 0.07f);
-                    tabColors.pressedColor = new Color(1f, 1f, 1f, 0.13f);
-                    tabColors.selectedColor = new Color(1f, 1f, 1f, 0f);
-                    // No disabledColor: it is read-only on this build's Il2CppInterop ColorBlock
-                    // binding (the other five setters exist). Harmless — tab bars never disable a
-                    // tab, and the default disabled tint on an alpha-0 base is invisible anyway.
+                    // The 2026-11-12 interop dropped the color setters. The public fields remain.
+                    tabColors.m_NormalColor = new Color(1f, 1f, 1f, 0f);
+                    tabColors.m_HighlightedColor = new Color(1f, 1f, 1f, 0.07f);
+                    tabColors.m_PressedColor = new Color(1f, 1f, 1f, 0.13f);
+                    tabColors.m_SelectedColor = new Color(1f, 1f, 1f, 0f);
+                    tabColors.m_DisabledColor = new Color(1f, 1f, 1f, 0f);
                     tabColors.colorMultiplier = 1f;
                     btn.colors = tabColors;
                 }

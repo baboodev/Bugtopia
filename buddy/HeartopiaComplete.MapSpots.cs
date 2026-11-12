@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
@@ -502,7 +503,8 @@ namespace HeartopiaMod
         // robin 63001 (p_bird_bird2001), whose birdPhotoId points at another species.
         // Suffixes are shuffled vs ids (bird120 -> 61119). The tracked object name is
         // the primary resolve; a live staticId is already the entity id, so it is used
-        // as-is. Regenerate with InsectSuffixToItemId after every content update.
+        // as-is. This is the pre-table fallback only: once TableData is readable,
+        // SyncSpeciesTablesOnWorldReady overlays the live Bird rows (birdSuffixToItemIdWorking).
         private static readonly Dictionary<int, int> BirdSuffixToItemId = new Dictionary<int, int>
         {
             { 101, 61101 }, { 102, 61102 }, { 103, 61103 }, { 104, 61104 }, { 105, 61105 }, { 106, 61106 },
@@ -533,7 +535,7 @@ namespace HeartopiaMod
         };
 
         // Variant tails that share one mesh number. The int map above cannot hold these:
-        // GetTrailingNumber("p_bird_bird902_2") is 2, and reading 902 would be Snowy Owl (61903).
+        // a trailing-digits read of "p_bird_bird902_2" is 2, and reading 902 would be Snowy Owl (61903).
         // Joined from Bird.normalPrefabId. Aquarium/craft clones of the same prefab strip back to this tail.
         private static readonly Dictionary<string, int> BirdPrefabTailToItemId = new Dictionary<string, int>(StringComparer.Ordinal)
         {
@@ -550,7 +552,8 @@ namespace HeartopiaMod
         // free; the remaining table rows are variants without insectNNN prefabs; 155 including the
         // harvest-festival dung beetles). Suffixes are
         // SHUFFLED vs ids here too (insect113 -> 51117, insect119 -> 51113) — never derive
-        // numerically. PRIMARY insect resolve (no Mono calls); the live-entity path is the fallback.
+        // numerically. Pre-table fallback for the insect resolve (no Mono calls); the live Insect
+        // rows overlay it once TableData is readable, and the live-entity path stays the last resort.
         private static readonly Dictionary<int, int> InsectSuffixToItemId = new Dictionary<int, int>
         {
             { 101, 51101 }, { 102, 51102 }, { 103, 51103 }, { 104, 51104 }, { 105, 51105 }, { 106, 51106 }, { 107, 51107 }, { 108, 51108 },
@@ -578,36 +581,50 @@ namespace HeartopiaMod
             { 1606, 51241 }, { 1607, 51240 }, { 1608, 51242 }, { 1609, 51243 }, { 1610, 51239 },
         };
 
-        // Trailing number of a bird prefab/sprite name ("p_bird_bird101(clone)" -> 101). 0 = none.
-        private static int GetTrailingNumber(string name)
-        {
-            if (string.IsNullOrEmpty(name))
-            {
-                return 0;
-            }
+        // Working maps read by every lookup: the bake until the Bird/Insect tables have been read,
+        // then the bake overlaid with the live rows (a live key wins, a bake-only key stays).
+        // Swapped whole on the main thread; never mutated in place.
+        private static Dictionary<int, int> birdSuffixToItemIdWorking = BirdSuffixToItemId;
+        private static Dictionary<string, int> birdPrefabTailToItemIdWorking = BirdPrefabTailToItemId;
+        private static Dictionary<int, int> insectSuffixToItemIdWorking = InsectSuffixToItemId;
+        private static Dictionary<string, int> insectPrefabTailToItemIdWorking =
+            new Dictionary<string, int>(StringComparer.Ordinal);
+        // Item id -> live normalPrefabId tail. Wins over the bake when an id is reachable from more
+        // than one key, so the icon key follows the table. Empty until a table read succeeds.
+        private static Dictionary<int, string> birdLiveTailByItemId = new Dictionary<int, string>();
+        private static Dictionary<int, string> insectLiveTailByItemId = new Dictionary<int, string>();
+        // Bumped whenever a working map changes content; EnsureRadarSpeciesIconKeys rebuilds on it.
+        private static int speciesMapsVersion;
 
-            int end = name.Length;
-            while (end > 0 && !char.IsDigit(name[end - 1]))
-            {
-                end--;
-            }
-            int start = end;
-            while (start > 0 && char.IsDigit(name[start - 1]))
-            {
-                start--;
-            }
-            if (end <= start)
-            {
-                return 0;
-            }
-            int value;
-            return int.TryParse(name.Substring(start, end - start), out value) ? value : 0;
-        }
+        private bool speciesBirdTableFailLogged;
+        private bool speciesInsectTableFailLogged;
+        private bool speciesCertTableFailLogged;
+        private int speciesTablesReadEpoch = -1;
+        private bool speciesBirdTableReadDone;
+        private bool speciesInsectTableReadDone;
+        private bool speciesCertTableReadDone;
 
         // Tail after "p_bird_bird" / "p_birdphoto_birdphoto", with spawn and display suffixes removed.
         // "p_bird_bird905_3_dots(Clone)" -> "905_3". "p_bird_bird101" -> "101".
         // "p_bird_bird119_pendant(Clone)" -> "119" (long-tailed tit 63002). Empty when it is not a bird prefab.
         private static string GetBirdPrefabTail(string name)
+        {
+            return GetSpeciesPrefabTail(name, "p_bird_bird", "p_birdphoto_birdphoto");
+        }
+
+        // "p_insect_insect410_dots(Clone)" -> "410". A variant mesh keeps its whole tail
+        // ("p_insect_insect410_2" -> "410_2") instead of collapsing to its trailing digits.
+        private static string GetInsectPrefabTail(string name)
+        {
+            return GetSpeciesPrefabTail(name, "p_insect_insect", null);
+        }
+
+        private static bool TryParseSpeciesIntTail(string tail, out int suffix)
+        {
+            return int.TryParse(tail, NumberStyles.None, CultureInfo.InvariantCulture, out suffix);
+        }
+
+        private static string GetSpeciesPrefabTail(string name, string worldPrefix, string photoPrefix)
         {
             if (string.IsNullOrEmpty(name))
             {
@@ -615,11 +632,9 @@ namespace HeartopiaMod
             }
 
             string normalized = name.Trim().ToLowerInvariant().Replace("(clone)", string.Empty).Trim();
-            const string worldPrefix = "p_bird_bird";
-            const string photoPrefix = "p_birdphoto_birdphoto";
             int at = normalized.IndexOf(worldPrefix, StringComparison.Ordinal);
             int prefixLength = worldPrefix.Length;
-            if (at < 0)
+            if (at < 0 && photoPrefix != null)
             {
                 at = normalized.IndexOf(photoPrefix, StringComparison.Ordinal);
                 prefixLength = photoPrefix.Length;
@@ -654,6 +669,11 @@ namespace HeartopiaMod
                     tail = tail.Substring(0, tail.Length - 8);
                     stripped = true;
                 }
+                else if (tail.EndsWith("_flauntable", StringComparison.Ordinal))
+                {
+                    tail = tail.Substring(0, tail.Length - 11);
+                    stripped = true;
+                }
                 else if (tail.EndsWith("_t", StringComparison.Ordinal))
                 {
                     tail = tail.Substring(0, tail.Length - 2);
@@ -667,18 +687,312 @@ namespace HeartopiaMod
 
         private static bool TryGetBirdItemIdFromPrefabName(string name, out int itemId)
         {
+            return TryGetSpeciesItemIdFromTail(GetBirdPrefabTail(name),
+                birdPrefabTailToItemIdWorking, birdSuffixToItemIdWorking, out itemId);
+        }
+
+        private static bool TryGetInsectItemIdFromPrefabName(string name, out int itemId)
+        {
+            return TryGetSpeciesItemIdFromTail(GetInsectPrefabTail(name),
+                insectPrefabTailToItemIdWorking, insectSuffixToItemIdWorking, out itemId);
+        }
+
+        private static bool TryGetSpeciesItemIdFromTail(
+            string tail, Dictionary<string, int> tailMap, Dictionary<int, int> suffixMap, out int itemId)
+        {
             itemId = 0;
-            string tail = GetBirdPrefabTail(name);
             if (string.IsNullOrEmpty(tail))
             {
                 return false;
             }
-            if (BirdPrefabTailToItemId.TryGetValue(tail, out itemId))
+            if (tailMap.TryGetValue(tail, out itemId))
             {
                 return true;
             }
             int suffix;
-            return int.TryParse(tail, out suffix) && BirdSuffixToItemId.TryGetValue(suffix, out itemId);
+            return TryParseSpeciesIntTail(tail, out suffix) && suffixMap.TryGetValue(suffix, out itemId);
+        }
+
+        // World-ready callback: reads TableData's per-level Bird / Insect / CollectCertification
+        // rows (static LevelTable* fields, Dictionary<int, Dictionary<int, TRow>>) so a content drop
+        // resolves without a code edit. Each part is read once per world; a part that fails keeps
+        // its baked map and is retried by the gate's bounded per-world retry.
+        private bool SyncSpeciesTablesOnWorldReady()
+        {
+            int epoch = AuraMonoWorldEpoch;
+            if (epoch != this.speciesTablesReadEpoch)
+            {
+                this.speciesTablesReadEpoch = epoch;
+                this.speciesBirdTableReadDone = false;
+                this.speciesInsectTableReadDone = false;
+                this.speciesCertTableReadDone = false;
+            }
+
+            if (!this.IsGameDataQueryable || !this.AttachAuraMonoThread())
+            {
+                return false;
+            }
+
+            this.EnsureRadarSpawnGateApis();
+            IntPtr tableDataClass = this.radarGateTableDataClass;
+            if (tableDataClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.speciesBirdTableReadDone)
+            {
+                this.speciesBirdTableReadDone = this.TrySyncLiveSpeciesTable(tableDataClass, false);
+            }
+
+            if (!this.speciesInsectTableReadDone)
+            {
+                this.speciesInsectTableReadDone = this.TrySyncLiveSpeciesTable(tableDataClass, true);
+            }
+
+            if (!this.speciesCertTableReadDone)
+            {
+                this.speciesCertTableReadDone = this.TrySyncRadarOpenCertifications(tableDataClass);
+            }
+
+            return this.speciesBirdTableReadDone && this.speciesInsectTableReadDone && this.speciesCertTableReadDone;
+        }
+
+        private bool TrySyncLiveSpeciesTable(IntPtr tableDataClass, bool insects)
+        {
+            Dictionary<int, int> liveSuffix = new Dictionary<int, int>();
+            Dictionary<string, int> liveTail = new Dictionary<string, int>(StringComparer.Ordinal);
+            Dictionary<int, string> tailById = new Dictionary<int, string>();
+            string error;
+            int rows = this.VisitAuraMonoLevelTableRows(tableDataClass,
+                insects ? "LevelTableInsects" : "LevelTableBirds", row =>
+                {
+                    int id;
+                    string prefab;
+                    if (!this.TryGetMonoInt32Member(row, "id", out id) || id <= 0
+                        || !this.TryGetMonoStringMember(row, "normalPrefabId", out prefab))
+                    {
+                        return;
+                    }
+
+                    string tail = insects ? GetInsectPrefabTail(prefab) : GetBirdPrefabTail(prefab);
+                    if (string.IsNullOrEmpty(tail))
+                    {
+                        return;
+                    }
+
+                    int suffix;
+                    if (TryParseSpeciesIntTail(tail, out suffix))
+                    {
+                        liveSuffix[suffix] = id;
+                    }
+                    else
+                    {
+                        liveTail[tail] = id;
+                    }
+
+                    tailById[id] = tail;
+                }, out error);
+
+            if (tailById.Count == 0)
+            {
+                bool logged = insects ? this.speciesInsectTableFailLogged : this.speciesBirdTableFailLogged;
+                if (!logged)
+                {
+                    if (insects)
+                    {
+                        this.speciesInsectTableFailLogged = true;
+                    }
+                    else
+                    {
+                        this.speciesBirdTableFailLogged = true;
+                    }
+
+                    ModLogger.Msg("[Species] " + (insects ? "Insect" : "Bird") + " table unreadable ("
+                        + (rows > 0 ? "no usable normalPrefabId in " + rows.ToString() + " rows" : error)
+                        + ") - baked suffix map stays in force.");
+                }
+
+                return false;
+            }
+
+            Dictionary<int, int> bakeSuffix = insects ? InsectSuffixToItemId : BirdSuffixToItemId;
+            Dictionary<string, int> mergedTail = new Dictionary<string, int>(StringComparer.Ordinal);
+            Dictionary<int, int> mergedSuffix = new Dictionary<int, int>(bakeSuffix);
+            if (!insects)
+            {
+                foreach (KeyValuePair<string, int> pair in BirdPrefabTailToItemId)
+                {
+                    mergedTail[pair.Key] = pair.Value;
+                }
+            }
+
+            foreach (KeyValuePair<int, int> pair in liveSuffix)
+            {
+                mergedSuffix[pair.Key] = pair.Value;
+            }
+
+            foreach (KeyValuePair<string, int> pair in liveTail)
+            {
+                mergedTail[pair.Key] = pair.Value;
+            }
+
+            Dictionary<int, int> currentSuffix = insects ? insectSuffixToItemIdWorking : birdSuffixToItemIdWorking;
+            Dictionary<string, int> currentTail = insects ? insectPrefabTailToItemIdWorking : birdPrefabTailToItemIdWorking;
+            Dictionary<int, string> currentTailById = insects ? insectLiveTailByItemId : birdLiveTailByItemId;
+            if (SpeciesMapEquals(currentSuffix, mergedSuffix)
+                && SpeciesMapEquals(currentTail, mergedTail)
+                && SpeciesMapEquals(currentTailById, tailById))
+            {
+                return true;
+            }
+
+            if (insects)
+            {
+                insectSuffixToItemIdWorking = mergedSuffix;
+                insectPrefabTailToItemIdWorking = mergedTail;
+                insectLiveTailByItemId = tailById;
+            }
+            else
+            {
+                birdSuffixToItemIdWorking = mergedSuffix;
+                birdPrefabTailToItemIdWorking = mergedTail;
+                birdLiveTailByItemId = tailById;
+            }
+
+            speciesMapsVersion++;
+            ModLogger.Msg("[Species] " + (insects ? "Insect" : "Bird") + " table: " + tailById.Count.ToString()
+                + " species from " + rows.ToString() + " rows (" + liveSuffix.Count.ToString() + " numeric, "
+                + liveTail.Count.ToString() + " variant tails); merged map " + mergedSuffix.Count.ToString()
+                + " + " + mergedTail.Count.ToString() + " tails.");
+            return true;
+        }
+
+        private static bool SpeciesMapEquals<TKey, TValue>(Dictionary<TKey, TValue> a, Dictionary<TKey, TValue> b)
+        {
+            if (a == null || b == null || a.Count != b.Count)
+            {
+                return a == b;
+            }
+
+            EqualityComparer<TValue> comparer = EqualityComparer<TValue>.Default;
+            foreach (KeyValuePair<TKey, TValue> pair in a)
+            {
+                TValue other;
+                if (!b.TryGetValue(pair.Key, out other) || !comparer.Equals(pair.Value, other))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        // Walks a TableData static Dictionary<int (level), Dictionary<int (id), TRow>> through
+        // get_Values on both levels, every level dictionary and every row pinned for the visit.
+        // Rows of all levels are visited (the game layers a level over level 0 per id). Returns the
+        // number of rows visited; 0 with error set when the table could not be reached.
+        private int VisitAuraMonoLevelTableRows(IntPtr tableDataClass, string fieldName, Action<IntPtr> visit, out string error)
+        {
+            error = string.Empty;
+            IntPtr levels;
+            if (!this.TryGetAuraMonoStaticObjectField(tableDataClass, fieldName, out levels) || levels == IntPtr.Zero)
+            {
+                error = "TableData." + fieldName + " not readable";
+                return 0;
+            }
+
+            uint levelsPin = AuraMonoPinNew(levels);
+            if (levelsPin == 0U)
+            {
+                error = "pin failed";
+                return 0;
+            }
+
+            List<IntPtr> levelTables = new List<IntPtr>();
+            List<uint> levelPins = new List<uint>();
+            int visited = 0;
+            try
+            {
+                if (!this.TryEnumerateAuraMonoDictionaryValues(levels, levelTables, levelPins))
+                {
+                    error = "TableData." + fieldName + " has no levels";
+                    return 0;
+                }
+
+                List<IntPtr> rows = new List<IntPtr>();
+                List<uint> rowPins = new List<uint>();
+                for (int i = 0; i < levelTables.Count; i++)
+                {
+                    if (levelTables[i] == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    rows.Clear();
+                    try
+                    {
+                        if (!this.TryEnumerateAuraMonoDictionaryValues(levelTables[i], rows, rowPins))
+                        {
+                            continue;
+                        }
+
+                        for (int r = 0; r < rows.Count; r++)
+                        {
+                            if (rows[r] == IntPtr.Zero)
+                            {
+                                continue;
+                            }
+
+                            visit(rows[r]);
+                            visited++;
+                        }
+                    }
+                    finally
+                    {
+                        FreeAuraMonoPins(rowPins);
+                        rowPins.Clear();
+                    }
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(levelPins);
+                AuraMonoPinFree(levelsPin);
+            }
+
+            if (visited == 0)
+            {
+                error = "TableData." + fieldName + " is empty";
+            }
+
+            return visited;
+        }
+
+        // Dictionary<K, V>.Values items (the dictionary's own enumerator yields boxed KeyValuePairs,
+        // not the rows). Every output item is pinned into pins; the caller frees them.
+        private bool TryEnumerateAuraMonoDictionaryValues(IntPtr dictionaryObj, List<IntPtr> output, List<uint> pins)
+        {
+            IntPtr valuesObj;
+            if (!this.TryInvokeAuraMonoZeroArg(dictionaryObj, out valuesObj, "get_Values") || valuesObj == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            uint valuesPin = AuraMonoPinNew(valuesObj);
+            if (valuesPin == 0U)
+            {
+                return false;
+            }
+
+            try
+            {
+                return this.TryEnumerateAuraMonoCollectionItems(valuesObj, output, pins);
+            }
+            finally
+            {
+                AuraMonoPinFree(valuesPin);
+            }
         }
 
         // Species ITEM id for a Bird/Insect radar marker (game-map icon). Resolved once per marker
@@ -714,7 +1028,7 @@ namespace HeartopiaMod
                 {
                     // PRIMARY: prefab tail from the tracked GO name / the ESP's resolved sprite
                     // key — no Mono calls, works with Auto Bird Farm off. Variant meshes
-                    // (905_3, 1301_2) are a string tail; a plain number still hits BirdSuffixToItemId.
+                    // (905_3, 1301_2) are a string tail; a plain number still hits the suffix map.
                     // FALLBACK: staticId via the BirdFarm aura helpers.
                     string birdName = target != null ? target.name : null;
                     if (!TryGetBirdItemIdFromPrefabName(birdName, out itemId))
@@ -741,17 +1055,13 @@ namespace HeartopiaMod
                 }
                 else if (string.Equals(label, "Insect", StringComparison.Ordinal))
                 {
-                    // PRIMARY: prefab-suffix from the tracked GO name / the ESP sprite key via the
-                    // baked (shuffle-aware) InsectSuffixToItemId. FALLBACK: live entity resolve
-                    // (entity staticId == bag-item id).
-                    int suffix = target != null ? GetTrailingNumber(target.name) : 0;
-                    if (suffix <= 0)
+                    // PRIMARY: prefab tail from the tracked GO name / the ESP sprite key via the
+                    // working (table-overlaid, shuffle-aware) insect maps. FALLBACK: live entity
+                    // resolve (entity staticId == bag-item id).
+                    string insectName = target != null ? target.name : null;
+                    if (!TryGetInsectItemIdFromPrefabName(insectName, out itemId))
                     {
-                        suffix = GetTrailingNumber(metadata.SpecificIconKey);
-                    }
-                    if (suffix > 0)
-                    {
-                        InsectSuffixToItemId.TryGetValue(suffix, out itemId);
+                        TryGetInsectItemIdFromPrefabName(metadata.SpecificIconKey, out itemId);
                     }
 
                     if (itemId <= 0 && target != null

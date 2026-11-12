@@ -24,9 +24,12 @@ namespace HeartopiaMod
         };
 
         // CollectCertification.openCertification == 1 only. Value is certificationType.
-        // Regenerate from the SQL in docs/superpowers/plans/2026-10-28-radar-collection-quick-filters.md
-        // after a table export. Hidden book ids are absent.
-        private static readonly Dictionary<int, int> RadarOpenCertificationTypeById = BuildRadarOpenCertificationTypeById();
+        // Starts as the bake (SQL in docs/superpowers/plans/2026-10-28-radar-collection-quick-filters.md)
+        // and is replaced whole by TrySyncRadarOpenCertifications once the live table is readable.
+        // Hidden book ids are absent from both.
+        private static Dictionary<int, int> radarOpenCertificationTypeById = BuildRadarOpenCertificationTypeById();
+        private const int RadarCertificationTypeMin = 7001;
+        private const int RadarCertificationTypeMax = 8005;
 
         private readonly HashSet<int> radarInsectQuickUnopened = new HashSet<int>();
         private readonly HashSet<int> radarInsectQuickBelow5 = new HashSet<int>();
@@ -66,6 +69,56 @@ namespace HeartopiaMod
             }
         }
 
+        // Live CollectCertification rows (TableData.LevelTableCollectCertifications, all levels):
+        // openCertification && certificationType in 7001..8005, hidden book ids excluded. Replaces
+        // the allow-list whole; an empty result is treated as unreadable and keeps the current one.
+        private bool TrySyncRadarOpenCertifications(IntPtr tableDataClass)
+        {
+            Dictionary<int, int> live = new Dictionary<int, int>();
+            string error;
+            int rows = this.VisitAuraMonoLevelTableRows(tableDataClass, "LevelTableCollectCertifications", row =>
+            {
+                int id;
+                bool open;
+                int certificationType;
+                if (this.TryGetMonoInt32Member(row, "id", out id)
+                    && id > 0
+                    && !RadarCollectionFilterIsHidden(id)
+                    && this.TryGetMonoBoolMember(row, "openCertification", out open)
+                    && open
+                    && this.TryGetMonoInt32Member(row, "certificationType", out certificationType)
+                    && certificationType >= RadarCertificationTypeMin
+                    && certificationType <= RadarCertificationTypeMax)
+                {
+                    live[id] = certificationType;
+                }
+            }, out error);
+
+            if (live.Count == 0)
+            {
+                if (!this.speciesCertTableFailLogged)
+                {
+                    this.speciesCertTableFailLogged = true;
+                    ModLogger.Msg("[RadarFilter] CollectCertification table unreadable ("
+                        + (rows > 0 ? "no open species in " + rows.ToString() + " rows" : error)
+                        + ") - baked certification list stays in force.");
+                }
+
+                return false;
+            }
+
+            if (SpeciesMapEquals(radarOpenCertificationTypeById, live))
+            {
+                return true;
+            }
+
+            radarOpenCertificationTypeById = live;
+            this.radarCollectionFilterDirty = true;
+            ModLogger.Msg("[RadarFilter] open certifications from table: " + live.Count.ToString()
+                + " species (" + rows.ToString() + " rows).");
+            return true;
+        }
+
         private static void ClassifyRadarCollectionSpecies(
             int staticId, bool hasEntry, int state, bool starKnown, int star, bool countKnown, int count,
             out bool unopened, out bool below5, out bool notMaster)
@@ -82,7 +135,7 @@ namespace HeartopiaMod
             below5 = state == RadarPictorialStateGot && starKnown && star < 5;
             int certificationType;
             int threshold;
-            notMaster = RadarOpenCertificationTypeById.TryGetValue(staticId, out certificationType)
+            notMaster = radarOpenCertificationTypeById.TryGetValue(staticId, out certificationType)
                 && RadarMasterThresholdByType.TryGetValue(certificationType, out threshold)
                 && countKnown
                 && count < threshold;
