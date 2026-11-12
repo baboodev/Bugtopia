@@ -1393,9 +1393,35 @@ namespace HeartopiaMod
             if (!this.TryComputeTrackGraphPath(startIndex, endIndex, this.farmWalkScratchCorners,
                     this.farmWalkExcludedNodes))
             {
-                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": A* found no route between waypoints "
-                    + startIndex + " and " + endIndex + " — cannot route.");
-                return false;
+                // A ban carried over from an earlier walk can cut the only bridge into a spur
+                // while leaving the walk that placed it routable, so the audit rollback below
+                // never sees it. The rollback only fires when THAT walk's re-route fails.
+                //
+                // Measured on the live graph: waypoint 1235 is degree 2 and the only link into
+                // an 11-node spur that holds the Black Truffle anchor (1226). Oyster (898) still
+                // reaches Shiitake (1558) without it, so a ban of 1235 survives the haul that
+                // set it. The next area hop then dies exactly as logged — "no route between
+                // waypoints 898 and 1226", then "1226 and 1558" — and both hops teleport.
+                // The same search with the ban lifted is 43 hops and 28 hops.
+                //
+                // Rule 0.8: a heuristic may never make routing impossible. Recover the route and
+                // drop the bans that sit on it, so the next hop is not severed for the rest of
+                // the ban's five minutes.
+                int bans = this.farmWalkExcludedNodes.Count;
+                bool recovered = bans > 0
+                    && this.TryComputeTrackGraphPath(startIndex, endIndex, this.farmWalkScratchCorners, null);
+                if (!recovered)
+                {
+                    ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": A* found no route between waypoints "
+                        + startIndex + " and " + endIndex + " — cannot route."
+                        + (bans > 0 ? " (" + bans + " waypoint ban(s) in effect)" : string.Empty));
+                    return false;
+                }
+
+                ModLogger.Msg("[FarmWalk] " + this.farmWalkLabel + ": " + bans
+                    + " ban(s) severed the only route between waypoints " + startIndex + " and " + endIndex
+                    + " — " + this.ReleaseFarmWalkBansOnRecoveredRoute(this.farmWalkScratchCorners)
+                    + ", taking the " + this.farmWalkScratchCorners.Count + "-corner route.");
             }
 
             this.farmWalkScratchCorners.Add(to);
@@ -1596,6 +1622,52 @@ namespace HeartopiaMod
             this.farmWalkStartNodeIndex = startIndex;
             this.farmWalkEndNodeIndex = endIndex;
             return this.farmWalkCorners.Count > 0;
+        }
+
+        // Drop bans that lie on a route A* could only build with the ban list ignored. Those are
+        // the nodes that severed it; bans off this route did not, and stay banned.
+        private string ReleaseFarmWalkBansOnRecoveredRoute(List<Vector3> corners)
+        {
+            this.farmWalkBlockedScratch.Clear();
+            Vector3[] positions = this.trackGraphPositions;
+            foreach (int index in this.farmWalkExcludedNodes)
+            {
+                if (positions == null || index < 0 || index >= positions.Length)
+                {
+                    continue;
+                }
+
+                Vector3 at = positions[index];
+                for (int c = 0; c < corners.Count; c++)
+                {
+                    if (corners[c] == at)
+                    {
+                        this.farmWalkBlockedScratch.Add(index);
+                        break;
+                    }
+                }
+            }
+
+            if (this.farmWalkBlockedScratch.Count == 0)
+            {
+                return "none of them sit on the recovered route";
+            }
+
+            string released = string.Empty;
+            for (int i = 0; i < this.farmWalkBlockedScratch.Count; i++)
+            {
+                int index = this.farmWalkBlockedScratch[i];
+                this.farmWalkExcludedNodes.Remove(index);
+                this.farmWalkBlockedGraphNodes.Remove(index);
+                if (released.Length > 0)
+                {
+                    released += ", ";
+                }
+
+                released += index.ToString();
+            }
+
+            return "released waypoint " + released;
         }
 
         // Perpendicular distance from the player to the leg being walked, in XZ. The corridor test
