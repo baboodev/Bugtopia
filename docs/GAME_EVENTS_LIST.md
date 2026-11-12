@@ -1,6 +1,6 @@
 # Game Events — Full List (generated)
 
-Auto-generated from `ilspy-dumps/` — every `struct ... : IEvent`. Total: 1592 types.
+Auto-generated from `ilspy-dumps/` — every `struct ... : IEvent`. Total: 1641 types.
 Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.md).
 
 
@@ -16,7 +16,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 
 - `UpdatePing`
 
-## ScriptsRefactory.DataAndProtocol.Events (185)
+## ScriptsRefactory.DataAndProtocol.Events (188)
 
 - `AccountLogoutEvent`
 - `AlertBlindBoxRewardEvent`
@@ -174,6 +174,9 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `ServerCenterEvent`
 - `ShowBirdInfoEvent`
 - `ShowBpPayRewardEvent`
+- `SimulationTaskChainAcceptResultEvent`
+- `SimulationTaskChainSkipResultEvent`
+- `SimulationTaskChainUpdatedEvent`
 - `StartCookCommandEvent`
 - `StartCookEvent`
 - `StartIgniteFireworksEvent`
@@ -217,7 +220,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `SwitchMainLevel`
 - `SwitchMainScene`
 
-## XDTDataAndProtocol.Events (908)
+## XDTDataAndProtocol.Events (940)
 
 - `AchievementToast`
 - `ActivityEndEvent`
@@ -265,6 +268,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `BPCloseEvent`
 - `BadgeDrawSuccessResultEvent`
 - `BakeLoadedEvent`
+- `BathBallRuntimeStateAddedEvent`
 - `BattleInputEnd`
 - `BattleInputStart`
 - `BattlePassActivityCompleteRefresh`
@@ -275,6 +279,12 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `BattlePassUpdatePayRewardEvent`
 - `BattlePassUpdatePointEvent`
 - `BattlePassUpdatedEvent`
+- `BirthdayCandleCommandFeedback`
+- `BirthdayProfileSynced`
+- `BirthdayWishBlowCandleRequested`
+- `BirthdayWishHistorySynced`
+- `BirthdayWishPanelOpenRequested`
+- `BirthdayWishStateSynced`
 - `BlockLeftJoyStickEvent`
 - `BlockSkillInputEvent`
 - `BodyPollutantCleaningStartedEvent`
@@ -380,8 +390,12 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `CraftSwitchEvent`
 - `DanceDraftCollectionFinished`
 - `DancePublishFinished`
+- `DancePublishedDeleteFinished`
+- `DancePublishedVisibilityFinished`
+- `DanceScoreApplyMoreFinished`
 - `DanceScoreViewEvent`
 - `DanceStartRequestFinished`
+- `DanceUgcCreateCancelledEvent`
 - `DelayRefreshBackPackEvent`
 - `DeleteUgcMarkerFinished`
 - `DestroyDynamicField`
@@ -443,6 +457,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `FishingStickInputUpdated`
 - `FishingThrowCommandEvent`
 - `FrameSyncEvent`
+- `FriendBirthdayDateSynced`
 - `FullScreenLightShowEvent`
 - `G2UEntitySpawnedEvent`
 - `G2UHandholdEvent`
@@ -480,7 +495,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `GodModeSwitchEvent`
 - `GoldenCoinGachaResultEvent`
 - `GoodsRackShowUI`
-- `GramophonePlayStatusUpdate`
+- `GramophoneLocalPlaybackStatusUpdate`
 - `GuiCatTestMotionEvent`
 - `GuidesChapterUpdateEvent`
 - `GuidesNodeUpdateEvent`
@@ -555,6 +570,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `InstrumentPanelOpenEvent`
 - `InteractWithCookerEvent`
 - `InterruptGuideEvent`
+- `InventionMachineStateChangedEvent`
 - `ItemSellFinishedEvent`
 - `JigsawPuzzleBingoEvent`
 - `JigsawPuzzleCellModelUpdateEvent`
@@ -581,6 +597,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `LongestHiderDistanceTipsEvent`
 - `LongestHiderTipsEvent`
 - `MailUpdatedEvent`
+- `MakeBirthdayWishFinished`
 - `MapRefreshEvent`
 - `MapSpotDataInitEvent`
 - `MapSpotRefreshed`
@@ -620,6 +637,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `NoBackGachaResultEvent`
 - `NotebookDataReadyEvent`
 - `NotebookInSharingComponentRemovedUiEvent`
+- `NotebookWishDisplayUpdated`
 - `NpcBirdPhotoExchangeEvent`
 - `NpcCanvassEvent`
 - `NpcCanvassUpdateEvent`
@@ -675,6 +693,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `PaintingsCountUpdatedEvent`
 - `PairSkateChallengeApplyEvent`
 - `PairSkateChallengeRefuseEvent`
+- `PapercutBaseStateChangedEvent`
 - `PartyConfigChangedEvent`
 - `PartyCreaseEvent`
 - `PartyCreateOrDestroyRefreshUiEvent`
@@ -741,6 +760,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `PictorialRewardUpdatedEvent`
 - `PlaceDrawingBoardEvent`
 - `PlaceFireworksEvent`
+- `PlaceGramophoneEvent`
 - `PlaceUgcMarkerFinished`
 - `PlayActivityRequestTipEvent`
 - `PlayCardActionFinishEvent`
@@ -789,6 +809,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `PuzzleCheckinChangedEvent`
 - `QteProbUpdatedEvent`
 - `QueryAvailablePointEvent`
+- `QueryBirthdayProfileFinished`
 - `QueryCertificationEvent`
 - `QueryNotebookDataResultEvent`
 - `QuestionnaireEvent`
@@ -862,6 +883,14 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `RotateFurnitureDebugEvent`
 - `S2C_DrawCardRespEvent`
 - `S2C_MaxPlayerCountChangeEvent`
+- `S2C_PapercutCommandResultEvent`
+- `S2C_PapercutParticipantJoinedEvent`
+- `S2C_PapercutParticipantLeftEvent`
+- `S2C_PapercutParticipantStageResultEvent`
+- `S2C_PapercutResultReadyEvent`
+- `S2C_PapercutSessionStartedEvent`
+- `S2C_PapercutStageSettledEvent`
+- `S2C_PapercutStoppedEvent`
 - `S2C_PlayCardRespEvent`
 - `S2C_PlayerCountChangeEvent`
 - `S2C_SnowSculptingFinishEvent`
@@ -902,6 +931,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `SelfieCompositionMirrorEvent`
 - `SendGiftResultEvent`
 - `SetBakeFakeGIEvent`
+- `SetBirthdayFinished`
 - `SetBrgFollowTarget`
 - `SetDefaultVehicleEvent`
 - `SetFollowNumEvent`
@@ -920,6 +950,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `ShowChatInputFieldDuringCard`
 - `ShowDrawingBoardEvent`
 - `ShowFireworksEvent`
+- `ShowGramophoneEvent`
 - `ShowGuideEvent`
 - `ShowHideResearchStuffEvent`
 - `ShowInsectInfoEvent`
@@ -963,6 +994,9 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `SwitchLevelWorldResultEvent`
 - `SwitchSandBoxPlanEvent`
 - `SyncGiveGiftResultEvent`
+- `SystemPresentationConditionConsumerQueryEvent`
+- `SystemPresentationConditionConsumerReadyEvent`
+- `SystemPresentationConditionsReachedEvent`
 - `SystemPresentationNativeRequestEvent`
 - `TakingPictureResult`
 - `TalkEndEvent`
@@ -998,6 +1032,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `TeaseKittyStateEnterEvent`
 - `TeasePetCommandEvent`
 - `TeaseQteEvent`
+- `TelevisionPlayableChangedEvent`
 - `TemplateLoadCompletedEvent`
 - `ThrowBeginEvent`
 - `ThrowEndEvent`
@@ -1177,12 +1212,6 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `StopTrack`
 - `UpdatePosition`
 
-## XDTGUI.Module.Build (3)
-
-- `BuildPlacementConfirmedEvent`
-- `SimulationShopBuildReturnedEvent`
-- `SimulationShopBuildStartedEvent`
-
 ## XDTGUI.Module.Energy (3)
 
 - `CreaseBuffEventByUi`
@@ -1208,6 +1237,12 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 ## XDTGUI.Module.Shop (1)
 
 - `OrderMachineStateChangeEvent`
+
+## XDTGUI.Module.SimulationBadge (3)
+
+- `SimulationBadgeDisplayRequestEvent`
+- `SimulationBadgeTrackChangedEvent`
+- `SimulationBadgesChangedEvent`
 
 ## XDTGUI.Module.Skill (2)
 
@@ -1277,6 +1312,10 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `UIOperationOpenByEnumRequestedEvent`
 - `UIOperationOpenWithParamRequestedEvent`
 
+## XDTGame.UI.Logics.BathBubble (1)
+
+- `BathBubblePanelBurstEvent`
+
 ## XDTGame.UI.Logics.Hud (1)
 
 - `MapHudModeFocusedEvent`
@@ -1307,6 +1346,10 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `OnStartJoinNewRoomEvent`
 - `OnStartJoinOldRoomEvent`
 - `OnStartReConnectRoomEvent`
+
+## XDTGameSystem.GameplaySystem.Birthday (1)
+
+- `BirthdayVisibilityChangedEvent`
 
 ## XDTGameSystem.GameplaySystem.Build (1)
 
@@ -1340,7 +1383,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 
 - `SocialReportUpdateEvent`
 
-## XDTGameSystem.UI (325)
+## XDTGameSystem.UI (336)
 
 - `AchievementToastShowEvent`
 - `AchievementUnlockedNotifyEvent`
@@ -1373,6 +1416,8 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `AvatarShopOpenRequestedEvent`
 - `BatchLearningRequestedEvent`
 - `BatchManageRequestedEvent`
+- `BathBallPickerRequestedEvent`
+- `BathBubbleRequestedEvent`
 - `BattlePassCollectTipEvent`
 - `BattlePassFriendSellOpenEvent`
 - `BattlePassFriendShopOpenEvent`
@@ -1414,6 +1459,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `CarouselModuleClosedEvent`
 - `CarouselModuleOpenedEvent`
 - `CatFeedOpenRequestedEvent`
+- `ChatStatusPromptVisibilityChangedEvent`
 - `CoinBusinessFeatureRequestedEvent`
 - `CookingOpenRequestedEvent`
 - `CraftCompositeOpenEvent`
@@ -1451,6 +1497,9 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `FriendPaperOpenRequestedEvent`
 - `FriendShipLevelTipShowRequestedEvent`
 - `FriendSpringFestivalTipEvent`
+- `FriendshipFireOpenEvent`
+- `FriendshipFireTrackEvent`
+- `FurnitureAuraBonusPreviewChangedEvent`
 - `GachaResultSequenceStartedEvent`
 - `GachaRewardShowRequestedEvent`
 - `GameActivitySystemOpenEvent`
@@ -1484,6 +1533,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `InsectHighlightOpenEvent`
 - `InstrumentModeEndedEvent`
 - `InstrumentModeStartedEvent`
+- `InventionMachinePanelOpenRequestEvent`
 - `ItemConsumeProtectShowRequestedEvent`
 - `ItemPreviewClosedEvent`
 - `ItemPreviewShownEvent`
@@ -1547,6 +1597,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `PartyProgressTipOpenEvent`
 - `PartySelfStartedNoticeRequestedEvent`
 - `PartyStartingNoticeRequestedEvent`
+- `PatternFireworkViewEvent`
 - `PayShopOpenRequestedEvent`
 - `PetAvatarDisplayPanelOpenEvent`
 - `PetBathFinishedEvent`
@@ -1587,6 +1638,7 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `ReconnectOpenRequestedEvent`
 - `RecordingHUDCloseEvent`
 - `RecordingHUDOpenEvent`
+- `RecordingHUDSelectRecorderRequestedEvent`
 - `ResearchCompletedNotifyEvent`
 - `ResearchInstrumentOpenEvent`
 - `ResearchPlatformOpenEvent`
@@ -1636,9 +1688,11 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `TimelineFullScreenFocusChangedEvent`
 - `TimelinePhysicalLayersVisibilityEvent`
 - `TimelineRaycastEnableRequestedEvent`
+- `TimelineSkipCaptureRequestedEvent`
 - `TimelineSkipClickActiveChangedEvent`
 - `TimelineSkipCloseRequestedEvent`
 - `TimelineSkipOpenRequestedEvent`
+- `TimelineVideoCloseRequestedEvent`
 - `ToastDetainDisableEvent`
 - `ToastDetainEnableEvent`
 - `ToastHobbyAbilityEvent`
@@ -1714,6 +1768,10 @@ Grouped by namespace. Regeneration script lives in [GAME_EVENTS.md](GAME_EVENTS.
 - `CommunityWorkDataChangedEvent`
 - `CommunityWorkLikeDataChangedEvent`
 - `CommunityWorkRemovedEvent`
+
+## XDTLevelAndEntity.Game.Module.Draw (1)
+
+- `PatternFireworkCraftChanged`
 
 ## XDTLevelAndEntity.Game.Module.Immersion (1)
 
