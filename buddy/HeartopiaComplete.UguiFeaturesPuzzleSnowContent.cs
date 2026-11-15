@@ -30,34 +30,14 @@ namespace HeartopiaMod
     //  - Lives inside the already-registered modal shell: no input-ownership entries, no theme
     //    registration of its own (the shell's "UguiShell" rebuilder re-runs these builders).
     //
-    // PUZZLE source nuances verified against the drawer, replayed exactly:
-    //  - Header "PUZZLE" (:91) is an UNLOCALIZED literal in bold 15 WHITE (headerStyle sets
-    //    Color.white explicitly, :75-76 — not the uiHeader color CreateUguiHeaderLabel would
-    //    use), so it is a plain CreateUguiLabel + bold. "STATUS"/"PIECES"/"SENT" and the 3-way
-    //    run status ("Solving..." / "Waiting for puzzle target..." / "Disabled", :100) are raw
-    //    unlocalized literals too; only the toggle label goes through L (DrawSwitchToggle
-    //    localizes internally, UiKitPrimitives.cs:763).
-    //  - The toggle routes through a METHOD, not a raw field write: on an actual change the
-    //    IMGUI block calls this.SetPuzzleAutoEnabled(newValue, true) (:101-104). The UGUI
-    //    handler calls that same method with notify: true — its internals (attempt-timer +
-    //    probe-flag resets, status message, log, the direction-dependent green/red
-    //    AddMenuNotification pair, StopPuzzleSolve on disable, :124-153) are NOT reproduced.
-    //  - Both cards are themePanelStyle boxes + DrawCardOutline (:94-96, :108-110) → the
-    //    established PanelBg fill + white hairline ring at clamp(0.05 + uiPanelAlpha*0.05,
-    //    .05, .10) (Radar Range card / Bag-Warehouse selected card precedent). The two
-    //    DrawPuzzleStatBox boxes (:161-166) use themeTopTabStyle (NO DrawCardOutline) → the
-    //    Radar dropdown-header mapping: controlFill @ clamp(uiPanelAlpha, .25, 1) + the style's
-    //    baked white .08 ring only, no extra hairline. mutedTextColor = uiText @ 0.78 (:73);
-    //    stat values + header are white; status texts are uiText.
-    //  - puzzleUiOpenLogged (:64-68) is deliberately NOT touched: it is a first-IMGUI-draw
-    //    diagnostic breadcrumb, and setting the shared once-flag from this surface would
-    //    suppress the IMGUI side's log — a cross-surface behavior change this port avoids.
-    //  - Layout is FIXED (no conditionals): header y=8 (+42) → toggle card y=50 h=52 (+70) →
-    //    status card y=120 h=164 (+170, return +20) → content height 310. Card width: the
-    //    source's uniform 520-wide column is a full-width role → panelW; card-internal
-    //    positions replay the source's relative formulas (toggle 14/14 250x26, run status at
-    //    +284 w-300; caption 12/8; stat boxes at 12 and 24+statW with statW=(w-36)/2, y=34
-    //    h=44, caption y+4 / value y+21 centered; status text 12/88 w-24 h=44 wrapped).
+    // PUZZLE UGUI (2026-11 sand-like refresh — BuildUguiShellFeaturesPuzzleContent):
+    //  Flat scroll column (UguiSandSculptureContent idiom): localized header, Auto Puzzle toggle +
+    //  run-status label, auto-place / auto-collect toggles, radius slider [1..30] + value label,
+    //  plain status box (pieces/sent, puzzle status, conditional place/collect lines),
+    //  primary "Move unfinished puzzles to backpack" button + conditional move-status label.
+    //  Auto Puzzle still routes through SetPuzzleAutoEnabled(notify:true); place/collect are field
+    //  writes with attempt/timer resets and green/red notifications (sand idiom).
+    //  puzzleUiOpenLogged is deliberately NOT touched (IMGUI first-draw breadcrumb only).
     //
     // SNOW SCULPTING source nuances verified against the branch, replayed exactly:
     //  - The toggle label used to read "? Auto Snow Sculpture". That ? really is U+003F in
@@ -121,19 +101,37 @@ namespace HeartopiaMod
         private sealed class UguiShellFeaturesPuzzleHandle
         {
             public GameObject Root;
+            public Transform ScrollContent;
+            public float BoxInnerW;
 
             public Toggle AutoToggle;             // routes through SetPuzzleAutoEnabled(value, true)
 
             public GameObject RunStatusLabel;     // 3-way literal pick (per-frame, zero-alloc)
             public string RunStatusShown;
 
-            public GameObject PiecesValue;        // stat-box value labels (0.5s tick)
-            public string PiecesShown;
-            public GameObject SentValue;
-            public string SentShown;
+            public Toggle AutoPlaceToggle;        // puzzleAutoPlace (flag + attempts reset)
+            public Toggle AutoCollectToggle;      // puzzleAutoCollect (flag + timer reset)
+            public Toggle SuppressUiToggle;       // puzzleSuppressUiPanels (Begin + Reward suppress)
 
-            public GameObject StatusLabel;        // wrapped puzzleStatus (0.5s tick)
+            public Slider RadiusSlider;           // puzzleScanRadiusMeters, whole metres [1,30]
+            public GameObject RadiusLabel;
+            public string RadiusShown;
+
+            public GameObject CountsLine;         // "Pieces: N   Sent: M" (0.5s tick)
+            public string CountsShown;
+            public GameObject StatusLine;         // wrapped puzzleStatus (0.5s tick)
             public string StatusShown;
+            public GameObject PlaceLine;          // conditional (puzzleLastPlaceStatus non-empty)
+            public string PlaceShown;
+            public bool PlaceLineVisible;
+            public GameObject CollectLine;        // conditional (puzzleLastCollectStatus non-empty)
+            public string CollectShown;
+            public bool CollectLineVisible;
+            public bool CollectBelowPlace;        // collect slot: 94 under Place, else 66
+
+            public GameObject MoveStatusLabel;    // conditional (puzzleMoveBoxesStatus non-empty)
+            public string MoveShown;
+            public bool MoveStatusVisible;
 
             public float NextSlowSyncAt;          // 0.5s tick (file header)
             public int ErrorCount;                // per-frame sync disabled at 3 (LIVE rail idiom)
@@ -141,11 +139,17 @@ namespace HeartopiaMod
 
         private UguiShellFeaturesPuzzleHandle uguiShellFeaturesPuzzle;
 
+        // Content heights: button row end + 30 pad; the wrapped move-status label adds +44 (sand idiom).
+        // +38 vs the pre-suppress layout for the Suppress puzzle UI panels toggle row.
+        private const float UguiFeaturesPuzzleHeightBase = 438f;
+        private const float UguiFeaturesPuzzleHeightWithMove = 482f;
+
         // ----------------------------------------------------------------------------------------
-        // Live text builder — the drawer's exact 3-way literal pick (PuzzleNetFeature.cs:100,
-        // raw GUI.Label — unlocalized on purpose).
+        // Live text builders
         // ----------------------------------------------------------------------------------------
 
+        // The drawer's exact 3-way literal pick (PuzzleNetFeature.cs:100, raw GUI.Label —
+        // unlocalized on purpose).
         private string BuildUguiFeaturesPuzzleRunStatusText()
         {
             return this.puzzleSolveRunning
@@ -153,13 +157,25 @@ namespace HeartopiaMod
                 : (this.puzzleAutoEnabled ? "Waiting for puzzle target..." : "Disabled");
         }
 
+        private string BuildUguiFeaturesPuzzleRadiusText()
+        {
+            return this.L("Puzzle scan radius") + ": "
+                + Mathf.RoundToInt(this.GetPuzzleScanRadiusMeters()) + " m";
+        }
+
+        private string BuildUguiFeaturesPuzzleCountsText()
+        {
+            return "Pieces: " + this.puzzlePieces.Count + "   Sent: " + this.puzzleSentCount;
+        }
+
         // ----------------------------------------------------------------------------------------
         // Builder
         // ----------------------------------------------------------------------------------------
 
-        // UGUI mirror of DrawPuzzleSection: header + toggle card + status card (2 stat boxes +
-        // wrapped status), all FIXED positions — no conditional layout anywhere on this sub-tab.
-        // Handle assigned LAST (Research idiom).
+        // Flat Sand Sculpture layout (UguiSandSculptureContent.cs): header, Auto Puzzle toggle +
+        // run status, auto-place / auto-collect toggles, radius slider, plain status box (counts,
+        // status, conditional place/collect lines), primary "Move unfinished puzzles to backpack"
+        // button and a conditional move-status label. Handle assigned LAST (Research idiom).
         private GameObject BuildUguiShellFeaturesPuzzleContent(Transform parent, float x, float y, float w, float h)
         {
             this.uguiShellFeaturesPuzzle = null;
@@ -191,98 +207,117 @@ namespace HeartopiaMod
                 }
             }
             catch { }
+            handle.ScrollContent = scrollContent;
 
             float contentWidth = w - 22f;      // viewport insets: 4 left + 18 right
             float panelW = contentWidth - 16f; // full-width elements at x=8, 8px right margin
 
-            // Style roles replayed from the drawer's style block (PuzzleNetFeature.cs:73-88).
-            Color mutedColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.78f);
-            Color statusColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 1f);
-            // themePanelStyle box + DrawCardOutline → PanelBg + hairline ring (file header).
-            Color cardRing = new Color(1f, 1f, 1f,
-                Mathf.Clamp(0.05f + (this.uiPanelAlpha * 0.05f), 0.05f, 0.10f));
+            Color bodyColor = new Color(this.uiTextR, this.uiTextG, this.uiTextB, 0.95f);
+            Color mutedColor = new Color(this.uiSubTabTextR, this.uiSubTabTextG, this.uiSubTabTextB, 0.92f);
 
-            // -------- Header (:90-91 — bold 15 WHITE) --------
+            // -------- Header (bold 14 in the TEXT color, sand idiom) --------
             GameObject header = this.CreateUguiLabel(scrollContent, "Header",
-                this.L("PUZZLE"), 15f, Color.white, false);
+                this.L("PUZZLE"), 14f, this.UguiKitTextColor(), false);
             this.TrySetUguiLabelBold(header);
-            PlaceUguiTopLeft(header, 8f, 8f, panelW, 30f);
+            PlaceUguiTopLeft(header, 8f, 8f, 460f, 24f);
 
-            // -------- Toggle card (:94-104 — 52px themed panel) --------
-            GameObject toggleCard = this.CreateUguiGo("ToggleCard", scrollContent);
-            PlaceUguiTopLeft(toggleCard, 8f, 50f, panelW, 52f);
-            this.AddUguiImage(toggleCard, this.UguiKitPanelBg(), true, 1f);
-            this.AddUguiRingOverlay(toggleCard, cardRing, 1f);
-
-            handle.AutoToggle = this.CreateUguiCheckbox(toggleCard.transform, "AutoPuzzle",
+            // -------- Auto Puzzle toggle + run status --------
+            handle.AutoToggle = this.CreateUguiCheckbox(scrollContent, "AutoPuzzle",
                 this.L("Auto Puzzle"), this.puzzleAutoEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesPuzzleAutoToggled));
-            PlaceUguiTopLeft(handle.AutoToggle.gameObject, 14f, 14f, 250f, 26f);
+            PlaceUguiTopLeft(handle.AutoToggle.gameObject, 8f, 42f, 250f, 30f);
 
             handle.RunStatusShown = this.BuildUguiFeaturesPuzzleRunStatusText();
-            handle.RunStatusLabel = this.CreateUguiLabel(toggleCard.transform, "RunStatus",
-                handle.RunStatusShown, 12f, statusColor, false);
-            PlaceUguiTopLeft(handle.RunStatusLabel, 284f, 17f, panelW - 300f, 22f);
+            handle.RunStatusLabel = this.CreateUguiLabel(scrollContent, "RunStatus",
+                handle.RunStatusShown, 12f, bodyColor, false);
+            PlaceUguiTopLeft(handle.RunStatusLabel, 268f, 46f, Mathf.Max(120f, panelW - 268f), 22f);
 
-            // -------- Status card (:108-118 — 164px themed panel) --------
-            GameObject statusCard = this.CreateUguiGo("StatusCard", scrollContent);
-            PlaceUguiTopLeft(statusCard, 8f, 120f, panelW, 164f);
-            this.AddUguiImage(statusCard, this.UguiKitPanelBg(), true, 1f);
-            this.AddUguiRingOverlay(statusCard, cardRing, 1f);
+            // -------- Auto-place toggle (resets puzzlePlaceAttempts) --------
+            handle.AutoPlaceToggle = this.CreateUguiCheckbox(scrollContent, "AutoPlacePuzzle",
+                this.L("Auto-place puzzle from backpack"), this.puzzleAutoPlace,
+                new System.Action<bool>(this.OnUguiFeaturesPuzzleAutoPlaceToggled));
+            PlaceUguiTopLeft(handle.AutoPlaceToggle.gameObject, 8f, 80f, 420f, 30f);
 
-            GameObject statusCaption = this.CreateUguiLabel(statusCard.transform, "Caption",
-                this.L("STATUS"), 11f, mutedColor, false);
-            this.TrySetUguiLabelBold(statusCaption);
-            PlaceUguiTopLeft(statusCaption, 12f, 8f, panelW - 24f, 18f);
+            // -------- Auto-collect toggle (resets puzzleCollectNextAt) --------
+            handle.AutoCollectToggle = this.CreateUguiCheckbox(scrollContent, "AutoCollectPuzzle",
+                this.L("Auto-collect finished puzzles"), this.puzzleAutoCollect,
+                new System.Action<bool>(this.OnUguiFeaturesPuzzleAutoCollectToggled));
+            PlaceUguiTopLeft(handle.AutoCollectToggle.gameObject, 8f, 118f, 420f, 30f);
 
-            // Stat boxes (:113-116 — statWidth = (w-36)/2, at x=12 and x=24+statWidth, y=34).
-            float statW = (panelW - 36f) / 2f;
-            handle.PiecesShown = this.puzzlePieces.Count.ToString();
-            handle.PiecesValue = this.CreateUguiFeaturesPuzzleStatBox(statusCard.transform,
-                "PiecesBox", 12f, statW, "PIECES", handle.PiecesShown, mutedColor);
-            handle.SentShown = this.puzzleSentCount.ToString();
-            handle.SentValue = this.CreateUguiFeaturesPuzzleStatBox(statusCard.transform,
-                "SentBox", 24f + statW, statW, "SENT", handle.SentShown, mutedColor);
+            // -------- Suppress Begin/Reward panels (QuietPopups-style event swallow) --------
+            handle.SuppressUiToggle = this.CreateUguiCheckbox(scrollContent, "SuppressPuzzleUi",
+                this.L("Suppress puzzle UI panels"), this.puzzleSuppressUiPanels,
+                new System.Action<bool>(this.OnUguiFeaturesPuzzleSuppressUiToggled));
+            PlaceUguiTopLeft(handle.SuppressUiToggle.gameObject, 8f, 156f, 420f, 30f);
 
-            // Wrapped status text (:118 — statusStyle, uiText, at 12/88 w-24 h=44).
-            handle.StatusShown = this.puzzleStatus;
-            handle.StatusLabel = this.CreateUguiLabel(statusCard.transform, "StatusText",
-                handle.StatusShown, 12f, statusColor, false);
-            this.TrySetUguiLabelWrapped(handle.StatusLabel);
-            PlaceUguiTopLeft(handle.StatusLabel, 12f, 88f, panelW - 24f, 44f);
+            // -------- Scan radius row (label 220x22, slider at +240, 200x18) --------
+            handle.RadiusShown = this.BuildUguiFeaturesPuzzleRadiusText();
+            handle.RadiusLabel = this.CreateUguiLabel(scrollContent, "RadiusLabel",
+                handle.RadiusShown, 12f, bodyColor, false);
+            PlaceUguiTopLeft(handle.RadiusLabel, 8f, 198f, 220f, 22f);
+            handle.RadiusSlider = this.CreateUguiSlider(scrollContent, "RadiusSlider",
+                PuzzleScanRadiusMin, PuzzleScanRadiusMax, Mathf.Round(this.GetPuzzleScanRadiusMeters()),
+                true, new System.Action<float>(this.OnUguiFeaturesPuzzleRadiusChanged));
+            PlaceUguiTopLeft(handle.RadiusSlider.gameObject, 248f, 204f, 200f, 18f);
 
-            // Full cursor replay: 8 + 42 + 70 + 170 + 20 (the drawer's own return pad) = 310.
-            this.SetUguiScrollContentHeight(scrollContent, 310f);
+            // -------- Plain status box (sand idiom: ControlFill @ 0.55 + neutral gray ring) --------
+            GameObject statusBox = this.CreateUguiGo("StatusBox", scrollContent);
+            PlaceUguiTopLeft(statusBox, 8f, 236f, panelW, 130f);
+            Color boxFill = this.UguiKitControlFill();
+            this.AddUguiImage(statusBox, new Color(boxFill.r, boxFill.g, boxFill.b, 0.55f), true, 1f);
+            this.AddUguiRingOverlay(statusBox, new Color(0.88f, 0.92f, 0.97f, 0.16f), 1f);
+
+            float boxInnerW = panelW - 20f;
+            handle.BoxInnerW = boxInnerW;
+
+            handle.CountsShown = this.BuildUguiFeaturesPuzzleCountsText();
+            handle.CountsLine = this.CreateUguiLabel(statusBox.transform, "CountsLine",
+                handle.CountsShown, 12f, bodyColor, false);
+            PlaceUguiTopLeft(handle.CountsLine, 10f, 8f, boxInnerW, 20f);
+
+            handle.StatusShown = this.L("Status") + ": " + this.puzzleStatus;
+            handle.StatusLine = this.CreateUguiLabel(statusBox.transform, "StatusLine",
+                handle.StatusShown, 11f, mutedColor, false);
+            this.TrySetUguiLabelWrapped(handle.StatusLine);
+            PlaceUguiTopLeft(handle.StatusLine, 10f, 32f, boxInnerW, 34f);
+
+            handle.PlaceLineVisible = !string.IsNullOrEmpty(this.puzzleLastPlaceStatus);
+            handle.PlaceShown = this.L("Place") + ": " + this.puzzleLastPlaceStatus;
+            handle.PlaceLine = this.CreateUguiLabel(statusBox.transform, "PlaceLine",
+                handle.PlaceShown, 11f, mutedColor, false);
+            this.TrySetUguiLabelWrapped(handle.PlaceLine);
+            PlaceUguiTopLeft(handle.PlaceLine, 10f, 66f, boxInnerW, 30f);
+            handle.PlaceLine.SetActive(handle.PlaceLineVisible);
+
+            handle.CollectLineVisible = !string.IsNullOrEmpty(this.puzzleLastCollectStatus);
+            handle.CollectBelowPlace = handle.PlaceLineVisible;
+            handle.CollectShown = this.L("Collect") + ": " + this.puzzleLastCollectStatus;
+            handle.CollectLine = this.CreateUguiLabel(statusBox.transform, "CollectLine",
+                handle.CollectShown, 11f, mutedColor, false);
+            this.TrySetUguiLabelWrapped(handle.CollectLine);
+            PlaceUguiTopLeft(handle.CollectLine, 10f, handle.CollectBelowPlace ? 94f : 66f, boxInnerW, 30f);
+            handle.CollectLine.SetActive(handle.CollectLineVisible);
+
+            // -------- Move button (primary, NOT a toggle) + conditional wrapped status label --------
+            GameObject moveButton = this.CreateUguiPrimaryButton(scrollContent, "MoveUnfinishedPuzzles",
+                this.L("Move unfinished puzzles to backpack"),
+                new System.Action(this.OnUguiFeaturesPuzzleMoveBoxesClicked));
+            PlaceUguiTopLeft(moveButton, 8f, 376f, 280f, 32f);
+
+            handle.MoveShown = this.puzzleMoveBoxesStatus;
+            handle.MoveStatusLabel = this.CreateUguiLabel(scrollContent, "MoveStatus",
+                handle.MoveShown, 11f, mutedColor, false);
+            this.TrySetUguiLabelWrapped(handle.MoveStatusLabel);
+            PlaceUguiTopLeft(handle.MoveStatusLabel, 8f, 416f, panelW, 36f);
+            handle.MoveStatusVisible = !string.IsNullOrEmpty(handle.MoveShown);
+            handle.MoveStatusLabel.SetActive(handle.MoveStatusVisible);
+
+            this.SetUguiScrollContentHeight(scrollContent,
+                handle.MoveStatusVisible ? UguiFeaturesPuzzleHeightWithMove : UguiFeaturesPuzzleHeightBase);
 
             handle.Root = block;
             this.uguiShellFeaturesPuzzle = handle;
             return block;
-        }
-
-        // One DrawPuzzleStatBox (:161-166): themeTopTabStyle box (controlFill @ clamp(panelAlpha,
-        // .25, 1) + baked white .08 ring — NO DrawCardOutline hairline on these, unlike the
-        // cards), caption bold 10 centered muted at y+4, value bold 13 centered WHITE at y+21.
-        // Returns the VALUE label (the live part); the caption is static.
-        private GameObject CreateUguiFeaturesPuzzleStatBox(Transform parent, string name,
-            float xPos, float statW, string caption, string initialValue, Color mutedColor)
-        {
-            GameObject box = this.CreateUguiGo(name, parent);
-            PlaceUguiTopLeft(box, xPos, 34f, statW, 44f);
-            Color controlFill = this.UguiKitControlFill();
-            this.AddUguiImage(box, new Color(controlFill.r, controlFill.g, controlFill.b,
-                Mathf.Clamp(this.uiPanelAlpha, 0.25f, 1f)), true, 1f);
-            this.AddUguiRingOverlay(box, new Color(1f, 1f, 1f, 0.08f), 1f);
-
-            GameObject captionGo = this.CreateUguiLabel(box.transform, "Caption",
-                caption, 10f, mutedColor, true);
-            this.TrySetUguiLabelBold(captionGo);
-            PlaceUguiTopLeft(captionGo, 0f, 4f, statW, 16f);
-
-            GameObject valueGo = this.CreateUguiLabel(box.transform, "Value",
-                initialValue, 13f, Color.white, true);
-            this.TrySetUguiLabelBold(valueGo);
-            PlaceUguiTopLeft(valueGo, 0f, 21f, statW, 18f);
-            return valueGo;
         }
 
         // ----------------------------------------------------------------------------------------
@@ -300,25 +335,74 @@ namespace HeartopiaMod
 
             try
             {
-                // Toggle re-sync (external IMGUI edits, incl. ForceStopPuzzleAuto paths) —
-                // WithoutNotify only.
+                // Toggle/slider re-sync (external IMGUI edits, incl. ForceStopPuzzleAuto and
+                // auto-place self-disable paths) — WithoutNotify only.
                 this.SyncUguiToggleFromField(handle.AutoToggle, this.puzzleAutoEnabled);
+                this.SyncUguiToggleFromField(handle.AutoPlaceToggle, this.puzzleAutoPlace);
+                this.SyncUguiToggleFromField(handle.AutoCollectToggle, this.puzzleAutoCollect);
+                this.SyncUguiToggleFromField(handle.SuppressUiToggle, this.puzzleSuppressUiPanels);
+                if (handle.RadiusSlider != null)
+                {
+                    float radius = Mathf.Round(this.GetPuzzleScanRadiusMeters());
+                    if (Mathf.Abs(handle.RadiusSlider.value - radius) > 0.0005f)
+                    {
+                        handle.RadiusSlider.SetValueWithoutNotify(radius);
+                    }
+                }
 
-                // 3-way run status: zero-alloc literal pick — per frame (file header).
+                // 3-way run status: zero-alloc literal pick — per frame.
                 this.SyncUguiSelfLabelText(handle.RunStatusLabel, ref handle.RunStatusShown,
                     this.BuildUguiFeaturesPuzzleRunStatusText());
 
-                // PIECES/SENT/puzzleStatus change from the background solve machinery and the
-                // counters allocate on build — 0.5s tick (file header).
+                // Counters/statuses change from background machinery and allocate on build —
+                // 0.5s tick (Sand Sculpture idiom).
                 if (Time.unscaledTime >= handle.NextSlowSyncAt)
                 {
                     handle.NextSlowSyncAt = Time.unscaledTime + 0.5f;
-                    this.SyncUguiSelfLabelText(handle.PiecesValue, ref handle.PiecesShown,
-                        this.puzzlePieces.Count.ToString());
-                    this.SyncUguiSelfLabelText(handle.SentValue, ref handle.SentShown,
-                        this.puzzleSentCount.ToString());
-                    this.SyncUguiSelfLabelText(handle.StatusLabel, ref handle.StatusShown,
-                        this.puzzleStatus);
+                    this.SyncUguiSelfLabelText(handle.RadiusLabel, ref handle.RadiusShown,
+                        this.BuildUguiFeaturesPuzzleRadiusText());
+                    this.SyncUguiSelfLabelText(handle.CountsLine, ref handle.CountsShown,
+                        this.BuildUguiFeaturesPuzzleCountsText());
+                    this.SyncUguiSelfLabelText(handle.StatusLine, ref handle.StatusShown,
+                        this.L("Status") + ": " + this.puzzleStatus);
+
+                    // Conditional lines: text synced even while hidden (cheap, stays ready);
+                    // visibility + the 66/94 slot ride cached flags (box is fixed-height).
+                    bool placeVisible = !string.IsNullOrEmpty(this.puzzleLastPlaceStatus);
+                    this.SyncUguiSelfLabelText(handle.PlaceLine, ref handle.PlaceShown,
+                        this.L("Place") + ": " + this.puzzleLastPlaceStatus);
+                    if (handle.PlaceLineVisible != placeVisible)
+                    {
+                        handle.PlaceLineVisible = placeVisible;
+                        handle.PlaceLine.SetActive(placeVisible);
+                    }
+
+                    bool collectVisible = !string.IsNullOrEmpty(this.puzzleLastCollectStatus);
+                    this.SyncUguiSelfLabelText(handle.CollectLine, ref handle.CollectShown,
+                        this.L("Collect") + ": " + this.puzzleLastCollectStatus);
+                    if (handle.CollectLineVisible != collectVisible)
+                    {
+                        handle.CollectLineVisible = collectVisible;
+                        handle.CollectLine.SetActive(collectVisible);
+                    }
+                    if (handle.CollectBelowPlace != placeVisible)
+                    {
+                        handle.CollectBelowPlace = placeVisible;
+                        PlaceUguiTopLeft(handle.CollectLine, 10f, placeVisible ? 94f : 66f,
+                            handle.BoxInnerW, 30f);
+                    }
+
+                    // Move-status label: raw field ref; visibility + content-height swap.
+                    bool moveVisible = !string.IsNullOrEmpty(this.puzzleMoveBoxesStatus);
+                    this.SyncUguiSelfLabelText(handle.MoveStatusLabel, ref handle.MoveShown,
+                        this.puzzleMoveBoxesStatus);
+                    if (handle.MoveStatusVisible != moveVisible)
+                    {
+                        handle.MoveStatusVisible = moveVisible;
+                        handle.MoveStatusLabel.SetActive(moveVisible);
+                        this.SetUguiScrollContentHeight(handle.ScrollContent,
+                            moveVisible ? UguiFeaturesPuzzleHeightWithMove : UguiFeaturesPuzzleHeightBase);
+                    }
                 }
             }
             catch (Exception ex)
@@ -330,14 +414,14 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
-        // Change handler
+        // Change handlers — all guarded on "value actually changed": the kit checkbox fires
+        // onChanged once at build (by design) and these handlers post notifications.
         // ----------------------------------------------------------------------------------------
 
         // PuzzleNetFeature.cs:98-104 — on an ACTUAL change, route through the backend method with
         // notify: true, exactly like the IMGUI block. SetPuzzleAutoEnabled owns everything else
         // (field write, timer/probe resets, status, log, green/red notification, StopPuzzleSolve
-        // on disable) — nothing reproduced here. The equal-guard is the UGUI analog of IMGUI's
-        // prev-vs-new change check (and absorbs the kit checkbox's build-time onChanged fire).
+        // on disable) — nothing reproduced here.
         private void OnUguiFeaturesPuzzleAutoToggled(bool value)
         {
             if (value == this.puzzleAutoEnabled)
@@ -345,6 +429,77 @@ namespace HeartopiaMod
                 return;
             }
             this.SetPuzzleAutoEnabled(value, true);
+        }
+
+        // Reset puzzlePlaceAttempts, THEN notification (sand auto-place idiom).
+        private void OnUguiFeaturesPuzzleAutoPlaceToggled(bool value)
+        {
+            if (value == this.puzzleAutoPlace)
+            {
+                return;
+            }
+            this.puzzleAutoPlace = value;
+            this.puzzlePlaceAttempts = 0;
+            this.AddMenuNotification(
+                this.L("Auto-place puzzle from backpack") + ": " + (value ? this.L("On") : this.L("Off")),
+                value ? UguiSandSculptureOkColor : UguiSandSculptureOffColor);
+        }
+
+        // Reset puzzleCollectNextAt, THEN notification (sand auto-collect idiom).
+        private void OnUguiFeaturesPuzzleAutoCollectToggled(bool value)
+        {
+            if (value == this.puzzleAutoCollect)
+            {
+                return;
+            }
+            this.puzzleAutoCollect = value;
+            this.puzzleCollectNextAt = 0f;
+            this.AddMenuNotification(
+                this.L("Auto-collect finished puzzles") + ": " + (value ? this.L("On") : this.L("Off")),
+                value ? UguiSandSculptureOkColor : UguiSandSculptureOffColor);
+        }
+
+        // Routes through SetPuzzleSuppressUiPanels so hooks + suppress-forward apply immediately.
+        private void OnUguiFeaturesPuzzleSuppressUiToggled(bool value)
+        {
+            if (value == this.puzzleSuppressUiPanels)
+            {
+                return;
+            }
+            this.SetPuzzleSuppressUiPanels(value, true);
+        }
+
+        // Whole metres, clamped to the feature range, equal-guard, refresh the value label.
+        private void OnUguiFeaturesPuzzleRadiusChanged(float value)
+        {
+            float rounded = Mathf.Clamp(Mathf.Round(value), PuzzleScanRadiusMin, PuzzleScanRadiusMax);
+            if (Mathf.Abs(rounded - this.puzzleScanRadiusMeters) <= 0.0001f)
+            {
+                return;
+            }
+            this.puzzleScanRadiusMeters = rounded;
+            UguiShellFeaturesPuzzleHandle handle = this.uguiShellFeaturesPuzzle;
+            if (handle != null)
+            {
+                this.SyncUguiSelfLabelText(handle.RadiusLabel, ref handle.RadiusShown,
+                    this.BuildUguiFeaturesPuzzleRadiusText());
+            }
+        }
+
+        // The SAME out-string is stored into puzzleMoveBoxesStatus AND shown as the notification
+        // on both outcomes; green on true, red on false (snow/sand move-button idiom).
+        private void OnUguiFeaturesPuzzleMoveBoxesClicked()
+        {
+            if (this.TryMoveUnfinishedPuzzleBoxesWarehouseToBackpack(out string moveStatus))
+            {
+                this.puzzleMoveBoxesStatus = moveStatus;
+                this.AddMenuNotification(moveStatus, UguiSandSculptureOkColor);
+            }
+            else
+            {
+                this.puzzleMoveBoxesStatus = moveStatus;
+                this.AddMenuNotification(moveStatus, UguiSandSculptureOffColor);
+            }
         }
 
         // ========================================================================================

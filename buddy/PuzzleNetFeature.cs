@@ -23,14 +23,49 @@ namespace HeartopiaMod
         }
 
         private static bool PuzzleLogsEnabled => MasterLogPuzzle;
-        private const float PuzzleNetworkSettleSeconds = 0.12f;
-        private const float PuzzleAutoRetrySeconds = 8.00f;
+        // Piece lock/move/bingo are fire-and-forget protocol sends — no per-action settle.
+        // One frame yield per piece keeps the main thread from hitching on a 100-piece board.
+        private const float PuzzleAutoRetrySeconds = 0.25f;
+        private const float PuzzleNextBoardSeconds = 0.15f;
         private const int PuzzleMaxSolvePasses = 5;
         private const bool PuzzleAllowBroadAuraEntityScan = false;
         private const bool PuzzleAllowAuraInteractProbe = false;
         private const bool PuzzleAllowWidgetPointerScan = false;
 
         private bool puzzleAutoEnabled = false;
+        private bool puzzleAutoPlace = false;
+        private bool puzzleAutoCollect = false;
+        // Suppress JigsawPuzzleBeginEvent / JigsawPuzzleRewardShowEvent so Join/complete do not open
+        // BeginStatusPanel / RewardPanel (QuietPopups idiom). Session-only.
+        private bool puzzleSuppressUiPanels = false;
+        private bool puzzleUiSuppressHooksRegistered = false;
+        private float puzzleScanRadiusMeters = 3f;
+        private const float PuzzleScanRadiusMin = 1f;
+        private const float PuzzleScanRadiusMax = 30f;
+
+        private const string PuzzleBeginEventName = "XDTGameSystem.UI.JigsawPuzzleBeginEvent";
+        private const int PuzzleBeginEventBytes = 4; // uint jigsawNetId
+        private const string PuzzleRewardShowEventName = "XDTGameSystem.UI.JigsawPuzzleRewardShowEvent";
+        private const int PuzzleRewardShowEventBytes = 4; // uint puzzleNetId
+
+        private string puzzleLastPlaceStatus = string.Empty;
+        private string puzzleLastCollectStatus = string.Empty;
+        private string puzzleLastCollectLoggedStatus = string.Empty;
+        private string puzzleMoveBoxesStatus = string.Empty;
+        private float puzzlePlaceNextAt = 0f;
+        private float puzzleCollectNextAt = 0f;
+        private int puzzlePlaceAttempts = 0;
+        private int puzzleCollectedCount = 0;
+        // Board just cleared by Auto Puzzle — poll it tightly until PoseDeleteBuild lands (or timeout).
+        private uint puzzlePendingCollectNetId = 0U;
+        private float puzzlePendingCollectUntil = 0f;
+        // PoseDeleteBuild sets CharacterProtocolManager._optionType=3 until BuildOptionRespondEvent.
+        // If that event never arrives (shop UI, desync, lost listener), every later take returns busy
+        // forever and Auto Puzzle piles Completed boards on the floor (MCP 2026-11-15).
+        private IntPtr puzzleCollectOptionTypeField = IntPtr.Zero;
+        private float puzzleCollectAwaitRespondUntil = 0f;
+        private float puzzleCollectBusySince = 0f;
+
         private bool puzzleSolveRunning = false;
         private float puzzleNextAutoAttemptAt = 0f;
         private uint puzzleBoardNetId = 0U;
@@ -53,6 +88,11 @@ namespace HeartopiaMod
         private IntPtr puzzleAuraMoveMethod = IntPtr.Zero;
         private IntPtr puzzleAuraBingoMethod = IntPtr.Zero;
 
+
+        private float GetPuzzleScanRadiusMeters()
+        {
+            return Mathf.Clamp(this.puzzleScanRadiusMeters, PuzzleScanRadiusMin, PuzzleScanRadiusMax);
+        }
 
         private void SetPuzzleAutoEnabled(bool value, bool notify)
         {
@@ -77,7 +117,9 @@ namespace HeartopiaMod
             else
             {
                 FeatureLog.Toggle("PuzzleNet", false);
-                this.StopPuzzleSolve("Auto Puzzle disabled.");
+                // Must Leave + exit GameJigsawPuzzleMode — StopPuzzleSolve alone left the player
+                // stuck in the jigsaw session (Join without Leave) with no way to enter/exit.
+                this.AbortActivePuzzleSession("Auto Puzzle disabled.");
                 if (notify)
                 {
                     this.AddMenuNotification("Auto Puzzle Disabled", new Color(1f, 0.55f, 0.55f));
@@ -88,7 +130,94 @@ namespace HeartopiaMod
         private void ForceStopPuzzleAuto()
         {
             this.SetPuzzleAutoEnabled(false, false);
-            this.ResetPuzzleContext("Auto Puzzle stopped.");
+            this.puzzleAutoPlace = false;
+            this.puzzleAutoCollect = false;
+            this.puzzlePlaceAttempts = 0;
+            this.puzzleCollectNextAt = 0f;
+            this.puzzlePendingCollectNetId = 0U;
+            this.puzzlePendingCollectUntil = 0f;
+            this.puzzleCollectAwaitRespondUntil = 0f;
+            this.puzzleCollectBusySince = 0f;
+            // Leave puzzleSuppressUiPanels alone — independent QuietPopups-style toggle.
+            // SetPuzzleAutoEnabled(false) already aborted the live session.
+        }
+
+        // QuietPopups idiom: register once, then re-assert suppress-forward every tick while the
+        // toggle is on. Begin opens JigsawPuzzleBeginStatusPanel; Reward opens
+        // JigsawPuzzleRewardPanel (the panel that sticks after auto-solve). StatusPanel only opens
+        // from Begin's Start button, so suppressing Begin is enough for that path.
+        private void UpdatePuzzleUiPanelSuppress()
+        {
+            bool on = this.puzzleSuppressUiPanels;
+            if (!on && !this.puzzleUiSuppressHooksRegistered)
+            {
+                return;
+            }
+
+            this.EnsurePuzzleUiSuppressEventHooks();
+            this.SetGameEventHookSuppressForward(PuzzleBeginEventName, on);
+            this.SetGameEventHookSuppressForward(PuzzleRewardShowEventName, on);
+        }
+
+        private void EnsurePuzzleUiSuppressEventHooks()
+        {
+            if (this.puzzleUiSuppressHooksRegistered)
+            {
+                return;
+            }
+
+            this.puzzleUiSuppressHooksRegistered = true;
+            bool beginOk = this.RegisterGameEventHook(
+                PuzzleBeginEventName, PuzzleBeginEventBytes, this.OnPuzzleBeginEventHook);
+            bool rewardOk = this.RegisterGameEventHook(
+                PuzzleRewardShowEventName, PuzzleRewardShowEventBytes, this.OnPuzzleRewardShowEventHook);
+            if (!beginOk || !rewardOk)
+            {
+                ModLogger.Warning("[PuzzleNet] UI suppress hooks refused — panels may still open:"
+                    + " begin=" + beginOk + " reward=" + rewardOk);
+            }
+            else
+            {
+                this.PuzzleLog("UI suppress hooks registered (Begin + RewardShow).");
+            }
+        }
+
+        private void OnPuzzleBeginEventHook(GameEventSnapshot e)
+        {
+            // Occupies the hook slot for suppress-forward; no payload work needed.
+        }
+
+        private void OnPuzzleRewardShowEventHook(GameEventSnapshot e)
+        {
+            // Occupies the hook slot for suppress-forward; no payload work needed.
+        }
+
+        private void SetPuzzleSuppressUiPanels(bool value, bool notify)
+        {
+            if (this.puzzleSuppressUiPanels == value && !notify)
+            {
+                return;
+            }
+
+            this.puzzleSuppressUiPanels = value;
+            if (value)
+            {
+                this.EnsurePuzzleUiSuppressEventHooks();
+                this.SetGameEventHookSuppressForward(PuzzleBeginEventName, true);
+                this.SetGameEventHookSuppressForward(PuzzleRewardShowEventName, true);
+            }
+            else if (this.puzzleUiSuppressHooksRegistered)
+            {
+                this.SetGameEventHookSuppressForward(PuzzleBeginEventName, false);
+                this.SetGameEventHookSuppressForward(PuzzleRewardShowEventName, false);
+            }
+
+            if (notify)
+            {
+                this.AddMenuNotification(
+                    this.L("Suppress puzzle UI panels") + ": " + (value ? this.L("On") : this.L("Off")),
+                    value ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.55f, 0.55f));
+            }
         }
 
 
@@ -1748,7 +1877,30 @@ namespace HeartopiaMod
             this.PuzzleLog("Start solve requested. boardNetId=" + this.puzzleBoardNetId + " pieces=" + this.puzzlePieces.Count + ".");
             this.puzzleSentCount = 0;
             uint previousBoardNetId = this.puzzleBoardNetId;
-            bool capturedActivePuzzle = this.TryCapturePuzzleFromCurrentTarget();
+            bool capturedActivePuzzle = false;
+            if (this.puzzleAutoEnabled)
+            {
+                // Radius scan first; panel / interact capture only when no unfinished board is in range.
+                if (this.TryFindNearestUnfinishedPuzzleBoard(out uint scanBoardNetId, out int scanStaticId, out string scanStatus))
+                {
+                    this.puzzleBoardNetId = scanBoardNetId;
+                    this.puzzleStaticId = scanStaticId;
+                    this.puzzlePieces.Clear();
+                    this.puzzleStatus = "Radius scan: board " + scanBoardNetId + " staticId=" + scanStaticId + ".";
+                    this.PuzzleLog(this.puzzleStatus + " " + scanStatus);
+                    capturedActivePuzzle = true;
+                }
+                else
+                {
+                    this.PuzzleLog("Radius scan: " + scanStatus);
+                    capturedActivePuzzle = this.TryCapturePuzzleFromCurrentTarget();
+                }
+            }
+            else
+            {
+                capturedActivePuzzle = this.TryCapturePuzzleFromCurrentTarget();
+            }
+
             if (capturedActivePuzzle)
             {
                 if (previousBoardNetId != 0U && previousBoardNetId != this.puzzleBoardNetId)
@@ -1800,6 +1952,15 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Only hold the next solve while a take was just accepted (fixed await) or the
+            // build-option gate is mid-unstick — not for the whole pending window (that made
+            // "time to start a placed board" jump between ~0.3 s and several seconds).
+            if (this.puzzleAutoCollect && this.IsPuzzleCollectTakeBlocking())
+            {
+                this.puzzleNextAutoAttemptAt = Time.unscaledTime + 0.1f;
+                return;
+            }
+
             if (Time.unscaledTime < this.puzzleNextAutoAttemptAt)
             {
                 return;
@@ -1808,6 +1969,20 @@ namespace HeartopiaMod
             this.puzzleNextAutoAttemptAt = Time.unscaledTime + PuzzleAutoRetrySeconds;
             this.PuzzleLog("Auto tick. boardNetId=" + this.puzzleBoardNetId + " pieces=" + this.puzzlePieces.Count + " status=" + this.puzzleStatus);
             this.StartPuzzleSolve();
+        }
+
+        private bool IsPuzzleCollectTakeBlocking()
+        {
+            float now = Time.unscaledTime;
+            if (this.puzzleCollectAwaitRespondUntil > now)
+            {
+                return true;
+            }
+
+            // Mid force-clear only — do not treat "busy for 0.1 s" as a multi-second solve gate.
+            return this.puzzleCollectBusySince > 0f
+                   && (now - this.puzzleCollectBusySince) >= PuzzleCollectBusyStuckSeconds * 0.5f
+                   && (now - this.puzzleCollectBusySince) < PuzzleCollectBusyStuckSeconds + 0.5f;
         }
 
         private void StopPuzzleSolve(string reason)
@@ -1822,13 +1997,236 @@ namespace HeartopiaMod
             this.PuzzleLog("Puzzle solve stopped: " + this.puzzleStatus);
         }
 
+        // Stop coroutine, Leave any joined board (mod + player status), exit GameJigsawPuzzleMode,
+        // clear local context. Safe to call when already idle.
+        private void AbortActivePuzzleSession(string reason)
+        {
+            uint boardNetId = this.puzzleBoardNetId;
+            List<uint> lockedPieces = null;
+            if (this.puzzlePieces.Count > 0)
+            {
+                lockedPieces = new List<uint>(this.puzzlePieces.Count);
+                for (int i = 0; i < this.puzzlePieces.Count; i++)
+                {
+                    PuzzlePieceContext piece = this.puzzlePieces[i];
+                    if (piece != null && piece.PieceNetId != 0U)
+                    {
+                        lockedPieces.Add(piece.PieceNetId);
+                    }
+                }
+            }
+
+            this.StopPuzzleSolve(reason);
+
+            if (lockedPieces != null)
+            {
+                for (int i = 0; i < lockedPieces.Count; i++)
+                {
+                    this.TryInvokePuzzleUnlock(lockedPieces[i]);
+                }
+            }
+
+            if (boardNetId != 0U)
+            {
+                this.TryInvokePuzzleLeave(boardNetId);
+            }
+
+            uint statusBoard = 0U;
+            if (this.TryReadPlayerJigsawBoardNetId(out statusBoard) && statusBoard != 0U && statusBoard != boardNetId)
+            {
+                this.TryInvokePuzzleLeave(statusBoard);
+            }
+
+            this.TryExitJigsawGameplayMode();
+
+            this.puzzleBoardNetId = 0U;
+            this.puzzleStaticId = 0;
+            this.puzzleSentCount = 0;
+            this.puzzlePieces.Clear();
+            this.puzzlePendingCollectNetId = 0U;
+            this.puzzlePendingCollectUntil = 0f;
+            this.puzzleStatus = string.IsNullOrWhiteSpace(reason) ? "Stopped." : reason;
+            this.PuzzleLog("Puzzle session aborted: " + this.puzzleStatus
+                + " leftBoard=" + boardNetId
+                + (statusBoard != 0U ? " statusBoard=" + statusBoard : string.Empty));
+        }
+
+        private bool TryReadPlayerJigsawBoardNetId(out uint boardNetId)
+        {
+            boardNetId = 0U;
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || auraMonoRuntimeInvoke == null)
+                {
+                    return false;
+                }
+
+                IntPtr characterClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Game.GameMode.Character");
+                IntPtr getCharacterMethod = characterClass != IntPtr.Zero
+                    ? this.FindAuraMonoMethodOnHierarchy(characterClass, "get_character", 0)
+                    : IntPtr.Zero;
+                if (characterClass == IntPtr.Zero || getCharacterMethod == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr characterObj = auraMonoRuntimeInvoke(getCharacterMethod, IntPtr.Zero, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || characterObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                if (!this.TryGetMonoObjectMember(characterObj, "Player", out IntPtr playerObj)
+                    && !this.TryGetMonoObjectMember(characterObj, "player", out playerObj))
+                {
+                    return false;
+                }
+
+                if (!this.TryGetMonoObjectMember(playerObj, "Status", out IntPtr statusObj)
+                    && !this.TryGetMonoObjectMember(playerObj, "status", out statusObj))
+                {
+                    return false;
+                }
+
+                if (!this.TryGetMonoObjectMember(statusObj, "JigsawPuzzleStatus", out IntPtr jigsawStatusObj)
+                    && !this.TryGetMonoObjectMember(statusObj, "jigsawPuzzleStatus", out jigsawStatusObj))
+                {
+                    return false;
+                }
+
+                return this.TryGetMonoUInt32Member(jigsawStatusObj, "jigsawPuzzleNetId", out boardNetId)
+                       || this.TryGetMonoUInt32Member(jigsawStatusObj, "JigsawPuzzleNetId", out boardNetId);
+            }
+            catch
+            {
+                boardNetId = 0U;
+                return false;
+            }
+        }
+
+        // If Character.currMode is GameJigsawPuzzleMode (even with a cleared target), ExitMode it.
+        // Leaving Join alone is not enough — the mode can stay active and block re-entry.
+        // NEVER ExitMode(Free/Photo/…) by ordinal guess: that corrupts the mode stack (HUD gone, jump dead).
+        private unsafe bool TryExitJigsawGameplayMode()
+        {
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || auraMonoRuntimeInvoke == null)
+                {
+                    return false;
+                }
+
+                IntPtr characterClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Game.GameMode.Character");
+                IntPtr getCharacterMethod = characterClass != IntPtr.Zero
+                    ? this.FindAuraMonoMethodOnHierarchy(characterClass, "get_character", 0)
+                    : IntPtr.Zero;
+                IntPtr getCurrMode = characterClass != IntPtr.Zero
+                    ? this.FindAuraMonoMethodOnHierarchy(characterClass, "get_currMode", 0)
+                    : IntPtr.Zero;
+                IntPtr exitMode = characterClass != IntPtr.Zero
+                    ? this.FindAuraMonoMethodOnHierarchy(characterClass, "ExitMode", 1)
+                    : IntPtr.Zero;
+                if (characterClass == IntPtr.Zero || getCharacterMethod == IntPtr.Zero
+                    || getCurrMode == IntPtr.Zero || exitMode == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr exc = IntPtr.Zero;
+                IntPtr characterObj = auraMonoRuntimeInvoke(getCharacterMethod, IntPtr.Zero, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || characterObj == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                exc = IntPtr.Zero;
+                IntPtr currMode = auraMonoRuntimeInvoke(getCurrMode, characterObj, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || currMode == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr jigsawModeClass = this.FindAuraMonoClassByFullName(
+                    "XDTLevelAndEntity.Game.GameMode.GameJigsawPuzzleMode");
+                IntPtr freeModeClass = this.FindAuraMonoClassByFullName(
+                    "XDTLevelAndEntity.Game.GameMode.GameFreeMode");
+                if (jigsawModeClass == IntPtr.Zero || auraMonoObjectGetClass == null)
+                {
+                    return false;
+                }
+
+                IntPtr currClass = auraMonoObjectGetClass(currMode);
+                if (currClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                // Already Free (or anything else): do not touch ExitMode.
+                if (freeModeClass != IntPtr.Zero && this.IsAuraMonoClassAssignableTo(currClass, freeModeClass))
+                {
+                    return false;
+                }
+
+                if (!this.IsAuraMonoClassAssignableTo(currClass, jigsawModeClass))
+                {
+                    return false;
+                }
+
+                IntPtr getMode = this.FindAuraMonoMethodOnHierarchy(jigsawModeClass, "get_Mode", 0);
+                if (getMode == IntPtr.Zero)
+                {
+                    getMode = this.FindAuraMonoMethodOnHierarchy(
+                        this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Game.GameMode.GameBaseMode"),
+                        "get_Mode",
+                        0);
+                }
+
+                if (getMode == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                exc = IntPtr.Zero;
+                IntPtr modeBoxed = auraMonoRuntimeInvoke(getMode, currMode, IntPtr.Zero, ref exc);
+                if (exc != IntPtr.Zero || modeBoxed == IntPtr.Zero || auraMonoObjectUnbox == null)
+                {
+                    return false;
+                }
+
+                // EGameplayMode is a byte enum — value MUST come from this jigsaw instance, never a guess.
+                byte modeValue = *(byte*)auraMonoObjectUnbox(modeBoxed);
+                if (modeValue == 0)
+                {
+                    // Free == 0. Refusing protects against a bad get_Mode read wiping Free.
+                    this.PuzzleLog("Exit jigsaw mode skipped: get_Mode returned Free(0).");
+                    return false;
+                }
+
+                IntPtr* args = stackalloc IntPtr[1];
+                args[0] = (IntPtr)(&modeValue);
+                exc = IntPtr.Zero;
+                auraMonoRuntimeInvoke(exitMode, characterObj, (IntPtr)args, ref exc);
+                bool ok = exc == IntPtr.Zero;
+                this.PuzzleLog(ok
+                    ? "Exited GameJigsawPuzzleMode (EGameplayMode=" + modeValue + ")."
+                    : "ExitMode GameJigsawPuzzleMode failed.");
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                this.PuzzleLog("Exit jigsaw mode exception: " + ex.Message);
+                return false;
+            }
+        }
+
         private System.Collections.IEnumerator PuzzleSolveRoutine()
         {
             List<PuzzlePieceContext> capturedPieces = this.puzzlePieces.Count > 0 ? new List<PuzzlePieceContext>(this.puzzlePieces) : null;
             if (this.puzzlePieces.Count <= 0)
             {
                 this.TryInvokePuzzleJoin();
-                yield return ModWait.Realtime(Mathf.Max(0.1f, PuzzleNetworkSettleSeconds));
+                yield return null; // one frame for join side-effects / piece bags to appear
             }
             else
             {
@@ -1873,7 +2271,6 @@ namespace HeartopiaMod
                     this.PuzzleLog(this.puzzleStatus + " index=" + piece.FirstIndex + " pos=(" + piece.TargetX + "," + piece.TargetY + ")");
 
                     this.TryInvokePuzzleLock(piece.PieceNetId);
-                    yield return ModWait.Realtime(Mathf.Max(0.03f, PuzzleNetworkSettleSeconds * 0.25f));
 
                     if (piece.IsInBag || piece.MaskCount == 1)
                     {
@@ -1881,23 +2278,21 @@ namespace HeartopiaMod
                         {
                             this.puzzleSentCount++;
                         }
-
-                        yield return ModWait.Realtime(Mathf.Max(0.04f, PuzzleNetworkSettleSeconds * 0.35f));
-                        continue;
                     }
-
-                    this.TryInvokePuzzleMove(piece.PieceNetId, piece.TargetX, piece.TargetY);
-                    yield return ModWait.Realtime(Mathf.Max(0.06f, PuzzleNetworkSettleSeconds * 0.5f));
-
-                    if (this.TryInvokePuzzleBingo(piece.PieceNetId))
+                    else
                     {
-                        this.puzzleSentCount++;
+                        this.TryInvokePuzzleMove(piece.PieceNetId, piece.TargetX, piece.TargetY);
+                        if (this.TryInvokePuzzleBingo(piece.PieceNetId))
+                        {
+                            this.puzzleSentCount++;
+                        }
                     }
 
-                    yield return ModWait.Realtime(PuzzleNetworkSettleSeconds);
+                    // No network settle — lock/move/bingo are independent sends. One frame keeps
+                    // a large board from stalling the player loop for the whole pass.
+                    yield return null;
                 }
 
-                yield return ModWait.Realtime(Mathf.Max(0.25f, PuzzleNetworkSettleSeconds * 2f));
                 this.RefreshPuzzlePieces(false);
                 int remaining = this.puzzlePieces.Count;
                 this.PuzzleLog("Puzzle solve pass " + pass + " refresh: remaining=" + remaining + " previous=" + previousRemaining + ".");
@@ -1913,6 +2308,7 @@ namespace HeartopiaMod
                 }
 
                 previousRemaining = remaining;
+                yield return null;
             }
 
             this.puzzleSolveRunning = false;
@@ -1921,10 +2317,51 @@ namespace HeartopiaMod
             FeatureLog.Life("PuzzleNet", this.puzzleStatus);
             if (this.puzzlePieces.Count <= 0 && this.puzzleSentCount > 0)
             {
-                this.puzzleAutoEnabled = false;
-                FeatureLog.Toggle("PuzzleNet", false, "puzzle cleared");
+                uint clearedBoard = this.puzzleBoardNetId;
                 this.puzzleBoardNetId = 0U;
                 this.puzzleStaticId = 0;
+                this.puzzlePieces.Clear();
+                this.puzzleStatus = "Puzzle cleared. Looking for next...";
+
+                // Immediate take while the board netId is still known. Server may still be converting
+                // 900xxx → 902; if busy/not ready, pending + tight poll picks it up.
+                if (this.puzzleAutoCollect && clearedBoard != 0U)
+                {
+                    this.puzzlePendingCollectNetId = clearedBoard;
+                    this.puzzlePendingCollectUntil = Time.unscaledTime + PuzzleCollectPendingSeconds;
+                    this.puzzleCollectNextAt = 0f;
+                    // Skip immediate take while a prior PoseDeleteBuild still owns _optionType —
+                    // firing another accept-path that fails leaves pending for the poller instead.
+                    if (!this.IsPuzzleCollectTakeBlocking()
+                        && this.EnsurePuzzleCollectResolved(out _)
+                        && this.TryPuzzlePoseDeleteBuild(clearedBoard, out string takeStatus))
+                    {
+                        this.puzzleCollectedCount++;
+                        this.puzzlePendingCollectNetId = 0U;
+                        this.puzzlePendingCollectUntil = 0f;
+                        this.puzzleLastCollectStatus = "collected #" + this.puzzleCollectedCount
+                            + " netId=" + clearedBoard + " (immediate " + takeStatus + ")";
+                        this.PuzzleLog("collect: " + this.puzzleLastCollectStatus);
+                        FeatureLog.Life("PuzzleNet", "collect: " + this.puzzleLastCollectStatus);
+                        this.AddMenuNotification(this.L("Puzzle collected"), new Color(0.45f, 1f, 0.55f));
+                        this.puzzleCollectNextAt = Time.unscaledTime + PuzzleCollectTakeBackoffSeconds;
+                    }
+                }
+                else
+                {
+                    this.puzzleCollectNextAt = 0f;
+                }
+
+                if (clearedBoard != 0U)
+                {
+                    this.TryInvokePuzzleLeave(clearedBoard);
+                }
+
+                if (this.puzzleAutoEnabled)
+                {
+                    this.puzzleNextAutoAttemptAt = Time.unscaledTime + PuzzleNextBoardSeconds;
+                    this.PuzzleLog("Auto Puzzle will look for the next board shortly.");
+                }
             }
             else if (this.puzzleAutoEnabled && this.puzzlePieces.Count > 0)
             {
@@ -2054,6 +2491,36 @@ namespace HeartopiaMod
                 parameterTypes ?? Type.EmptyTypes);
         }
 
+        private bool TryInvokePuzzleLeave(uint boardNetId)
+        {
+            if (boardNetId == 0U)
+            {
+                return false;
+            }
+
+            if (this.TryInvokeAuraMonoPuzzleLeave(boardNetId))
+            {
+                return true;
+            }
+
+            if (!this.EnsurePuzzleProtocolMethods() || this.puzzleLeaveMethod == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                this.puzzleLeaveMethod.Invoke(null, new object[] { boardNetId });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.PuzzleLog("Leave puzzle failed " + boardNetId + ": " + ex.Message);
+            }
+
+            return false;
+        }
+
         private bool TryInvokePuzzleJoin()
         {
             if (this.puzzleBoardNetId == 0U)
@@ -2117,6 +2584,50 @@ namespace HeartopiaMod
             }
 
             return false;
+        }
+
+        private bool TryInvokePuzzleUnlock(uint pieceNetId)
+        {
+            if (pieceNetId == 0U)
+            {
+                return false;
+            }
+
+            if (this.TryInvokeAuraMonoPuzzleUnlock(pieceNetId))
+            {
+                return true;
+            }
+
+            if (!this.EnsurePuzzleProtocolMethods() || this.puzzleUnlockMethod == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                this.puzzleUnlockMethod.Invoke(null, new object[] { pieceNetId });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.PuzzleLog("Unlock piece failed " + pieceNetId + ": " + ex.Message);
+            }
+
+            return false;
+        }
+
+        private unsafe bool TryInvokeAuraMonoPuzzleUnlock(uint pieceNetId)
+        {
+            if (!this.EnsureAuraMonoPuzzleProtocolMethods(out string status) || this.puzzleAuraUnlockMethod == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = (IntPtr)(&pieceNetId);
+            auraMonoRuntimeInvoke(this.puzzleAuraUnlockMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            return exc == IntPtr.Zero;
         }
 
         private bool TryInvokePuzzleMove(uint pieceNetId, short x, short y)
@@ -2194,6 +2705,23 @@ namespace HeartopiaMod
             return ok;
         }
 
+        private unsafe bool TryInvokeAuraMonoPuzzleLeave(uint boardNetId)
+        {
+            if (!this.EnsureAuraMonoPuzzleProtocolMethods(out string status) || this.puzzleAuraLeaveMethod == IntPtr.Zero)
+            {
+                this.PuzzleLog("Aura leave unavailable: " + status);
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr* args = stackalloc IntPtr[1];
+            args[0] = (IntPtr)(&boardNetId);
+            auraMonoRuntimeInvoke(this.puzzleAuraLeaveMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            bool ok = exc == IntPtr.Zero;
+            this.PuzzleLog("Aura leave board=" + boardNetId + " ok=" + ok + (ok ? string.Empty : " exc=0x" + exc.ToInt64().ToString("X")));
+            return ok;
+        }
+
         private unsafe bool TryInvokeAuraMonoPuzzleLock(uint pieceNetId, bool isLock)
         {
             if (!this.EnsureAuraMonoPuzzleProtocolMethods(out string status) || this.puzzleAuraLockMethod == IntPtr.Zero)
@@ -2246,6 +2774,1307 @@ namespace HeartopiaMod
             bool ok = exc == IntPtr.Zero;
             this.PuzzleLog("Aura bingo piece=" + pieceNetId + " ok=" + ok + (ok ? string.Empty : " exc=0x" + exc.ToInt64().ToString("X")));
             return ok;
+        }
+
+        // ===== radius board scan =============================================================
+        private static readonly string[] PuzzleAuraBoardComponentTypeNames =
+        {
+            "XDTLevelAndEntity.Gameplay.Component.Homeland.JigsawPuzzleComponent",
+            "XDTLevelAndEntity.GamePlay.Component.Homeland.JigsawPuzzleComponent",
+        };
+        private const string PuzzleAuraSystemTypeName = "XDTGameSystem.GameplaySystem.JigsawPuzzle.JigsawPuzzleSystem";
+        private IntPtr puzzleAuraBoardComponentClass = IntPtr.Zero;
+        private IntPtr puzzleAuraIsBoardFinishedMethod = IntPtr.Zero;
+
+        // Nearest unfinished placed box (JigsawPuzzleComponent view) within scan radius.
+        // Unfinished = staticId is a box row (900001..900669 + TableData row) AND
+        // JigsawPuzzleComponentData.isFinished == false AND JigsawPuzzleSystem.IsJigsawPuzzleBoardFinished(netId) == false
+        // (server-mirrored board mask == row*col). Scalars only escape the pinned scope.
+        // radiusOverrideMeters > 0 replaces GetPuzzleScanRadiusMeters (used by auto-place so a small
+        // slider still sees a box placed at PuzzlePlaceDistanceMeters).
+        private unsafe bool TryFindNearestUnfinishedPuzzleBoard(out uint boardNetId, out int staticId, out string status)
+        {
+            return this.TryFindNearestUnfinishedPuzzleBoard(out boardNetId, out staticId, out status, 0f);
+        }
+
+        private unsafe bool TryFindNearestUnfinishedPuzzleBoard(
+            out uint boardNetId, out int staticId, out string status, float radiusOverrideMeters)
+        {
+            boardNetId = 0U;
+            staticId = 0;
+            status = string.Empty;
+            List<uint> pins = new List<uint>();
+            try
+            {
+                if (!AuraMonoPinningAvailable)
+                {
+                    status = "pinning unavailable";
+                    return false;
+                }
+
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    status = "aura api not ready";
+                    return false;
+                }
+
+                if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+                {
+                    status = "GetComponents not ready";
+                    return false;
+                }
+
+                if (this.puzzleAuraBoardComponentClass == IntPtr.Zero)
+                {
+                    for (int i = 0; i < PuzzleAuraBoardComponentTypeNames.Length && this.puzzleAuraBoardComponentClass == IntPtr.Zero; i++)
+                    {
+                        this.puzzleAuraBoardComponentClass = this.FindAuraMonoClassByFullName(PuzzleAuraBoardComponentTypeNames[i]);
+                    }
+                }
+
+                if (this.puzzleAuraBoardComponentClass == IntPtr.Zero)
+                {
+                    status = "JigsawPuzzleComponent class unavailable";
+                    return false;
+                }
+
+                if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos))
+                {
+                    status = "no player position";
+                    return false;
+                }
+
+                if (!this.TryAuraMonoGetComponentObjects(this.puzzleAuraBoardComponentClass, out List<IntPtr> comps, pins)
+                    || comps == null || comps.Count == 0)
+                {
+                    status = "no JigsawPuzzleComponent instances";
+                    return false;
+                }
+
+                float radius = radiusOverrideMeters > 0f
+                    ? radiusOverrideMeters
+                    : this.GetPuzzleScanRadiusMeters();
+                float bestDistance = radius;
+                int inRange = 0;
+                int finished = 0;
+                int unreadable = 0;
+                IntPtr systemObj = IntPtr.Zero;
+                bool systemResolved = false;
+                IntPtr* argSlot = stackalloc IntPtr[1];
+                for (int i = 0; i < comps.Count; i++)
+                {
+                    IntPtr compObj = comps[i];
+                    if (compObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    if (!this.TryGetMonoObjectMember(compObj, "entity", out IntPtr entityObj) || entityObj == IntPtr.Zero
+                        || !this.TryGetAuraMonoEntityNetId(entityObj, out uint netId) || netId == 0U
+                        || !this.TryGetAuraMonoEntityPosition(entityObj, out Vector3 pos))
+                    {
+                        unreadable++;
+                        continue;
+                    }
+
+                    float distance = Vector3.Distance(playerPos, pos);
+                    if (distance > radius)
+                    {
+                        continue;
+                    }
+
+                    inRange++;
+                    if (!this.TryReadPuzzleBoardComponentData(compObj, out int candidateStaticId, out bool isFinished))
+                    {
+                        unreadable++;
+                        continue;
+                    }
+
+                    if (isFinished || !this.PuzzleIsUnfinishedBox(candidateStaticId))
+                    {
+                        finished++;
+                        continue;
+                    }
+
+                    if (distance > bestDistance)
+                    {
+                        continue;
+                    }
+
+                    if (!systemResolved)
+                    {
+                        systemResolved = true;
+                        if (this.TryResolveAuraMonoModule(PuzzleAuraSystemTypeName, out systemObj) && systemObj != IntPtr.Zero)
+                        {
+                            pins.Add(AuraMonoPinNew(systemObj));
+                            IntPtr systemClass = auraMonoObjectGetClass(systemObj);
+                            if (systemClass != IntPtr.Zero)
+                            {
+                                this.puzzleAuraIsBoardFinishedMethod = this.FindAuraMonoMethodOnHierarchy(systemClass, "IsJigsawPuzzleBoardFinished", 1);
+                            }
+                        }
+                    }
+
+                    if (systemObj == IntPtr.Zero || this.puzzleAuraIsBoardFinishedMethod == IntPtr.Zero)
+                    {
+                        status = "JigsawPuzzleSystem.IsJigsawPuzzleBoardFinished unavailable";
+                        return false;
+                    }
+
+                    IntPtr exc = IntPtr.Zero;
+                    uint arg = netId;
+                    argSlot[0] = (IntPtr)(&arg);
+                    IntPtr boxed = auraMonoRuntimeInvoke(this.puzzleAuraIsBoardFinishedMethod, systemObj, (IntPtr)argSlot, ref exc);
+                    if (exc != IntPtr.Zero || boxed == IntPtr.Zero || !this.TryUnboxMonoBoolean(boxed, out bool boardDone))
+                    {
+                        unreadable++;
+                        continue;
+                    }
+
+                    if (boardDone)
+                    {
+                        finished++;
+                        continue;
+                    }
+
+                    bestDistance = distance;
+                    boardNetId = netId;
+                    staticId = candidateStaticId;
+                }
+
+                if (boardNetId == 0U)
+                {
+                    status = "no unfinished board in " + radius.ToString("F1") + "m (components=" + comps.Count
+                             + " inRange=" + inRange + " finished=" + finished + " unreadable=" + unreadable + ")";
+                    return false;
+                }
+
+                status = "dist=" + bestDistance.ToString("F1") + "m (components=" + comps.Count
+                         + " inRange=" + inRange + " finished=" + finished + ")";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                boardNetId = 0U;
+                staticId = 0;
+                status = "board scan exception: " + ex.Message;
+                return false;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+        }
+
+        // JigsawPuzzleComponentData { int staticId; bool isFinished; ... } read from the boxed struct via real
+        // field offsets (header-inclusive; subtract 2*IntPtr.Size). Mask fields are intentionally not read here.
+        private unsafe bool TryReadPuzzleBoardComponentData(IntPtr componentObj, out int staticId, out bool isFinished)
+        {
+            staticId = 0;
+            isFinished = false;
+            if (componentObj == IntPtr.Zero || auraMonoObjectGetClass == null || auraMonoObjectUnbox == null
+                || auraMonoClassGetFieldFromName == null || auraMonoFieldGetOffset == null)
+            {
+                return false;
+            }
+
+            if (!this.TryGetMonoObjectMember(componentObj, "_componentData", out IntPtr boxedData) || boxedData == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            uint boxPin = AuraMonoPinNew(boxedData);
+            try
+            {
+                IntPtr dataClass = auraMonoObjectGetClass(boxedData);
+                if (dataClass == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr staticField = auraMonoClassGetFieldFromName(dataClass, "staticId");
+                IntPtr finishedField = auraMonoClassGetFieldFromName(dataClass, "isFinished");
+                IntPtr raw = auraMonoObjectUnbox(boxedData);
+                if (staticField == IntPtr.Zero || finishedField == IntPtr.Zero || raw == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                int header = 2 * IntPtr.Size;
+                staticId = System.Runtime.InteropServices.Marshal.ReadInt32(raw, (int)auraMonoFieldGetOffset(staticField) - header);
+                isFinished = System.Runtime.InteropServices.Marshal.ReadByte(raw, (int)auraMonoFieldGetOffset(finishedField) - header) != 0;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.PuzzleLog("board data read exception: " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                AuraMonoPinFree(boxPin);
+            }
+        }
+
+        // ===== move unfinished puzzle boxes: warehouse -> backpack ==========================
+        // EntityType 901 (ids 900001..900669). Finished 902 and custom 903 are out of scope.
+        // Mirrors TryMoveSandBasesWarehouseToBackpack: PINNED enumeration, locked stacks skipped,
+        // filter = TableData jigsaw-puzzle row (not a hard-coded id list).
+        private const int PuzzleBoxStaticIdMin = 900001;
+        private const int PuzzleBoxStaticIdMax = 900669;
+        private IntPtr puzzleTableDataClass = IntPtr.Zero;
+        private IntPtr puzzleGetJigsawpuzzleMethod = IntPtr.Zero;
+        private bool puzzleGetJigsawpuzzleResolved = false;
+
+        private void EnsurePuzzleGetJigsawpuzzleResolved()
+        {
+            if (this.puzzleGetJigsawpuzzleMethod != IntPtr.Zero)
+            {
+                return;
+            }
+
+            // Class/method pointers stay valid for the image lifetime. Retry on each call until resolved
+            // (this runs from a button press, not a per-frame poll).
+            if (this.puzzleTableDataClass == IntPtr.Zero)
+            {
+                this.puzzleTableDataClass = this.FindAuraMonoTableDataClass();
+                if (this.puzzleTableDataClass == IntPtr.Zero)
+                {
+                    this.puzzleTableDataClass = this.FindAuraMonoClassAcrossLoadedAssemblies(string.Empty, "TableData");
+                }
+            }
+
+            if (this.puzzleTableDataClass == IntPtr.Zero)
+            {
+                return;
+            }
+
+            this.puzzleGetJigsawpuzzleMethod = this.FindAuraMonoMethodOnHierarchy(this.puzzleTableDataClass, "GetJigsawpuzzle", 2);
+            if (this.puzzleGetJigsawpuzzleMethod == IntPtr.Zero)
+            {
+                this.puzzleGetJigsawpuzzleMethod = this.FindAuraMonoMethodOnHierarchy(this.puzzleTableDataClass, "GetJigsawpuzzle", 1);
+            }
+
+            this.puzzleGetJigsawpuzzleResolved = this.puzzleGetJigsawpuzzleMethod != IntPtr.Zero;
+        }
+
+        // True iff a TableData jigsaw-puzzle row exists for staticId (unfinished box, EntityType 901).
+        private unsafe bool PuzzleIsUnfinishedBox(int staticId)
+        {
+            if (staticId < PuzzleBoxStaticIdMin || staticId > PuzzleBoxStaticIdMax)
+            {
+                return false;
+            }
+
+            this.EnsurePuzzleGetJigsawpuzzleResolved();
+            if (this.puzzleGetJigsawpuzzleMethod != IntPtr.Zero && auraMonoRuntimeInvoke != null)
+            {
+                IntPtr exc = IntPtr.Zero;
+                int id = staticId;
+                IntPtr result;
+                if (AuraMonoMethodParamCountIs(this.puzzleGetJigsawpuzzleMethod, 2))
+                {
+                    byte needException = 0;
+                    IntPtr* a = stackalloc IntPtr[2];
+                    a[0] = (IntPtr)(&id);
+                    a[1] = (IntPtr)(&needException);
+                    result = auraMonoRuntimeInvoke(this.puzzleGetJigsawpuzzleMethod, IntPtr.Zero, (IntPtr)a, ref exc);
+                }
+                else
+                {
+                    IntPtr* a = stackalloc IntPtr[1];
+                    a[0] = (IntPtr)(&id);
+                    result = auraMonoRuntimeInvoke(this.puzzleGetJigsawpuzzleMethod, IntPtr.Zero, (IntPtr)a, ref exc);
+                }
+
+                return exc == IntPtr.Zero && result != IntPtr.Zero;
+            }
+
+            // Fallback: TableJigsawpuzzles contains-key (same lookup as TryGetPuzzleBoardRowCol).
+            try
+            {
+                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
+                object table = tableDataType != null
+                    ? tableDataType.GetField("TableJigsawpuzzles", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(null)
+                    : null;
+                return table is IDictionary dictionary && dictionary.Contains(staticId);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // Finished display frame (EntityType 902): TableJigsawpuzzlefinisheds / GetJigsawpuzzlefinished.
+        // staticId lives in the 901xxx band — outside PuzzleIsUnfinishedBox (900001..900669).
+        private IntPtr puzzleGetJigsawpuzzlefinishedMethod = IntPtr.Zero;
+        private bool puzzleGetJigsawpuzzlefinishedResolved = false;
+
+        private void EnsurePuzzleGetJigsawpuzzlefinishedResolved()
+        {
+            if (this.puzzleGetJigsawpuzzlefinishedMethod != IntPtr.Zero)
+            {
+                return;
+            }
+
+            if (this.puzzleTableDataClass == IntPtr.Zero)
+            {
+                this.puzzleTableDataClass = this.FindAuraMonoTableDataClass();
+                if (this.puzzleTableDataClass == IntPtr.Zero)
+                {
+                    this.puzzleTableDataClass = this.FindAuraMonoClassAcrossLoadedAssemblies(string.Empty, "TableData");
+                }
+            }
+
+            if (this.puzzleTableDataClass == IntPtr.Zero)
+            {
+                return;
+            }
+
+            this.puzzleGetJigsawpuzzlefinishedMethod = this.FindAuraMonoMethodOnHierarchy(
+                this.puzzleTableDataClass, "GetJigsawpuzzlefinished", 2);
+            if (this.puzzleGetJigsawpuzzlefinishedMethod == IntPtr.Zero)
+            {
+                this.puzzleGetJigsawpuzzlefinishedMethod = this.FindAuraMonoMethodOnHierarchy(
+                    this.puzzleTableDataClass, "GetJigsawpuzzlefinished", 1);
+            }
+
+            this.puzzleGetJigsawpuzzlefinishedResolved = this.puzzleGetJigsawpuzzlefinishedMethod != IntPtr.Zero;
+        }
+
+        private unsafe bool PuzzleIsFinishedFrame(int staticId)
+        {
+            if (staticId <= 0)
+            {
+                return false;
+            }
+
+            // Fast band check from live backpack samples (901013..901654, entityType 902).
+            if (staticId >= 901000 && staticId <= 901999)
+            {
+                return true;
+            }
+
+            this.EnsurePuzzleGetJigsawpuzzlefinishedResolved();
+            if (this.puzzleGetJigsawpuzzlefinishedMethod != IntPtr.Zero && auraMonoRuntimeInvoke != null)
+            {
+                IntPtr exc = IntPtr.Zero;
+                int id = staticId;
+                IntPtr result;
+                if (AuraMonoMethodParamCountIs(this.puzzleGetJigsawpuzzlefinishedMethod, 2))
+                {
+                    byte needException = 0;
+                    IntPtr* a = stackalloc IntPtr[2];
+                    a[0] = (IntPtr)(&id);
+                    a[1] = (IntPtr)(&needException);
+                    result = auraMonoRuntimeInvoke(this.puzzleGetJigsawpuzzlefinishedMethod, IntPtr.Zero, (IntPtr)a, ref exc);
+                }
+                else
+                {
+                    IntPtr* a = stackalloc IntPtr[1];
+                    a[0] = (IntPtr)(&id);
+                    result = auraMonoRuntimeInvoke(this.puzzleGetJigsawpuzzlefinishedMethod, IntPtr.Zero, (IntPtr)a, ref exc);
+                }
+
+                return exc == IntPtr.Zero && result != IntPtr.Zero;
+            }
+
+            try
+            {
+                Type tableDataType = this.FindLoadedType("TableData", "EcsClient.TableData");
+                object table = tableDataType != null
+                    ? tableDataType.GetField("TableJigsawpuzzlefinisheds", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(null)
+                    : null;
+                return table is IDictionary dictionary && dictionary.Contains(staticId);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private unsafe bool TryMoveUnfinishedPuzzleBoxesWarehouseToBackpack(out string status)
+        {
+            status = string.Empty;
+            try
+            {
+                if (!AuraMonoPinningAvailable)
+                {
+                    status = "pinning unavailable";
+                    return false;
+                }
+
+                this.EnsurePuzzleGetJigsawpuzzleResolved();
+                if (!this.puzzleGetJigsawpuzzleResolved)
+                {
+                    status = "TableData.GetJigsawpuzzle unavailable";
+                    return false;
+                }
+
+                if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem", out IntPtr backPack)
+                    || backPack == IntPtr.Zero)
+                {
+                    status = "BackPackSystem unavailable";
+                    return false;
+                }
+
+                IntPtr getAllItem = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(backPack), "GetAllItem", 1);
+                if (getAllItem == IntPtr.Zero)
+                {
+                    getAllItem = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(backPack), "GetAllItem", 0);
+                }
+
+                if (getAllItem == IntPtr.Zero)
+                {
+                    status = "GetAllItem missing";
+                    return false;
+                }
+
+                int storageWarehouse = 2; // EStorageType.Warehouse
+                IntPtr listObj;
+                IntPtr exc = IntPtr.Zero;
+                if (AuraMonoMethodParamCountIs(getAllItem, 1))
+                {
+                    IntPtr* a = stackalloc IntPtr[1];
+                    a[0] = (IntPtr)(&storageWarehouse);
+                    listObj = auraMonoRuntimeInvoke(getAllItem, backPack, (IntPtr)a, ref exc);
+                }
+                else
+                {
+                    listObj = auraMonoRuntimeInvoke(getAllItem, backPack, IntPtr.Zero, ref exc);
+                }
+
+                if (exc != IntPtr.Zero || listObj == IntPtr.Zero)
+                {
+                    status = "warehouse read failed";
+                    return false;
+                }
+
+                Dictionary<uint, int> map = new Dictionary<uint, int>();
+                List<uint> pins = new List<uint>();
+                List<IntPtr> items = new List<IntPtr>();
+                int boxStacks = 0;
+                int boxQty = 0;
+                try
+                {
+                    if (!this.TryEnumerateAuraMonoCollectionItems(listObj, items, pins) || items.Count == 0)
+                    {
+                        status = "warehouse empty";
+                        return false;
+                    }
+
+                    for (int i = 0; i < items.Count; i++)
+                    {
+                        IntPtr itemObj = items[i];
+                        if (itemObj == IntPtr.Zero
+                            || !this.TryGetDirectBackpackItemNetId(itemObj, out uint netId)
+                            || netId == 0U)
+                        {
+                            continue;
+                        }
+
+                        if (this.TryGetDirectBackpackItemIsLocked(itemObj, out bool isLocked) && isLocked)
+                        {
+                            continue;
+                        }
+
+                        if (!this.TryGetDirectBackpackItemStaticId(itemObj, out int staticId) || staticId <= 0
+                            || !this.PuzzleIsUnfinishedBox(staticId))
+                        {
+                            continue;
+                        }
+
+                        if (!this.TryGetDirectBackpackItemCount(itemObj, out int count) || count <= 0)
+                        {
+                            count = 1;
+                        }
+
+                        map[netId] = count;
+                        boxStacks++;
+                        boxQty += count;
+                    }
+                }
+                finally
+                {
+                    FreeAuraMonoPins(pins);
+                }
+
+                if (map.Count == 0)
+                {
+                    status = "no puzzle boxes in warehouse";
+                    return false;
+                }
+
+                if (!this.TrySendWarehouseStacksToBagChunked(map, out int movedStacks, out int movedQty, out string error))
+                {
+                    status = string.IsNullOrEmpty(error) ? "MoveBatchBackpackItems failed" : error;
+                    return false;
+                }
+
+                status = "Moved " + movedStacks + " puzzle box stack(s), qty " + movedQty + " -> Bag";
+                this.PuzzleLog(status);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "warehouse scan exception: " + ex.Message;
+                return false;
+            }
+            finally
+            {
+                this.puzzleMoveBoxesStatus = status;
+            }
+        }
+
+        // ===== auto-place unfinished puzzle boxes from the backpack ==========================
+        // Same BuildPlaceData pipeline as the sand base (EnsureSandPlaceResolved / TryResolveSandPlaceTarget /
+        // TryCheckSandFieldLoadAllows / TrySendSandBasePlace are shared); only the bag-item filter differs.
+        private const int PuzzlePlaceMaxAttempts = 3;
+        private const float PuzzlePlaceBackoffSeconds = 2.5f;          // after a FAILED place
+        private const float PuzzlePlaceBoardPresentBackoffSeconds = 0.25f; // unfinished board already near — retry soon
+        private const float PuzzlePlaceRescanSeconds = 0.15f;          // polling for the just-placed box
+        private const float PuzzlePlacePendingWindowSeconds = 2.0f;    // spawn wait before placing another
+        private const float PuzzlePlaceDistanceMeters = 0.7f;          // ahead of player (sand uses 1.5 m)
+        private const int PuzzlePlaceMaxBackpackScan = 4096;
+        private const string PuzzleNoBoxInBackpackPrefix = "no puzzle box in backpack";
+        private float puzzlePlaceSentAt = 0f;
+
+        // Scan backpack (EStorageType.Backpack == 1), first item whose staticId is an unfinished puzzle box.
+        private unsafe bool TryResolvePuzzleBoxBackpackItem(out uint bagItemNetId, out int staticId, out string status)
+        {
+            bagItemNetId = 0U;
+            staticId = 0;
+            status = string.Empty;
+
+            if (!AuraMonoPinningAvailable)
+            {
+                status = "pinning unavailable";
+                return false;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread()
+                || auraMonoRuntimeInvoke == null || auraMonoObjectGetClass == null)
+            {
+                status = "aura not ready";
+                return false;
+            }
+
+            if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem", out IntPtr backPack)
+                || backPack == IntPtr.Zero)
+            {
+                status = "BackPackSystem unavailable";
+                return false;
+            }
+
+            IntPtr getAllItem = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(backPack), "GetAllItem", 1);
+            if (getAllItem == IntPtr.Zero)
+            {
+                getAllItem = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(backPack), "GetAllItem", 0);
+            }
+
+            if (getAllItem == IntPtr.Zero)
+            {
+                status = "GetAllItem missing";
+                return false;
+            }
+
+            IntPtr listObj;
+            IntPtr exc = IntPtr.Zero;
+            int storageBackpack = 1; // EStorageType.Backpack
+            if (AuraMonoMethodParamCountIs(getAllItem, 1))
+            {
+                IntPtr* a = stackalloc IntPtr[1];
+                a[0] = (IntPtr)(&storageBackpack);
+                listObj = auraMonoRuntimeInvoke(getAllItem, backPack, (IntPtr)a, ref exc);
+            }
+            else
+            {
+                listObj = auraMonoRuntimeInvoke(getAllItem, backPack, IntPtr.Zero, ref exc);
+            }
+
+            if (exc != IntPtr.Zero || listObj == IntPtr.Zero)
+            {
+                status = "GetAllItem failed";
+                return false;
+            }
+
+            List<uint> pins = new List<uint>();
+            List<IntPtr> items = new List<IntPtr>(256);
+            try
+            {
+                if (!this.TryEnumerateAuraMonoCollectionItems(listObj, items, pins) || items.Count == 0)
+                {
+                    status = "backpack empty";
+                    return false;
+                }
+
+                for (int i = 0; i < items.Count && i < PuzzlePlaceMaxBackpackScan; i++)
+                {
+                    IntPtr itemObj = items[i];
+                    if (itemObj == IntPtr.Zero
+                        || !this.TryGetDirectBackpackItemNetId(itemObj, out uint candNetId) || candNetId == 0U
+                        || !this.TryGetDirectBackpackItemStaticId(itemObj, out int candStatic) || candStatic <= 0
+                        || !this.PuzzleIsUnfinishedBox(candStatic))
+                    {
+                        continue;
+                    }
+
+                    bagItemNetId = candNetId;
+                    staticId = candStatic;
+                    status = "item netId=" + candNetId + " staticId=" + candStatic + " (scanned " + (i + 1) + ")";
+                    return true;
+                }
+
+                status = "no puzzle box among " + items.Count + " items";
+                return false;
+            }
+            catch (Exception ex)
+            {
+                status = "scan exception: " + ex.Message;
+                return false;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+        }
+
+        private bool TryPlaceUnfinishedPuzzleBoxFromBackpack(out string status)
+        {
+            status = "puzzle place unavailable";
+
+            if (!this.EnsureSandPlaceResolved(out string placeResolve))
+            {
+                status = "place types not resolved: " + placeResolve;
+                this.PuzzleLog("place: " + status);
+                return false;
+            }
+
+            if (!this.TryResolvePuzzleBoxBackpackItem(out uint bagItemNetId, out int staticId, out string itemStatus))
+            {
+                status = PuzzleNoBoxInBackpackPrefix + ": " + itemStatus;
+                this.PuzzleLog("place: " + status);
+                return false;
+            }
+
+            if (!this.TryResolveSandPlaceTarget(out uint buildRootNetId, out ulong putZoneId,
+                                                out Vector3 localPos, out int angle, out string targetStatus,
+                                                PuzzlePlaceDistanceMeters))
+            {
+                status = "target unresolved: " + targetStatus;
+                this.PuzzleLog("place: " + status);
+                return false;
+            }
+
+            // Fail-open game gate (BuildModule.CheckCanPut); an explicit refusal blocks the put.
+            if (!this.TryCheckSandFieldLoadAllows(staticId, out string loadStatus))
+            {
+                status = loadStatus;
+                this.PuzzleLog("place: " + status);
+                return false;
+            }
+
+            if (!this.TrySendSandBasePlace(bagItemNetId, buildRootNetId, putZoneId, localPos, angle, out string sendStatus))
+            {
+                status = "send failed: " + sendStatus;
+                this.PuzzleLog("place: " + status);
+                return false;
+            }
+
+            status = "placed puzzle box staticId=" + staticId + " item=" + bagItemNetId
+                     + " root=" + buildRootNetId + " zone=0x" + putZoneId.ToString("X")
+                     + " localPos=" + localPos + " (" + sendStatus + ")";
+            this.PuzzleLog("place OK: " + status);
+            return true;
+        }
+
+        private void UpdatePuzzleAutoPlace()
+        {
+            if (!this.puzzleAutoPlace)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (now < this.puzzlePlaceNextAt)
+            {
+                return;
+            }
+
+            // Detect with at least placeDistance+0.5 so a small slider still sees the just-placed box.
+            float placeDetectRadius = Mathf.Max(this.GetPuzzleScanRadiusMeters(), PuzzlePlaceDistanceMeters + 0.5f);
+
+            // An unfinished board near the player already exists: nothing to place; reset the guards.
+            if (this.TryFindNearestUnfinishedPuzzleBoard(out _, out _, out string scanStatus, placeDetectRadius))
+            {
+                this.puzzlePlaceAttempts = 0;
+                this.puzzlePlaceSentAt = 0f;
+                this.puzzlePlaceNextAt = now + PuzzlePlaceBoardPresentBackoffSeconds;
+                return;
+            }
+
+            // Only a definite "no board" answer allows placing; a not-ready scan must not cause a duplicate place.
+            bool definitelyNoBoard = scanStatus.StartsWith("no unfinished board", StringComparison.Ordinal)
+                                     || scanStatus.StartsWith("no JigsawPuzzleComponent instances", StringComparison.Ordinal);
+            if (!definitelyNoBoard)
+            {
+                this.puzzlePlaceNextAt = now + PuzzlePlaceBackoffSeconds;
+                return;
+            }
+
+            // Just placed: wait for the box to stream in before placing another.
+            if (this.puzzlePlaceSentAt > 0f && now - this.puzzlePlaceSentAt < PuzzlePlacePendingWindowSeconds)
+            {
+                this.puzzlePlaceNextAt = now + PuzzlePlaceRescanSeconds;
+                return;
+            }
+
+            this.puzzlePlaceSentAt = 0f;
+            if (this.puzzlePlaceAttempts >= PuzzlePlaceMaxAttempts)
+            {
+                // Placed repeatedly but never saw a board within the scan radius.
+                this.puzzleAutoPlace = false;
+                this.puzzleLastPlaceStatus = "auto-place disabled: placed box not detected within scan radius";
+                this.AddMenuNotification(this.L("Auto-place puzzle from backpack") + ": " + this.L("Off"), new Color(1f, 0.55f, 0.55f));
+                return;
+            }
+
+            this.puzzlePlaceAttempts++;
+            bool ok = this.TryPlaceUnfinishedPuzzleBoxFromBackpack(out string placeStatus);
+            this.puzzleLastPlaceStatus = placeStatus;
+            if (ok)
+            {
+                this.puzzlePlaceSentAt = now;
+                this.puzzlePlaceNextAt = now + PuzzlePlaceRescanSeconds;
+                return;
+            }
+
+            if (placeStatus.StartsWith(PuzzleNoBoxInBackpackPrefix, StringComparison.Ordinal))
+            {
+                this.puzzleAutoPlace = false;
+                this.puzzleLastPlaceStatus = "stopped: no puzzle boxes left in backpack";
+                this.AddMenuNotification(this.L("Auto-place puzzle from backpack") + ": " + this.L("no puzzle boxes left"), new Color(1f, 0.55f, 0.55f));
+                return;
+            }
+
+            if (this.puzzlePlaceAttempts >= PuzzlePlaceMaxAttempts)
+            {
+                this.puzzleAutoPlace = false;
+                this.puzzleLastPlaceStatus = "auto-place disabled: " + placeStatus;
+                this.AddMenuNotification(this.L("Auto-place puzzle from backpack") + ": " + this.L("Off"), new Color(1f, 0.55f, 0.55f));
+                return;
+            }
+
+            this.puzzlePlaceNextAt = now + PuzzlePlaceBackoffSeconds;
+        }
+
+        // ===== auto-collect finished / mask-complete puzzle boards ============================
+        // Live (2026-11-15): after solve the entity becomes EntityType 902 (staticId 901xxx,
+        // JigsawPuzzleComponentData.isFinished == true). PoseDeleteBuild takes that into the bag
+        // (proven MCP: 901650 → backpack entityType 902). There is also a short mask-complete
+        // window on the 900xxx box (isFinished == false, IsJigsawPuzzleBoardFinished == true) —
+        // collect either. PoseDeleteBuild is server-authoritative on ownership; when LevelEntity
+        // ownerId is readable and foreign, skip; when unread, still attempt the take.
+        private const float PuzzleCollectScanBackoffSeconds = 0.25f;   // idle: nothing to collect
+        private const float PuzzleCollectPendingScanSeconds = 0.08f;  // waiting for just-cleared board to become takeable
+        private const float PuzzleCollectBusyBackoffSeconds = 0.25f;  // PoseDeleteBuild in-flight — retry soon
+        private const float PuzzleCollectTakeBackoffSeconds = 1.0f;   // after accepted take: wait BuildOptionRespond
+        private const float PuzzleCollectPendingSeconds = 8.0f;       // prefer cleared board until 902 lands / take accepts
+        private const float PuzzleCollectAwaitRespondSeconds = 1.0f;  // fixed hold before next take / next solve
+        private const float PuzzleCollectBusyStuckSeconds = 2.0f;     // force-clear _optionType after this
+
+        // Resolves CharacterProtocolManager.PoseDeleteBuild(uint) into the sand collect fields so that
+        // TryInvokeSandPoseDeleteBuild can be reused; does not require the sand finish component class.
+        private bool EnsurePuzzleCollectResolved(out string status)
+        {
+            status = "cached";
+            if (this.sandCollectPoseDeleteMethod != IntPtr.Zero)
+            {
+                if (this.puzzleCollectOptionTypeField == IntPtr.Zero && this.sandCollectCharacterProtocolClass != IntPtr.Zero)
+                {
+                    this.puzzleCollectOptionTypeField = this.FindAuraMonoFieldOnHierarchy(
+                        this.sandCollectCharacterProtocolClass, "_optionType");
+                }
+
+                return true;
+            }
+
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                status = "aura api not ready";
+                return false;
+            }
+
+            if (this.sandCollectCharacterProtocolClass == IntPtr.Zero)
+            {
+                for (int i = 0; i < SandCharacterProtocolTypeNames.Length; i++)
+                {
+                    this.sandCollectCharacterProtocolClass = this.FindAuraMonoClassByFullName(SandCharacterProtocolTypeNames[i]);
+                    if (this.sandCollectCharacterProtocolClass != IntPtr.Zero)
+                    {
+                        break;
+                    }
+                }
+
+                if (this.sandCollectCharacterProtocolClass == IntPtr.Zero)
+                {
+                    this.sandCollectCharacterProtocolClass = this.FindAuraMonoClassInImages(
+                        "XDTDataAndProtocol.ProtocolService.GamePlay.Character", "CharacterProtocolManager",
+                        SandAuraProtocolImages);
+                }
+            }
+
+            if (this.sandCollectCharacterProtocolClass != IntPtr.Zero)
+            {
+                this.sandCollectPoseDeleteMethod = this.FindAuraMonoMethodOnHierarchy(
+                    this.sandCollectCharacterProtocolClass, "PoseDeleteBuild", 1);
+                if (this.puzzleCollectOptionTypeField == IntPtr.Zero)
+                {
+                    this.puzzleCollectOptionTypeField = this.FindAuraMonoFieldOnHierarchy(
+                        this.sandCollectCharacterProtocolClass, "_optionType");
+                }
+            }
+
+            if (this.sandCollectPoseDeleteMethod == IntPtr.Zero)
+            {
+                status = "PoseDeleteBuild unresolved";
+                return false;
+            }
+
+            status = "resolved";
+            return true;
+        }
+
+        private delegate void PuzzleMonoFieldStaticSetValueDelegate(IntPtr vtable, IntPtr field, IntPtr valuePtr);
+        private static PuzzleMonoFieldStaticSetValueDelegate puzzleMonoFieldStaticSetValue;
+
+        // CharacterProtocolManager._optionType > 0 blocks every PoseDeleteBuild. Force to 0 when
+        // BuildOptionRespondEvent never arrives (live MCP: busy forever after a few takes).
+        private unsafe bool TryClearStuckPuzzleBuildOption(out string detail)
+        {
+            detail = string.Empty;
+            if (this.puzzleCollectOptionTypeField == IntPtr.Zero
+                || this.sandCollectCharacterProtocolClass == IntPtr.Zero
+                || auraMonoClassVtable == null
+                || auraMonoFieldStaticGetValue == null
+                || this.auraMonoRootDomain == IntPtr.Zero
+                || !AuraMonoStaticFieldReadsAllowed())
+            {
+                detail = "no _optionType static access";
+                return false;
+            }
+
+            try
+            {
+                IntPtr vtable = auraMonoClassVtable(this.auraMonoRootDomain, this.sandCollectCharacterProtocolClass);
+                if (vtable == IntPtr.Zero)
+                {
+                    detail = "no vtable";
+                    return false;
+                }
+
+                int current = 0;
+                auraMonoFieldStaticGetValue(vtable, this.puzzleCollectOptionTypeField, (IntPtr)(&current));
+                if (current == 0)
+                {
+                    detail = "_optionType already 0";
+                    this.puzzleCollectAwaitRespondUntil = 0f;
+                    this.puzzleCollectBusySince = 0f;
+                    return true;
+                }
+
+                if (puzzleMonoFieldStaticSetValue == null)
+                {
+                    IntPtr monoModule = this.GetAuraMonoModuleHandle();
+                    if (monoModule != IntPtr.Zero)
+                    {
+                        puzzleMonoFieldStaticSetValue = this.GetAuraMonoExport<PuzzleMonoFieldStaticSetValueDelegate>(
+                            monoModule, "mono_field_static_set_value");
+                    }
+                }
+
+                if (puzzleMonoFieldStaticSetValue == null)
+                {
+                    detail = "mono_field_static_set_value missing (was " + current + ")";
+                    return false;
+                }
+
+                int zero = 0;
+                puzzleMonoFieldStaticSetValue(vtable, this.puzzleCollectOptionTypeField, (IntPtr)(&zero));
+                int after = -1;
+                auraMonoFieldStaticGetValue(vtable, this.puzzleCollectOptionTypeField, (IntPtr)(&after));
+                detail = "cleared _optionType " + current + "→" + after;
+                return after == 0;
+            }
+            catch (Exception ex)
+            {
+                detail = "clear ex: " + ex.Message;
+                return false;
+            }
+        }
+
+        private bool TryPuzzlePoseDeleteBuild(uint netId, out string status)
+        {
+            if (!this.TryInvokeSandPoseDeleteBuild(netId, out status))
+            {
+                return false;
+            }
+
+            this.puzzleCollectAwaitRespondUntil = Time.unscaledTime + PuzzleCollectAwaitRespondSeconds;
+            this.puzzleCollectBusySince = 0f;
+            return true;
+        }
+
+        private void UpdatePuzzleAutoCollect()
+        {
+            if (!this.puzzleAutoCollect)
+            {
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (now < this.puzzleCollectNextAt)
+            {
+                return;
+            }
+
+            if (this.puzzlePendingCollectNetId != 0U && now > this.puzzlePendingCollectUntil)
+            {
+                this.puzzlePendingCollectNetId = 0U;
+                this.puzzlePendingCollectUntil = 0f;
+            }
+
+            if (!this.TryCollectOneSolvedPuzzleBoard(out bool tookOne, out bool busy, out string status))
+            {
+                this.puzzleLastCollectStatus = status;
+                this.puzzleCollectNextAt = now + (this.puzzlePendingCollectNetId != 0U
+                    ? PuzzleCollectPendingScanSeconds
+                    : PuzzleCollectScanBackoffSeconds);
+                return;
+            }
+
+            this.puzzleLastCollectStatus = status;
+            if (!string.IsNullOrEmpty(status)
+                && !string.Equals(status, this.puzzleLastCollectLoggedStatus, StringComparison.Ordinal))
+            {
+                this.puzzleLastCollectLoggedStatus = status;
+                FeatureLog.Life("PuzzleNet", "collect: " + status);
+            }
+
+            if (tookOne)
+            {
+                this.puzzleCollectBusySince = 0f;
+                this.puzzleCollectNextAt = now + PuzzleCollectTakeBackoffSeconds;
+            }
+            else if (busy)
+            {
+                if (this.puzzleCollectBusySince <= 0f)
+                {
+                    this.puzzleCollectBusySince = now;
+                }
+
+                if ((now - this.puzzleCollectBusySince) >= PuzzleCollectBusyStuckSeconds
+                    || (this.puzzleCollectAwaitRespondUntil > 0f && now >= this.puzzleCollectAwaitRespondUntil))
+                {
+                    if (this.EnsurePuzzleCollectResolved(out _)
+                        && this.TryClearStuckPuzzleBuildOption(out string clearDetail))
+                    {
+                        this.puzzleLastCollectStatus = "build-option gate stuck — " + clearDetail + "; retrying";
+                        this.puzzleLastCollectLoggedStatus = string.Empty;
+                        FeatureLog.Life("PuzzleNet", "collect: " + this.puzzleLastCollectStatus);
+                        this.puzzleCollectAwaitRespondUntil = 0f;
+                        this.puzzleCollectBusySince = 0f;
+                        this.puzzleCollectNextAt = now + 0.1f;
+                        return;
+                    }
+                }
+
+                this.puzzleCollectNextAt = now + PuzzleCollectBusyBackoffSeconds;
+            }
+            else
+            {
+                this.puzzleCollectBusySince = 0f;
+                if (this.puzzlePendingCollectNetId != 0U)
+                {
+                    this.puzzleCollectNextAt = now + PuzzleCollectPendingScanSeconds;
+                }
+                else
+                {
+                    this.puzzleCollectNextAt = now + PuzzleCollectScanBackoffSeconds;
+                }
+            }
+        }
+
+        // tookOne=false + busy=false: nothing to collect. busy=true: PoseDeleteBuild in flight — retry soon.
+        private unsafe bool TryCollectOneSolvedPuzzleBoard(out bool tookOne, out bool busy, out string status)
+        {
+            tookOne = false;
+            busy = false;
+            status = string.Empty;
+            List<uint> pins = new List<uint>();
+            try
+            {
+                if (!AuraMonoPinningAvailable)
+                {
+                    status = "pinning unavailable";
+                    return false;
+                }
+
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    status = "aura api not ready";
+                    return false;
+                }
+
+                if (!this.EnsurePuzzleCollectResolved(out string resolveStatus))
+                {
+                    status = "collect types not resolved: " + resolveStatus;
+                    return false;
+                }
+
+                if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+                {
+                    status = "GetComponents not ready";
+                    return false;
+                }
+
+                if (this.puzzleAuraBoardComponentClass == IntPtr.Zero)
+                {
+                    for (int i = 0; i < PuzzleAuraBoardComponentTypeNames.Length && this.puzzleAuraBoardComponentClass == IntPtr.Zero; i++)
+                    {
+                        this.puzzleAuraBoardComponentClass = this.FindAuraMonoClassByFullName(PuzzleAuraBoardComponentTypeNames[i]);
+                    }
+                }
+
+                if (this.puzzleAuraBoardComponentClass == IntPtr.Zero)
+                {
+                    status = "JigsawPuzzleComponent class unavailable";
+                    return false;
+                }
+
+                if (!this.TryGetLocalPlayerPosition(out Vector3 playerPos))
+                {
+                    status = "no player position";
+                    return false;
+                }
+
+                if (!this.TryAuraMonoGetComponentObjects(this.puzzleAuraBoardComponentClass, out List<IntPtr> comps, pins)
+                    || comps == null || comps.Count == 0)
+                {
+                    status = "no JigsawPuzzleComponent instances";
+                    return true;
+                }
+
+                // Prefer the just-cleared board: walk it first so a yard full of old 902 frames
+                // does not steal the take slot / backoff before the board we just solved.
+                uint pendingNetId = this.puzzlePendingCollectNetId;
+                if (pendingNetId != 0U)
+                {
+                    for (int p = 0; p < comps.Count; p++)
+                    {
+                        IntPtr pendingComp = comps[p];
+                        if (pendingComp == IntPtr.Zero
+                            || !this.TryGetMonoObjectMember(pendingComp, "entity", out IntPtr pendingEntity)
+                            || pendingEntity == IntPtr.Zero
+                            || !this.TryGetAuraMonoEntityNetId(pendingEntity, out uint pendingId)
+                            || pendingId != pendingNetId)
+                        {
+                            continue;
+                        }
+
+                        // Swap pending to front for the main loop.
+                        if (p != 0)
+                        {
+                            comps[p] = comps[0];
+                            comps[0] = pendingComp;
+                        }
+
+                        break;
+                    }
+                }
+
+                float radius = this.GetPuzzleScanRadiusMeters();
+                int inRange = 0;
+                int solved = 0;
+                int notOwned = 0;
+                int ownerUnread = 0;
+                int unreadable = 0;
+                IntPtr systemObj = IntPtr.Zero;
+                bool systemResolved = false;
+                uint selfNetId = 0U;
+                bool selfResolved = false;
+                IntPtr* argSlot = stackalloc IntPtr[1];
+                for (int i = 0; i < comps.Count; i++)
+                {
+                    IntPtr compObj = comps[i];
+                    if (compObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    if (!this.TryGetMonoObjectMember(compObj, "entity", out IntPtr entityObj) || entityObj == IntPtr.Zero
+                        || !this.TryGetAuraMonoEntityNetId(entityObj, out uint netId) || netId == 0U
+                        || !this.TryGetAuraMonoEntityPosition(entityObj, out Vector3 pos))
+                    {
+                        unreadable++;
+                        continue;
+                    }
+
+                    bool isPending = pendingNetId != 0U && netId == pendingNetId;
+                    if (!isPending && Vector3.Distance(playerPos, pos) > radius)
+                    {
+                        continue;
+                    }
+
+                    inRange++;
+                    if (!this.TryReadPuzzleBoardComponentData(compObj, out int candidateStaticId, out bool isFinished))
+                    {
+                        unreadable++;
+                        continue;
+                    }
+
+                    // Collectable:
+                    //  1) componentData.isFinished (902 frame flag), OR
+                    //  2) staticId is a finished-frame row (901xxx / TableJigsawpuzzlefinisheds) —
+                    //     the old gate required PuzzleIsUnfinishedBox (900xxx only), so after the
+                    //     server flipped staticId to 901xxx with isFinished still false / unread,
+                    //     boards sat on the floor forever (MCP: Completed UI, no PoseDelete), OR
+                    //  3) mask-complete unfinished box (IsJigsawPuzzleBoardFinished), OR pending.
+                    bool collectable = isFinished || this.PuzzleIsFinishedFrame(candidateStaticId);
+                    if (!collectable)
+                    {
+                        if (!systemResolved)
+                        {
+                            systemResolved = true;
+                            if (this.TryResolveAuraMonoModule(PuzzleAuraSystemTypeName, out systemObj) && systemObj != IntPtr.Zero)
+                            {
+                                pins.Add(AuraMonoPinNew(systemObj));
+                                if (this.puzzleAuraIsBoardFinishedMethod == IntPtr.Zero)
+                                {
+                                    IntPtr systemClass = auraMonoObjectGetClass(systemObj);
+                                    if (systemClass != IntPtr.Zero)
+                                    {
+                                        this.puzzleAuraIsBoardFinishedMethod = this.FindAuraMonoMethodOnHierarchy(systemClass, "IsJigsawPuzzleBoardFinished", 1);
+                                    }
+                                }
+                            }
+                        }
+
+                        if (systemObj == IntPtr.Zero || this.puzzleAuraIsBoardFinishedMethod == IntPtr.Zero)
+                        {
+                            if (!isPending)
+                            {
+                                status = "JigsawPuzzleSystem.IsJigsawPuzzleBoardFinished unavailable";
+                                return false;
+                            }
+                        }
+                        else
+                        {
+                            IntPtr exc = IntPtr.Zero;
+                            uint arg = netId;
+                            argSlot[0] = (IntPtr)(&arg);
+                            IntPtr boxed = auraMonoRuntimeInvoke(this.puzzleAuraIsBoardFinishedMethod, systemObj, (IntPtr)argSlot, ref exc);
+                            if (exc != IntPtr.Zero || boxed == IntPtr.Zero || !this.TryUnboxMonoBoolean(boxed, out bool boardDone))
+                            {
+                                if (!isPending)
+                                {
+                                    unreadable++;
+                                    continue;
+                                }
+                            }
+                            else
+                            {
+                                collectable = boardDone;
+                            }
+                        }
+
+                        // Pending netId: still attempt PoseDeleteBuild once (server may accept
+                        // before isFinished / finished-table row is visible client-side).
+                        if (!collectable && isPending)
+                        {
+                            collectable = true;
+                        }
+                    }
+
+                    if (!collectable)
+                    {
+                        continue;
+                    }
+
+                    solved++;
+                    if (!selfResolved)
+                    {
+                        selfResolved = true;
+                        this.TryResolveSelfPlayerNetId(out selfNetId);
+                    }
+
+                    // Owner gate: only skip when ownerId is positively known and foreign.
+                    // TryHomelandFarmTryReadOwnerId often misses puzzle boards (crop/level-object
+                    // cache); treating that miss as notOwned left solved boards on the floor forever.
+                    uint ownerId = 0U;
+                    bool ownerKnown = selfNetId != 0U
+                        && this.TryHomelandFarmTryReadOwnerId(netId, out ownerId)
+                        && ownerId != 0U;
+                    if (ownerKnown && ownerId != selfNetId)
+                    {
+                        notOwned++;
+                        if (isPending)
+                        {
+                            this.puzzlePendingCollectNetId = 0U;
+                            this.puzzlePendingCollectUntil = 0f;
+                        }
+
+                        continue;
+                    }
+
+                    if (!ownerKnown)
+                    {
+                        ownerUnread++;
+                    }
+
+                    if (this.TryPuzzlePoseDeleteBuild(netId, out string takeStatus))
+                    {
+                        tookOne = true;
+                        this.puzzleCollectedCount++;
+                        if (isPending || netId == this.puzzlePendingCollectNetId)
+                        {
+                            this.puzzlePendingCollectNetId = 0U;
+                            this.puzzlePendingCollectUntil = 0f;
+                        }
+
+                        status = "collected #" + this.puzzleCollectedCount + " netId=" + netId
+                                 + " staticId=" + candidateStaticId
+                                 + (isFinished ? " fin" : string.Empty)
+                                 + (this.PuzzleIsFinishedFrame(candidateStaticId) ? " frame902" : string.Empty)
+                                 + (isPending ? " pending" : string.Empty)
+                                 + (ownerKnown ? string.Empty : " ownerUnread")
+                                 + " (" + takeStatus + ")";
+                        this.PuzzleLog("collect: " + status);
+                        this.AddMenuNotification(this.L("Puzzle collected"), new Color(0.45f, 1f, 0.55f));
+                        return true;
+                    }
+
+                    // Prior build option still in flight — short busy retry, not the 1.5 s take gate.
+                    status = "take not ready: " + takeStatus;
+                    busy = true;
+                    return true;
+                }
+
+                status = "no own solved board in " + radius.ToString("F1") + "m (components=" + comps.Count
+                         + " inRange=" + inRange + " solved=" + solved + " notOwned=" + notOwned
+                         + " ownerUnread=" + ownerUnread + " unreadable=" + unreadable
+                         + (pendingNetId != 0U ? " pending=" + pendingNetId : string.Empty) + ")";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status = "collect scan exception: " + ex.Message;
+                return false;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
         }
 
         private void ResetPuzzleContext(string status)

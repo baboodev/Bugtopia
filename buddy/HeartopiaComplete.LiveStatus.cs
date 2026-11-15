@@ -36,6 +36,7 @@ namespace HeartopiaMod
             "Auto Sell",
             "Homeland Farm",
             "Auto Puzzle",
+            "Auto-collect finished puzzles",
             "Pet Care",
             "Auto Ice Skating",
             "Ice Skating Seq",
@@ -252,6 +253,14 @@ namespace HeartopiaMod
                     ? "Solving..."
                     : "Waiting for puzzle target...";
                 entries.Add(this.CreateLiveFeatureEntry("Auto Puzzle", puzzleStatus));
+            }
+
+            if (this.puzzleAutoCollect)
+            {
+                string collectSummary = string.IsNullOrWhiteSpace(this.puzzleLastCollectStatus)
+                    ? ("On · collected " + this.puzzleCollectedCount)
+                    : this.puzzleLastCollectStatus;
+                entries.Add(this.CreateLiveFeatureEntry("Auto-collect finished puzzles", collectSummary));
             }
 
             if (this.petPlayAutoCatEnabled || this.petPlayAutoDogEnabled || this.petPlayAutoWashEnabled)

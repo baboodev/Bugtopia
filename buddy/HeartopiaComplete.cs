@@ -1549,7 +1549,7 @@ namespace HeartopiaMod
             }
             if (this.puzzleNetBreaker.ShouldRun(farmTickNow))
             {
-                try { this.UpdatePuzzleAutomation(); this.puzzleNetBreaker.Success(); }
+                try { this.UpdatePuzzleUiPanelSuppress(); this.UpdatePuzzleAutomation(); this.UpdatePuzzleAutoPlace(); this.UpdatePuzzleAutoCollect(); this.puzzleNetBreaker.Success(); }
                 catch (Exception ex) { this.puzzleNetBreaker.Failure("PuzzleNet", ex, farmTickNow); }
             }
             this.UpdateVisualDebugEsp();

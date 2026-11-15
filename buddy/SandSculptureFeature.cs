@@ -2309,7 +2309,17 @@ namespace HeartopiaMod
         private bool TryResolveSandPlaceTarget(out uint buildRootNetId, out ulong putZoneId,
                                                out Vector3 localPos, out int angle, out string status)
         {
+            return this.TryResolveSandPlaceTarget(out buildRootNetId, out putZoneId, out localPos, out angle, out status, SandPlaceDistance);
+        }
+
+        // distanceMeters: metres ahead of the player (flat forward). Sand keeps SandPlaceDistance;
+        // puzzle auto-place passes a shorter value so the box lands under the interact/collect radius.
+        private bool TryResolveSandPlaceTarget(out uint buildRootNetId, out ulong putZoneId,
+                                               out Vector3 localPos, out int angle, out string status,
+                                               float distanceMeters)
+        {
             buildRootNetId = 0; putZoneId = 0; localPos = Vector3.zero; angle = 0; status = string.Empty;
+            float placeDistance = distanceMeters > 0.05f ? distanceMeters : SandPlaceDistance;
 
             // buildRootNetId = LocalPlayerComponent.inFieldNetId
             if (!this.TryReadSelfInFieldNetId(out buildRootNetId) || buildRootNetId == 0)
@@ -2329,7 +2339,7 @@ namespace HeartopiaMod
             catch { }
             fwd.y = 0f;
             fwd = fwd.sqrMagnitude < 1e-4f ? Vector3.forward : fwd.normalized;
-            Vector3 targetWorld = playerPos + fwd * SandPlaceDistance;
+            Vector3 targetWorld = playerPos + fwd * placeDistance;
 
             // world -> root-local via field-root entity localToWorldMatrix (fallbacks inside)
             if (this.TryGetFieldRootWorldToLocal(buildRootNetId, out Matrix4x4 w2l))

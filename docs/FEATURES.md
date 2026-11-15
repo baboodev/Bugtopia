@@ -1774,13 +1774,42 @@ Reuse a captured stove set on every start **without re-scanning**, so you can ru
 - **Reset Capture** clears the registry (the "forget" action — use after switching homelands).
 - The toggle is saved to config. The registry itself is **session-only**: view/lo netIds are reassigned across game restarts, so re-capture once per login.
 
-### Puzzle (`PuzzleNetFeature`)
+### Puzzle
 
-- Detects puzzle UI open state.
-- Reads piece layout from game objects / net IDs.
-- Auto-solves placement puzzle when enabled.
-- Shows `Solving...` / `Waiting for puzzle target...` status.
-- Disables itself after successful solve or on error.
+**Tab:** Features → **Puzzle** (`UguiShellFeaturesPuzzleSubIndex`). Source: `buddy/PuzzleNetFeature.cs`; UI in `buddy/HeartopiaComplete.UguiFeaturesPuzzleSnowContent.cs` (flat sand-sculpture-style layout: toggles, radius slider, status box, warehouse-move button).
+
+#### Auto Puzzle
+
+- **Toggle, off by default:** when on, scans unfinished jigsaw boards (`JigsawPuzzleComponent`) within the session **scan radius** (see below), picks the **nearest** to the local player, and runs the existing AuraMono join / lock / piece-move / bingo solver **one board at a time** (sequential — never two overlapping solves).
+- After a board clears, **Auto Puzzle stays on** and looks for the next unfinished board in radius (status moves to a “looking for next” line instead of turning the toggle off).
+- Piece lock / move / bingo are sent back-to-back with **no network settle delay** (one frame yield per piece only, so a large board does not hitch the player loop). Next-board / retry ticks are fixed (~0.15–0.25 s), not the old 0.12 s×N settle or 8 s retry.
+- Fallback: if radius scan finds nothing, the mod can still capture from an already-open puzzle UI / interact focus (legacy path).
+- Run-status line: `Solving...` / `Waiting for puzzle target...` / disabled, plus piece and send counts in the status box.
+
+#### Auto-place puzzle from backpack
+
+- **Independent toggle, off by default:** when there is **no** unfinished board within scan radius, places **one** unfinished puzzle box from the bag using the same generic `BuildPlaceData` + `SendBuildBatchOperation` path as sand base auto-place (`inFieldNetId`, put zone, local position **0.7 m** ahead of the player — shorter than sand’s 1.5 m). Only **EntityType 901** catalog boxes (`TableJigsawpuzzle` / `PuzzleIsUnfinishedBox`) — not finished display frames (902) or custom UGC (903).
+- Throttled with attempt backoff like sand auto-place; pairs with Auto Puzzle so a placed board is picked up on the next solve tick.
+
+#### Auto-collect finished puzzles
+
+- **Independent toggle, off by default:** scans `JigsawPuzzleComponent` in radius; keeps **finished frames** (`isFinished == true` **or** `TableJigsawpuzzlefinisheds` / staticId 901xxx — EntityType **902** on the floor after solve) and the **mask-complete box** window (`IsJigsawPuzzleBoardFinished`). Skips only when `LevelEntityComponentData.ownerId` is readable and not self; unread owner still attempts the take. Takes via `CharacterProtocolManager.PoseDeleteBuild(boardNetId)` (same call vanilla `JigsawPuzzleGetCommand` uses). After Auto Puzzle clears a board: immediate `PoseDeleteBuild` on that netId (skipped if a prior take still owns `_optionType`), then a ~8 s pending poll that prefers it. If `PoseDeleteBuild` stays busy &gt;~2 s (missing `BuildOptionRespondEvent`), force-clears `CharacterProtocolManager._optionType` and retries. Auto Puzzle will not start the next board while a take is in flight / pending — otherwise Completed boards stack on the floor. Shows on the live status rail while on.
+
+#### Suppress puzzle UI panels
+
+- **Independent toggle, off by default:** swallows `JigsawPuzzleBeginEvent` and `JigsawPuzzleRewardShowEvent` (QuietPopups / EventCenter suppress-forward), so Join/complete do not open `JigsawPuzzleBeginStatusPanel` / `JigsawPuzzleRewardPanel`. Protocol Join/Lock/Move/Bingo still run. Session-only. Does not close a Reward panel that is already open — turn the toggle on **before** solving, or dismiss a stuck Reward with its exit button once.
+
+#### Scan radius
+
+- Slider **1–30 m**, default **3**, whole metres. Shared by solve / place / collect scans. **Session-only** — not written to `Config.xml` (resets on restart).
+
+#### Move unfinished puzzles to backpack
+
+- **Button** (not a toggle): scans **warehouse only** (`EStorageType` **2**), keeps stacks whose `staticId` is an unfinished **901** jigsaw box (`PuzzleIsUnfinishedBox`), skips locked stacks, sends to bag via chunked `BackpackProtocolManager.MoveBatchBackpackItems` (256 stacks/batch). Outcome string under the button and in `bugtopia.log`. Pinned warehouse enumeration (`TryEnumerateAuraMonoCollectionItems` + `FreeAuraMonoPins`).
+
+#### Disable All
+
+- Hotkey **Disable All** and turning **Auto Puzzle** off abort the live session: unlock held pieces, `LeaveJigsawPuzzle` (mod board + player `JigsawPuzzleStatus`), and `Character.ExitMode` when `currMode` is `GameJigsawPuzzleMode` — otherwise a mid-solve stop left Join active and blocked re-entry. `ForceStopPuzzleAuto` also clears Auto-place / Auto-collect.
 
 ### Pet Care
 
