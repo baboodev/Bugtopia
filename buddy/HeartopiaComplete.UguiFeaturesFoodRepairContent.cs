@@ -16,8 +16,7 @@ namespace HeartopiaMod
     // Ground rules (same as every prior round):
     //  - The IMGUI drawer and every backend method it calls stay fully functional and untouched â€”
     //    this file only READS the same fields and CALLS the same methods (all this.-accessible
-    //    partial-class state, incl. the private instance IsBagOpen()/OpenInventory()/
-    //    CloseInventory(); ZERO backend interop additions). Two independent rendering paths over
+    //    partial-class state; ZERO backend interop additions). Two independent rendering paths over
     //    one backend.
     //  - Wiring is by STATIC display-position index (UguiShellFeaturesTabIndex = 2 +
     //    UguiShellFeaturesFoodRepairSubIndex = 1, declared with their siblings in
@@ -85,11 +84,11 @@ namespace HeartopiaMod
     //  - Repair pick (:817-822): autoRepairType = i + SaveKeybinds(false), verbatim. Food pick
     //    (:838-858): autoEatFoodType = i FIRST, then the CUSTOM-OPTION CASCADE exactly when
     //    i == CustomFoodIndex ("Custom Food"; a tail getter, not a literal - "Normal Food"
-    //    was appended after it and options may only ever be appended): customFoodPickMode = true;
-    //    OpenInventory() (REAL game-UI call â€” opens the player's bag); the amber (1,0.8,0.4)
-    //    L("Custom Food: Scanning your bag...") toast; scannedBagFoods = null;
-    //    customFoodScanRetryTime = Time.time + 0.5f. ANY other pick sets customFoodPickMode =
-    //    false instead. Both paths end with SaveKeybinds(false). Stock-Dropdown nuance
+    //    was appended after it and options may only ever be appended): customFoodPickMode = true
+    //    and customFoodPickerItems = BuildCustomFoodPickerItems() (backpack dishes; the game bag
+    //    stays closed). A green "Found {N}" toast fires when the list is non-empty. ANY other
+    //    pick sets customFoodPickMode = false and customFoodPickerItems = null. Both paths end
+    //    with SaveKeybinds(false). Stock-Dropdown nuance
     //    (accepted, Birds/Auto-Buy precedent): re-picking the ALREADY-selected option fires no
     //    event â€” so re-entering pick mode with Custom Food already selected needs a hop through
     //    another option (or the IMGUI twin, which re-fires on any option click).
@@ -98,45 +97,29 @@ namespace HeartopiaMod
     //    Dropdown bakes option text. The processor recomputes it per gated frame (IMGUI-parity
     //    alloc budget) and on change writes options[CustomFoodIndex].text + RefreshShownValue() (both
     //    RVA-verified) so caption AND list stay correct across UGUI picks and IMGUI-twin edits.
-    //  - CUSTOM FOOD PICKER (:863-1011), visible only while customFoodPickMode &&
-    //    autoEatFoodType == CustomFoodIndex: built ONCE, shown via relayout-on-signature. The signature
-    //    packs picker visibility + the list's null/empty/count state + the current-selection
-    //    label's visibility â€” all three drive real layout. The per-frame GAME-STATE POLLING
-    //    (IsBagOpen is a GameObject.Find) runs ONLY inside the same pickerVisible condition the
-    //    source block uses (:864) â€” zero bag polling while the picker is closed. Scan logic
-    //    replayed verbatim incl. the else-if shape (:870-886): bag-open + null list â†’ scan +
-    //    "Found {N}" green toast only when N > 0; else a scheduled retry once
-    //    customFoodScanRetryTime elapses (retry scan shows NO toast â€” source asymmetry). Both
-    //    surfaces polling concurrently stays idempotent (null-gate + one-shot retry zeroing).
-    //  - The scanned list (:889-954): pooled rows (grow-on-demand, rebind-by-diff, deactivate-
-    //    not-destroy â€” the Pictures nested-list idiom; NOT the Bag/Warehouse virtualized grid,
-    //    bag food counts are small), index-stable at (0, i*36), inside a kit scroll view with
-    //    both bgs cleared (source draws no box behind the list, Pictures precedent). Height =
-    //    Min(count*36, 214) (:898). Row visuals: 28x28 icon at (4,+3) â€” a RawImage bound from
-    //    scannedBagFoodTextures (Theme-round RawImage precedent), hidden when no texture (source
-    //    skips DrawTexture); name at (38,+4) 12pt â€” GetFoodDisplayName with the source's exact
-    //    "Food " prefix strip (:908-911, culture-default StartsWith replayed as written);
-    //    selection highlight = a Â±2px oversized box behind the row (:917-921's GUI.color
-    //    (0.3,0.7,0.4)-tinted GUI.Box â†’ sliced fill (0.3,0.7,0.4,0.55), the mapped analog).
-    //    Rebinds fire on sprite change or wholesale array replacement (reference-compared â€”
-    //    Rescan re-copies textures under the same keys); the selection highlight diffs per
-    //    frame (covers IMGUI-twin picks). Name/texture cannot go stale between binds: the scan
-    //    fills both caches BEFORE scannedBagFoods is assigned.
-    //  - Row click (:937-948), verbatim order: display name resolved BEFORE the caches clear;
-    //    autoEatCustomFoodName = sprite; SaveKeybinds(false); green LF("Custom food set to:
-    //    {0}") toast; customFoodPickMode = false; scannedBagFoods = null; both dicts cleared;
-    //    retry timer zeroed; if (IsBagOpen()) CloseInventory() â€” really closes the game bag.
-    //  - Empty/scanning states (:955-968): "No food items found. Open your bag and try again."
-    //    red (1,0.55,0.55) when the array is empty; "Open your bag to scan for food items..."
-    //    amber (1,0.85,0.4) while it is still null. "Select Food:" header (:894) amber bold.
-    //    These four picker literals + "Rescan"/"Done"/"Cancel" + "Selected: " are RAW
-    //    UNLOCALIZED in source (plain GUI.Label/GUI.Button, no L) â€” kept raw; the picker's
-    //    NOTIFICATIONS are L/LF'd in source and stay localized.
-    //  - Rescan (:983-989): clears the three scan states + re-arms a 0.25s retry â€” does NOT
-    //    touch customFoodPickMode, does NOT close the bag, no toast. DONE vs CANCEL (:991-999
-    //    vs :1001-1009): VERIFIED LINE-FOR-LINE IDENTICAL bodies â€” customFoodPickMode = false,
-    //    scan state cleared, timer zeroed, close-bag-if-open; they differ ONLY in button style
-    //    (primary vs danger). Implemented as one shared close method called by both handlers.
+    //  - CUSTOM FOOD PICKER, visible only while customFoodPickMode &&
+    //    autoEatFoodType == CustomFoodIndex: built ONCE, shown via relayout-on-signature. The
+    //    signature packs picker visibility + the list's null/empty/count state + the
+    //    current-selection label's visibility. Choosing Custom Food fills customFoodPickerItems
+    //    immediately from BuildCustomFoodPickerItems() (backpack only). There is no deferred
+    //    scan and no scanning placeholder.
+    //  - The dish list is a 6-column icon grid laid out at its full height inside the page
+    //    scroll. It is not a nested ScrollRect. Cells grow to the item count and stay bound to
+    //    that index. Rebind runs when net id, summed count, star, selection, or display name
+    //    changes. Icons come from TryGetTransferItemTexture plus GetOrCreateUguiTransferSprite.
+    //    A miss shows initials and is retried every 0.5s while the picker is visible.
+    //  - Cell click saves the dish sprite key (SpriteName, otherwise MatchKey) into
+    //    autoEatCustomFoodName, records the display name in scannedBagFoodDisplayNames,
+    //    SaveKeybinds(false), then a green toast. It then sets customFoodPickMode = false and
+    //    customFoodPickerItems = null. It does not open or close the game bag, does not consume
+    //    the tile NetId, and does not clear the display-name cache.
+    //  - Empty state: "No edible food in the backpack." when the list is non-null and empty.
+    //    The "Select Food:" header stays with a non-empty list. Rescan, Done, and Cancel stay.
+    //  - Rescan replaces customFoodPickerItems with a fresh BuildCustomFoodPickerItems() result.
+    //    It does not change customFoodPickMode or autoEatCustomFoodName, and shows no toast.
+    //  - Done and Cancel share one close: customFoodPickMode = false and customFoodPickerItems
+    //    = null. They do not change autoEatCustomFoodName, do not clear
+    //    scannedBagFoodDisplayNames, and do not open or close the game bag.
     //  - Current-selection label (:971-979): visible only while autoEatCustomFoodName is
     //    non-empty, green (0.45,1,0.55), "Selected: " + the same "Food "-stripped display name;
     //    text re-synced per frame while the picker is visible (it changes on either surface's
@@ -146,8 +129,8 @@ namespace HeartopiaMod
     // lands before the external re-sync could clobber it â€” Birds order), the sibling-close edge
     // detection, dropdown external re-syncs (SetValueWithoutNotify + LastValue), the dynamic
     // last-option label, the snapshot refresh + 4 status labels, toggle re-syncs
-    // (SetIsOnWithoutNotify), slider re-syncs + value labels, then the picker block (scan poll +
-    // row sync + selection text, all inside pickerVisible) and the layout-signature check.
+    // (SetIsOnWithoutNotify), slider re-syncs + value labels, then the picker block (grid sync +
+    // icon retry + selection text, all inside pickerVisible) and the layout-signature check.
     // Everything diffs before writing; per-frame sync disabled after 3 consecutive errors (LIVE
     // rail idiom).
     // ============================================================================================
@@ -157,15 +140,25 @@ namespace HeartopiaMod
         // Handles (per-instance state â€” assigned LAST in the builder, Research idiom)
         // ----------------------------------------------------------------------------------------
 
-        private sealed class UguiFoodRepairFoodRowHandle
+        private sealed class UguiFoodRepairFoodCell
         {
-            public GameObject Root;        // whole-row Button (transparent hit surface)
-            public GameObject Highlight;   // Â±2px oversized selection box behind the content
-            public GameObject IconGo;      // RawImage carrier â€” hidden when no texture cached
-            public RawImage Icon;
-            public GameObject Label;
-            public string BoundSprite = "";
-            public bool SelectedShown;
+            public Image Bg;
+            public Image Ring;
+            public Image Icon;
+            public GameObject InitialsLabel;
+            public GameObject StackBadge;
+            public GameObject StarBadge;
+            public GameObject NameLabel;
+            public GameObject Root;
+            public Button CellButton;
+            public int BoundIndex = -1;
+            public int SigIndex = int.MinValue;
+            public uint SigNetId;
+            public int SigCount;
+            public int SigStar;
+            public bool SigSelected;
+            public string SigName;
+            public bool HasIcon;
         }
 
         private sealed class UguiShellFeaturesFoodRepairHandle
@@ -221,6 +214,7 @@ namespace HeartopiaMod
             public bool RepairDropdownListenerWired;
             public int RepairDropdownLastValue;    // poll-fallback change detection
             public bool RepairDropdownWasExpanded; // sibling-close edge detection (file header)
+            public GameObject SelectFoodButton;
             public Dropdown FoodDropdown;
             public bool FoodDropdownListenerWired;
             public int FoodDropdownLastValue;
@@ -229,12 +223,17 @@ namespace HeartopiaMod
 
             public GameObject PickerRoot;          // the whole conditional block (file header)
             public GameObject PickerHeader;        // "Select Food:" â€” only with a non-empty list
-            public GameObject FoodListScroll;      // nested kit scroll, bgs cleared
-            public Transform FoodListContent;
-            public readonly List<UguiFoodRepairFoodRowHandle> FoodRows = new List<UguiFoodRepairFoodRowHandle>();
-            public string[] FoodsArraySeen;        // wholesale-replacement rebind detector
+            public GameObject FoodGridRoot;
+            public float FoodCellStride;
+            public readonly List<UguiFoodRepairFoodCell> FoodCells = new List<UguiFoodRepairFoodCell>();
+            public float NextIconRetryAt;
+            public Color CellNormalFill;
+            public Color CellActiveFill;
+            public Color RingNormal;
+            public Color RingSelected;
+            public Color TextColor;
+            public Color StarColor;
             public GameObject PickerEmptyLabel;
-            public GameObject PickerScanningLabel;
             public GameObject PickerSelectedLabel;
             public string PickerSelectedShown;
             public GameObject RescanButton;
@@ -270,8 +269,19 @@ namespace HeartopiaMod
         private const float UguiFoodRepairFoodDropdownRowY = 581f;
         private const float UguiFoodRepairDropdownsBottomY = 621f;
         private const float UguiFoodRepairPickerTopY = UguiFoodRepairDropdownRowY + 80f;
-        private const float UguiFoodRepairListWidth = 300f;        // :899 scrollViewRect width
-        private const float UguiFoodRepairListInnerWidth = UguiFoodRepairListWidth - 22f; // kit viewport insets â‰ˆ the :900 280px content
+        private const int UguiFoodRepairGridColumns = 6;
+        private const float UguiFoodRepairGridCellH = 96f;
+
+        private static float UguiFoodRepairGridHeight(int count)
+        {
+            if (count <= 0)
+            {
+                return 0f;
+            }
+
+            int rows = (count + UguiFoodRepairGridColumns - 1) / UguiFoodRepairGridColumns;
+            return rows * UguiFoodRepairGridCellH;
+        }
 
         // ----------------------------------------------------------------------------------------
         // Live layout signature â€” picker visibility, list null/empty/count, selection-label
@@ -289,10 +299,10 @@ namespace HeartopiaMod
             {
                 return throwBit;
             }
-            string[] foods = this.scannedBagFoods;
-            int listState = foods == null ? 0 : (foods.Length == 0 ? 1 : 2);
+            List<TransferItemEntry> foods = this.customFoodPickerItems;
+            int listState = foods == null ? 0 : (foods.Count == 0 ? 1 : 2);
             bool selectionVisible = !string.IsNullOrEmpty(this.autoEatCustomFoodName);
-            int count = foods != null ? foods.Length : 0;
+            int count = foods != null ? foods.Count : 0;
             return throwBit | 1 | (listState << 1) | (selectionVisible ? 8 : 0) | (count << 4);
         }
 
@@ -338,6 +348,16 @@ namespace HeartopiaMod
             this.uguiShellFeaturesFoodRepair = null;
 
             UguiShellFeaturesFoodRepairHandle handle = new UguiShellFeaturesFoodRepairHandle();
+            // Same fills the Bag/Warehouse grid snapshots at build. Do not read
+            // uguiShellBagWarehouse; that handle stays null until the Bag tab is built.
+            Color accent = this.UguiKitAccent();
+            handle.CellNormalFill = this.UguiKitContentBg();
+            handle.CellActiveFill = new Color(accent.r, accent.g, accent.b, 0.18f);
+            handle.RingNormal = new Color(1f, 1f, 1f,
+                Mathf.Clamp(0.05f + (this.uiPanelAlpha * 0.05f), 0.05f, 0.10f));
+            handle.RingSelected = new Color(accent.r, accent.g, accent.b, 0.8f);
+            handle.TextColor = this.UguiKitTextColor();
+            handle.StarColor = new Color(1f, 0.86f, 0.36f);
             GameObject block = this.CreateUguiGo("FeaturesFoodRepairContent", parent);
             PlaceUguiTopLeft(block, x, y, w, h);
             this.AddUguiImage(block, this.UguiKitContentBg(), true, 1f);
@@ -584,6 +604,9 @@ namespace HeartopiaMod
                 new System.Action<int>(this.OnUguiFeaturesFoodRepairFoodTypePicked), out foodWired);
             handle.FoodDropdownListenerWired = foodWired;
             PlaceUguiTopLeft(handle.FoodDropdown.gameObject, rowX + 90f, UguiFoodRepairFoodDropdownRowY, 160f, 40f);
+            handle.SelectFoodButton = this.CreateUguiPrimaryButton(scrollContent, "SelectFoodButton",
+                this.L("Select"), new System.Action(this.OnUguiFeaturesFoodRepairSelectClicked));
+            PlaceUguiTopLeft(handle.SelectFoodButton, rowX + 258f, UguiFoodRepairFoodDropdownRowY, 88f, 40f);
 
             // -------- Custom Food picker (:863-1011 â€” the conditional block; positions inside
             // are owned by the relayout, everything is created here once) --------
@@ -596,33 +619,13 @@ namespace HeartopiaMod
                 this.L("Select Food:"), 13f, new Color(1f, 0.85f, 0.4f), false);
             this.TrySetUguiLabelBold(handle.PickerHeader);
 
-            Transform listContent;
-            handle.FoodListScroll = this.CreateUguiScrollView(picker.transform, "FoodList", 10f, out listContent);
-            handle.FoodListContent = listContent;
-            try
-            {
-                Image listBg = handle.FoodListScroll.GetComponent<Image>();
-                if (listBg != null)
-                {
-                    listBg.color = Color.clear; // the source draws no box behind the list
-                }
-                if (listContent != null && listContent.parent != null)
-                {
-                    Image listVpBg = listContent.parent.GetComponent<Image>();
-                    if (listVpBg != null)
-                    {
-                        listVpBg.color = Color.clear;
-                    }
-                }
-            }
-            catch { }
+            handle.FoodCellStride = pickerW / UguiFoodRepairGridColumns;
+            handle.FoodGridRoot = this.CreateUguiGo("FoodGrid", picker.transform);
+            handle.FoodGridRoot.SetActive(false);
 
             handle.PickerEmptyLabel = this.CreateUguiLabel(picker.transform, "NoItemsLabel",
-                this.L("No food items found. Open your bag and try again."), 13f,
+                this.L("No edible food in the backpack."), 13f,
                 new Color(1f, 0.55f, 0.55f), false);
-            handle.PickerScanningLabel = this.CreateUguiLabel(picker.transform, "ScanningLabel",
-                this.L("Open your bag to scan for food items..."), 13f,
-                new Color(1f, 0.85f, 0.4f), false);
 
             handle.PickerSelectedShown = string.Empty;
             handle.PickerSelectedLabel = this.CreateUguiLabel(picker.transform, "SelectedLabel",
@@ -637,7 +640,7 @@ namespace HeartopiaMod
             handle.CancelButton = this.CreateUguiDangerButton(picker.transform, "CancelButton",
                 this.L("Cancel"), new System.Action(this.OnUguiFeaturesFoodRepairCancelClicked));
 
-            this.SyncUguiFeaturesFoodRepairFoodRows(handle);
+            this.SyncUguiFeaturesFoodRepairFoodGrid(handle);
             handle.LayoutSignature = this.ComputeUguiFeaturesFoodRepairLayoutSignature();
             this.RelayoutUguiShellFeaturesFoodRepair(handle);
 
@@ -646,10 +649,10 @@ namespace HeartopiaMod
             return block;
         }
 
-        // Positions the picker's children for the CURRENT state and sets the total scroll height
-        // â€” the UGUI analog of the branch's picker-section num accumulation (Gui.cs:863-1010):
-        // [count>0: header 24 (+28) â†’ list Min(count*36,214) (+10)] / [empty or null: one state
-        // line (+30)] â†’ [selection non-empty: label (+26)] â†’ buttons 26 at 0/110/220 (+35).
+        // Positions the picker's children for the CURRENT state and sets the total scroll height.
+        // A non-empty list places the header, then the full grid (every row). The page scroll is
+        // the only scroller. An empty list places the empty label. Selection label and the three
+        // buttons follow either way.
         // Everything above the picker is fixed at build time. Reposition/SetActive only.
         // The relayout now moves a dozen controls that a failed build could have left null, and one
         // NRE in there would repeat every gated frame - so both accessors are null-tolerant.
@@ -708,6 +711,13 @@ namespace HeartopiaMod
             PlaceUguiTopLeftIfSet(handle.FoodTypeLabel, rowX, UguiFoodRepairFoodDropdownRowY + extraY + 3f, 90f, 22f);
             PlaceUguiTopLeftIfSet(UguiGoOf(handle.FoodDropdown), rowX + 90f,
                 UguiFoodRepairFoodDropdownRowY + extraY, 160f, 40f);
+            bool selectVisible = this.autoEatFoodType == this.CustomFoodIndex;
+            SetUguiGoActive(handle.SelectFoodButton, selectVisible);
+            if (selectVisible)
+            {
+                PlaceUguiTopLeft(handle.SelectFoodButton, rowX + 258f,
+                    UguiFoodRepairFoodDropdownRowY + extraY, 88f, 40f);
+            }
 
             bool pickerVisible = this.customFoodPickMode
                 && this.autoEatFoodType == this.CustomFoodIndex;
@@ -720,32 +730,26 @@ namespace HeartopiaMod
             }
 
             float pickerW = handle.ContentWidth - 16f;
-            string[] foods = this.scannedBagFoods;
-            int count = foods != null ? foods.Length : 0;
+            List<TransferItemEntry> foods = this.customFoodPickerItems;
+            int count = foods != null ? foods.Count : 0;
             bool haveList = foods != null && count > 0;
             float py = 0f;
 
             SetUguiGoActive(handle.PickerHeader, haveList);
-            SetUguiGoActive(handle.FoodListScroll, haveList);
+            SetUguiGoActive(handle.FoodGridRoot, haveList);
             SetUguiGoActive(handle.PickerEmptyLabel, foods != null && count == 0);
-            SetUguiGoActive(handle.PickerScanningLabel, foods == null);
 
             if (haveList)
             {
                 PlaceUguiTopLeft(handle.PickerHeader, 0f, py, pickerW, 24f);
                 py += 28f;
-                float listH = Mathf.Min(count * 36f, 214f); // :898 â€” buttons stay visible, list scrolls
-                PlaceUguiTopLeft(handle.FoodListScroll, 0f, py, UguiFoodRepairListWidth, listH);
-                py += listH + 10f;
+                float gridH = UguiFoodRepairGridHeight(count);
+                PlaceUguiTopLeft(handle.FoodGridRoot, 0f, py, pickerW, gridH);
+                py += gridH + 10f;
             }
             else if (foods != null)
             {
                 PlaceUguiTopLeft(handle.PickerEmptyLabel, 0f, py, pickerW, 24f);
-                py += 30f;
-            }
-            else
-            {
-                PlaceUguiTopLeft(handle.PickerScanningLabel, 0f, py, pickerW, 24f);
                 py += 30f;
             }
 
@@ -767,117 +771,225 @@ namespace HeartopiaMod
         }
 
         // ----------------------------------------------------------------------------------------
-        // Pooled scanned-food rows (grow-on-demand, rebind-by-diff, deactivate-not-destroy â€”
-        // Pictures nested-list idiom; file header)
+        // Custom-food grid. One cell per dish, laid out in the page scroll. Sync rebinds by
+        // signature and hides cells past the current list.
         // ----------------------------------------------------------------------------------------
 
-        private UguiFoodRepairFoodRowHandle CreateUguiFeaturesFoodRepairFoodRow(
-            UguiShellFeaturesFoodRepairHandle handle, int index)
+        private UguiFoodRepairFoodCell BuildUguiFeaturesFoodRepairFoodCell(
+            UguiShellFeaturesFoodRepairHandle handle)
         {
-            UguiFoodRepairFoodRowHandle row = new UguiFoodRepairFoodRowHandle();
+            UguiFoodRepairFoodCell w = new UguiFoodRepairFoodCell();
+            GameObject root = this.CreateUguiGo("Cell" + handle.FoodCells.Count, handle.FoodGridRoot.transform);
+            w.Root = root;
+            float cellW = handle.FoodCellStride - 8f;
 
-            GameObject root = this.CreateUguiGo("Row" + index, handle.FoodListContent);
-            PlaceUguiTopLeft(root, 0f, index * 36f, UguiFoodRepairListInnerWidth, 34f); // :914 rows, index-stable
-            Image hit = this.AddUguiImage(root, new Color(0f, 0f, 0f, 0f), false, 1f);
-            hit.raycastTarget = true;
-            Button btn = root.AddComponent<Button>();
-            btn.targetGraphic = hit;
-            // Closure over the ROW HANDLE (not the index): the handler reads the row's current
-            // BoundSprite, so pool rebinds can never race a click (Research staticIdCopy idiom,
-            // pooled variant).
-            UguiFoodRepairFoodRowHandle captured = row;
-            this.WireUguiClick(btn.onClick, new System.Action(
-                () => this.OnUguiFeaturesFoodRepairFoodRowClicked(captured)));
+            w.Bg = this.AddUguiImage(root, handle.CellNormalFill, true, 1.5f);
+            w.Bg.raycastTarget = true;
+            w.CellButton = root.AddComponent<Button>();
+            w.CellButton.targetGraphic = w.Bg;
+            w.CellButton.transition = Selectable.Transition.None;
+            UguiFoodRepairFoodCell captured = w;
+            this.WireUguiClick(w.CellButton.onClick, new System.Action(
+                () => this.OnUguiFeaturesFoodRepairFoodCellClicked(captured)));
 
-            // Selection box behind the content, Â±2px oversized like the source's :920 rect
-            // (clipped by the list viewport the same way IMGUI's scroll view clipped its box).
-            GameObject highlight = this.CreateUguiGo("Highlight", root.transform);
-            StretchUguiFill(highlight, -2f, -2f, -2f, -2f);
-            this.AddUguiImage(highlight, new Color(0.3f, 0.7f, 0.4f, 0.55f), true, 2f);
-            highlight.SetActive(false);
-            row.Highlight = highlight;
+            this.AddUguiRingOverlay(root, handle.RingNormal, 1.5f);
+            Transform ringT = root.transform.Find("Ring");
+            w.Ring = (ringT != null) ? ringT.GetComponent<Image>() : null;
 
             GameObject iconGo = this.CreateUguiGo("Icon", root.transform);
-            PlaceUguiTopLeft(iconGo, 4f, 3f, 28f, 28f); // :925 iconRect
-            RawImage icon = iconGo.AddComponent<RawImage>();
-            icon.raycastTarget = false;
+            // No stepper strip, so the icon sits higher than the transfer cell and the name fits
+            // under it inside the 96px row.
+            PlaceUguiTopLeft(iconGo, (cellW - 42f) * 0.5f, 8f, 42f, 36f);
+            w.Icon = iconGo.AddComponent<Image>();
+            w.Icon.raycastTarget = false;
+            try { w.Icon.preserveAspect = true; } catch { }
             iconGo.SetActive(false);
-            row.IconGo = iconGo;
-            row.Icon = icon;
 
-            row.Label = this.CreateUguiLabel(root.transform, "Name", "", 12f, this.UguiKitTextColor(), false);
-            PlaceUguiTopLeft(row.Label, 38f, 4f, UguiFoodRepairListInnerWidth - 38f - 4f, 30f); // :932 textRect
+            w.InitialsLabel = this.CreateUguiLabel(root.transform, "Initials", "", 14f, handle.TextColor, true);
+            this.TrySetUguiLabelBold(w.InitialsLabel);
+            PlaceUguiTopLeft(w.InitialsLabel, (cellW - 42f) * 0.5f, 8f, 42f, 36f);
+            w.InitialsLabel.SetActive(false);
 
-            row.Root = root;
-            return row;
+            w.StackBadge = this.CreateUguiLabel(root.transform, "Stack", "", 9f, Color.white, false);
+            this.TrySetUguiLabelBold(w.StackBadge);
+            PlaceUguiTopLeft(w.StackBadge, 4f, 3f, 36f, 18f);
+            w.StackBadge.SetActive(false);
+
+            w.StarBadge = this.CreateUguiLabel(root.transform, "Star", "", 9f, handle.StarColor, false);
+            this.TrySetUguiLabelBold(w.StarBadge);
+            this.TrySetUguiLabelRightAligned(w.StarBadge);
+            PlaceUguiTopLeft(w.StarBadge, cellW - 36f, 3f, 32f, 18f);
+            w.StarBadge.SetActive(false);
+
+            w.NameLabel = this.CreateUguiLabel(root.transform, "Name", "", 9f, handle.TextColor, true);
+            this.TrySetUguiTransferNameWrapped(w.NameLabel);
+            PlaceUguiTopLeft(w.NameLabel, 3f, 48f, cellW - 6f, 32f);
+            return w;
         }
 
-        private void SyncUguiFeaturesFoodRepairFoodRows(UguiShellFeaturesFoodRepairHandle handle)
+        private void SyncUguiFeaturesFoodRepairFoodGrid(UguiShellFeaturesFoodRepairHandle handle)
         {
-            string[] foods = this.scannedBagFoods;
-            int count = foods != null ? foods.Length : 0;
-
-            // Wholesale array replacement (scan/rescan) forces a full rebind: Rescan re-copies
-            // textures under identical sprite keys, so a per-sprite diff alone would keep stale
-            // Texture2D references alive on visually-identical rows (file header).
-            bool forceRebind = !object.ReferenceEquals(handle.FoodsArraySeen, foods);
-            handle.FoodsArraySeen = foods;
-
-            for (int i = 0; i < count; i++)
+            if (handle == null || handle.FoodGridRoot == null)
             {
-                if (i >= handle.FoodRows.Count)
-                {
-                    handle.FoodRows.Add(this.CreateUguiFeaturesFoodRepairFoodRow(handle, i));
-                }
-                UguiFoodRepairFoodRowHandle row = handle.FoodRows[i];
-                if (row.Root != null && !row.Root.activeSelf)
-                {
-                    row.Root.SetActive(true);
-                }
-
-                string sprite = foods[i] ?? string.Empty;
-                if (forceRebind || !string.Equals(row.BoundSprite, sprite, StringComparison.Ordinal))
-                {
-                    row.BoundSprite = sprite;
-                    // :906-911 â€” display name with the source's exact "Food " prefix strip.
-                    string foodName = this.GetFoodDisplayName(sprite);
-                    if (foodName.StartsWith("Food "))
-                    {
-                        foodName = foodName.Substring(5);
-                    }
-                    this.SetUguiLabelText(row.Label, foodName);
-
-                    Texture2D tex;
-                    if (!this.scannedBagFoodTextures.TryGetValue(sprite, out tex))
-                    {
-                        tex = null;
-                    }
-                    if (row.Icon != null)
-                    {
-                        try { row.Icon.texture = tex; } catch { }
-                    }
-                    SetUguiGoActive(row.IconGo, tex != null); // :926 â€” no texture, no icon
-                }
-
-                // Selection highlight diffs per frame â€” an IMGUI-twin pick moves it too (:912).
-                bool selected = this.autoEatCustomFoodName == sprite;
-                if (selected != row.SelectedShown)
-                {
-                    row.SelectedShown = selected;
-                    SetUguiGoActive(row.Highlight, selected);
-                }
+                return;
             }
 
-            for (int i = count; i < handle.FoodRows.Count; i++)
+            int count = (this.customFoodPickerItems != null) ? this.customFoodPickerItems.Count : 0;
+            List<UguiFoodRepairFoodCell> cells = handle.FoodCells;
+            while (cells.Count < count)
             {
-                UguiFoodRepairFoodRowHandle row = handle.FoodRows[i];
-                if (row.Root != null && row.Root.activeSelf)
-                {
-                    row.Root.SetActive(false);
-                }
+                cells.Add(this.BuildUguiFeaturesFoodRepairFoodCell(handle));
             }
 
-            this.SetUguiScrollContentHeight(handle.FoodListContent, count * 36f); // :900 content chain
+            string selectedKey = this.NormalizeAutoEatFoodLookupKey(this.autoEatCustomFoodName);
+            float stride = handle.FoodCellStride;
+            for (int k = 0; k < count; k++)
+            {
+                UguiFoodRepairFoodCell cell = cells[k];
+                if (cell == null || cell.Root == null)
+                {
+                    continue;
+                }
+
+                cell.BoundIndex = k;
+                if (!cell.Root.activeSelf)
+                {
+                    cell.Root.SetActive(true);
+                }
+
+                int row = k / UguiFoodRepairGridColumns;
+                int col = k % UguiFoodRepairGridColumns;
+                PlaceUguiTopLeft(cell.Root, col * stride + 2f, row * UguiFoodRepairGridCellH + 2f,
+                    stride - 8f, UguiFoodRepairGridCellH - 8f);
+
+                if (this.customFoodPickerItems == null || k >= this.customFoodPickerItems.Count)
+                {
+                    cell.SigIndex = int.MinValue;
+                    continue;
+                }
+
+                TransferItemEntry entry = this.customFoodPickerItems[k];
+                if (entry == null)
+                {
+                    cell.Root.SetActive(false);
+                    cell.SigIndex = int.MinValue;
+                    continue;
+                }
+
+                bool selected = string.Equals(
+                    this.NormalizeAutoEatFoodLookupKey(entry.SpriteName),
+                    selectedKey,
+                    StringComparison.OrdinalIgnoreCase);
+                if (cell.SigIndex == k
+                    && cell.SigNetId == entry.NetId
+                    && cell.SigCount == entry.Count
+                    && cell.SigStar == entry.StarRate
+                    && cell.SigSelected == selected
+                    && string.Equals(cell.SigName, entry.DisplayName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (cell.Bg != null)
+                {
+                    cell.Bg.color = selected ? handle.CellActiveFill : handle.CellNormalFill;
+                }
+                if (cell.Ring != null)
+                {
+                    cell.Ring.color = selected ? handle.RingSelected : handle.RingNormal;
+                }
+
+                Texture2D tex;
+                this.TryGetTransferItemTexture(entry, out tex);
+                Sprite sprite = (tex != null) ? this.GetOrCreateUguiTransferSprite(tex) : null;
+                bool hasIcon = sprite != null;
+                cell.HasIcon = hasIcon;
+                if (cell.Icon != null)
+                {
+                    if (hasIcon)
+                    {
+                        cell.Icon.sprite = sprite;
+                        cell.Icon.color = Color.white;
+                    }
+                    SetUguiGoActive(cell.Icon.gameObject, hasIcon);
+                }
+                SetUguiGoActive(cell.InitialsLabel, !hasIcon);
+                if (!hasIcon)
+                {
+                    this.SetUguiLabelText(cell.InitialsLabel, this.GetAutoSellItemInitials(entry.DisplayName));
+                }
+
+                bool showStack = entry.Count > 0;
+                SetUguiGoActive(cell.StackBadge, showStack);
+                if (showStack)
+                {
+                    this.SetUguiLabelText(cell.StackBadge, "x" + entry.Count);
+                }
+
+                string starLabel = this.GetTransferTileStarLabel(entry);
+                bool showStar = !string.IsNullOrEmpty(starLabel);
+                SetUguiGoActive(cell.StarBadge, showStar);
+                if (showStar)
+                {
+                    this.SetUguiLabelText(cell.StarBadge, starLabel);
+                }
+
+                this.SetUguiLabelText(cell.NameLabel, entry.DisplayName);
+
+                cell.SigIndex = k;
+                cell.SigNetId = entry.NetId;
+                cell.SigCount = entry.Count;
+                cell.SigStar = entry.StarRate;
+                cell.SigSelected = selected;
+                cell.SigName = entry.DisplayName;
+            }
+
+            for (int k = count; k < cells.Count; k++)
+            {
+                UguiFoodRepairFoodCell cell = cells[k];
+                if (cell == null || cell.Root == null || !cell.Root.activeSelf)
+                {
+                    continue;
+                }
+
+                cell.BoundIndex = -1;
+                cell.SigIndex = int.MinValue;
+                cell.Root.SetActive(false);
+            }
+        }
+
+        // 0.5s tick while the picker is visible. A texture that arrives after the first bind
+        // invalidates that cell so the next grid sync paints the icon.
+        private void RetryUguiFeaturesFoodRepairIcons(UguiShellFeaturesFoodRepairHandle handle)
+        {
+            if (handle == null || handle.FoodGridRoot == null || !handle.FoodGridRoot.activeSelf
+                || this.customFoodPickerItems == null)
+            {
+                return;
+            }
+
+            List<UguiFoodRepairFoodCell> cells = handle.FoodCells;
+            int count = this.customFoodPickerItems.Count;
+            for (int k = 0; k < count && k < cells.Count; k++)
+            {
+                UguiFoodRepairFoodCell cell = cells[k];
+                if (cell == null || cell.HasIcon || cell.SigIndex == int.MinValue)
+                {
+                    continue;
+                }
+
+                TransferItemEntry entry = this.customFoodPickerItems[k];
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                Texture2D tex;
+                if (this.TryGetTransferItemTexture(entry, out tex) && tex != null)
+                {
+                    cell.SigIndex = int.MinValue;
+                }
+            }
         }
 
         // ----------------------------------------------------------------------------------------
@@ -1080,45 +1192,31 @@ namespace HeartopiaMod
                 this.SyncUguiSelfLabelText(handle.ThrowZLabel, ref handle.ThrowZShown,
                     this.LF("Throw Z (forward): {0} m", this.autoRepairThrowOffsetZ.ToString("0.0")));
 
-                // Custom Food picker â€” ALL live-game polling stays inside the SAME condition the
-                // source block uses (:864), so IsBagOpen (a GameObject.Find) never runs while
-                // the picker is closed (file header).
+                // Grid sync and the 0.5s icon retry run only while the picker is open.
+                // The game bag is not polled.
                 bool pickerVisible = this.customFoodPickMode
                     && this.autoEatFoodType == this.CustomFoodIndex;
                 if (pickerVisible)
                 {
-                    // :870-886 verbatim, incl. the else-if shape and the retry branch's missing
-                    // "Found {N}" toast (source asymmetry â€” file header).
-                    if (this.IsBagOpen() && this.scannedBagFoods == null)
-                    {
-                        this.scannedBagFoods = this.ScanBagForFoodItems();
-                        if (this.scannedBagFoods.Length > 0)
-                        {
-                            this.AddMenuNotification(
-                                this.LF("Found {0} food item(s) in bag.", this.scannedBagFoods.Length),
-                                new Color(0.45f, 1f, 0.55f));
-                        }
-                    }
-                    else if (this.customFoodScanRetryTime > 0f && Time.time >= this.customFoodScanRetryTime)
-                    {
-                        this.customFoodScanRetryTime = 0f;
-                        if (this.IsBagOpen())
-                        {
-                            this.scannedBagFoods = this.ScanBagForFoodItems();
-                        }
-                    }
-
-                    this.SyncUguiFeaturesFoodRepairFoodRows(handle);
+                    this.SyncUguiFeaturesFoodRepairFoodGrid(handle);
                     this.SyncUguiSelfLabelText(handle.PickerSelectedLabel, ref handle.PickerSelectedShown,
                         this.BuildUguiFeaturesFoodRepairSelectedText());
                 }
 
                 // Conditional-layout signature (picker visibility + list state + selection label).
+                // Relayout runs before the icon retry so FoodGridRoot is active when the retry
+                // checks it (the grid is created inactive and only this pass turns it on).
                 int signature = this.ComputeUguiFeaturesFoodRepairLayoutSignature();
                 if (signature != handle.LayoutSignature)
                 {
                     handle.LayoutSignature = signature;
                     this.RelayoutUguiShellFeaturesFoodRepair(handle);
+                }
+
+                if (pickerVisible && Time.unscaledTime >= handle.NextIconRetryAt)
+                {
+                    handle.NextIconRetryAt = Time.unscaledTime + 0.5f;
+                    this.RetryUguiFeaturesFoodRepairIcons(handle);
                 }
             }
             catch (Exception ex)
@@ -1353,9 +1451,9 @@ namespace HeartopiaMod
         // Gui.cs:838-858 â€” index FIRST, then the custom-option cascade / customFoodPickMode reset,
         // SaveKeybinds LAST, all in source order. The cascade fires EXACTLY on the Custom Food
         // option (CustomFoodIndex, not the last entry since "Normal Food" was appended):
-        // pick mode + OpenInventory() (the REAL game
-        // bag) + the amber scanning toast + scan-state reset + the 0.5s retry arm. Every other
-        // pick only clears pick mode. The :841 autoEatFoodDropdownOpen = false write is
+        // pick mode + BuildCustomFoodPickerItems() (backpack only; the game bag stays closed)
+        // and a green "Found {N}" toast when the list is non-empty. Every other
+        // pick clears pick mode and the picker list. The :841 autoEatFoodDropdownOpen = false write is
         // IMGUI-only visual state, NOT reproduced. The picker's appearance itself is handled by
         // the processor's next signature check.
         private void OnUguiFeaturesFoodRepairFoodTypePicked(int index)
@@ -1368,65 +1466,82 @@ namespace HeartopiaMod
             this.autoEatFoodType = index;
             if (index == this.CustomFoodIndex)
             {
-                this.customFoodPickMode = true;
-                // (The source also reset lastClickedBagFood here. Its only reader,
-                // CheckForBagFoodClick, was unreachable and was deleted 2026-08-07, so the field
-                // and this write went with it.)
-                this.OpenInventory();
-                this.AddMenuNotification(this.L("Custom Food: Scanning your bag..."), new Color(1f, 0.8f, 0.4f));
-                // Clear any previous scan so it will scan when the bag opens (:849-851).
-                this.scannedBagFoods = null;
-                this.customFoodScanRetryTime = Time.time + 0.5f;
+                this.OpenUguiFeaturesFoodRepairCustomFoodPicker(true);
             }
             else
             {
                 this.customFoodPickMode = false;
+                this.customFoodPickerItems = null;
             }
             try { this.SaveKeybinds(false); } catch { }
         }
 
-        // Gui.cs:937-948 â€” verbatim order; the display name is resolved BEFORE the caches clear
-        // (the source resolved it during draw, pre-click â€” same values by construction).
-        private void OnUguiFeaturesFoodRepairFoodRowClicked(UguiFoodRepairFoodRowHandle row)
+        private void OnUguiFeaturesFoodRepairSelectClicked()
         {
-            if (row == null || string.IsNullOrEmpty(row.BoundSprite))
+            bool notify = !this.customFoodPickMode;
+            this.OpenUguiFeaturesFoodRepairCustomFoodPicker(notify);
+        }
+
+        private void OpenUguiFeaturesFoodRepairCustomFoodPicker(bool notifyFound)
+        {
+            this.customFoodPickMode = true;
+            this.customFoodPickerItems = this.BuildCustomFoodPickerItems();
+            if (notifyFound && this.customFoodPickerItems != null && this.customFoodPickerItems.Count > 0)
+            {
+                this.AddMenuNotification(
+                    this.LF("Found {0} food item(s) in bag.", this.customFoodPickerItems.Count),
+                    new Color(0.45f, 1f, 0.55f));
+            }
+        }
+
+        private void OnUguiFeaturesFoodRepairFoodCellClicked(UguiFoodRepairFoodCell cell)
+        {
+            if (cell == null)
             {
                 return;
             }
-            string foodSprite = row.BoundSprite;
-            string foodName = this.GetFoodDisplayName(foodSprite);
-            if (foodName.StartsWith("Food "))
+
+            int index = cell.BoundIndex;
+            if (this.customFoodPickerItems == null || index < 0 || index >= this.customFoodPickerItems.Count)
             {
-                foodName = foodName.Substring(5);
+                return;
             }
 
-            this.autoEatCustomFoodName = foodSprite;
+            TransferItemEntry entry = this.customFoodPickerItems[index];
+            if (entry == null)
+            {
+                return;
+            }
+
+            string saved = string.IsNullOrWhiteSpace(entry.SpriteName) ? entry.MatchKey : entry.SpriteName;
+            if (string.IsNullOrWhiteSpace(saved))
+            {
+                return;
+            }
+
+            this.autoEatCustomFoodName = saved;
+            string cacheKey = this.NormalizeAutoSellMatchKey(saved);
+            if (!string.IsNullOrWhiteSpace(cacheKey) && !string.IsNullOrWhiteSpace(entry.DisplayName))
+            {
+                this.scannedBagFoodDisplayNames[cacheKey] = entry.DisplayName;
+            }
+
             try { this.SaveKeybinds(false); } catch { }
+            string foodName = string.IsNullOrWhiteSpace(entry.DisplayName)
+                ? this.GetFoodDisplayName(saved)
+                : entry.DisplayName;
             this.AddMenuNotification(this.LF("Custom food set to: {0}", foodName), new Color(0.45f, 1f, 0.55f));
             this.customFoodPickMode = false;
-            this.scannedBagFoods = null;
-            this.scannedBagFoodTextures.Clear();
-            this.scannedBagFoodDisplayNames.Clear();
-            this.customFoodScanRetryTime = 0f;
-            if (this.IsBagOpen())
-            {
-                this.CloseInventory();
-            }
+            this.customFoodPickerItems = null;
         }
 
-        // Gui.cs:983-989 â€” clears the scan state and re-arms a 0.25s retry. Does NOT touch
-        // customFoodPickMode and does NOT close the bag (unlike Done/Cancel).
+        // Replaces the picker list. Does not change pick mode or the saved dish, and shows no toast.
         private void OnUguiFeaturesFoodRepairRescanClicked()
         {
-            this.scannedBagFoods = null;
-            this.scannedBagFoodTextures.Clear();
-            this.scannedBagFoodDisplayNames.Clear();
-            this.customFoodScanRetryTime = Time.time + 0.25f;
+            this.customFoodPickerItems = this.BuildCustomFoodPickerItems();
         }
 
-        // Gui.cs:991-999 (Done) and :1001-1009 (Cancel) have LINE-FOR-LINE IDENTICAL bodies â€”
-        // verified against the source; they differ only in button style. One shared close
-        // routine keeps that fact explicit.
+        // Done and Cancel both close the picker. They differ only in button style.
         private void OnUguiFeaturesFoodRepairDoneClicked()
         {
             this.CloseUguiFeaturesFoodRepairCustomFoodPicker();
@@ -1440,14 +1555,7 @@ namespace HeartopiaMod
         private void CloseUguiFeaturesFoodRepairCustomFoodPicker()
         {
             this.customFoodPickMode = false;
-            this.scannedBagFoods = null;
-            this.scannedBagFoodTextures.Clear();
-            this.scannedBagFoodDisplayNames.Clear();
-            this.customFoodScanRetryTime = 0f;
-            if (this.IsBagOpen())
-            {
-                this.CloseInventory();
-            }
+            this.customFoodPickerItems = null;
         }
     }
 }

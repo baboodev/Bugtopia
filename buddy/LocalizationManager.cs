@@ -955,7 +955,9 @@ namespace HeartopiaMod
             { "Match Item", "Match Item" },
             { "Select Food:", "Select Food:" },
             { "No food items found. Open your bag and try again.", "No food items found. Open your bag and try again." },
+            { "No edible food in the backpack.", "No edible food in the backpack." },
             { "Open your bag to scan for food items...", "Open your bag to scan for food items..." },
+            { "Select", "Select" },
             { "Rescan", "Rescan" },
             // ---- Music tab (MusicPlayerFeature.cs / HeartopiaComplete.UguiMusicContent.cs) ----
             { "Music", "Music" },
@@ -2311,7 +2313,9 @@ namespace HeartopiaMod
             { "Match Item", "Objeto a buscar" },
             { "Select Food:", "Elegir comida:" },
             { "No food items found. Open your bag and try again.", "No se encontró comida. Abre tu bolsa e inténtalo de nuevo." },
+            { "No edible food in the backpack.", "No hay comida comestible en la mochila." },
             { "Open your bag to scan for food items...", "Abre tu bolsa para buscar comida..." },
+            { "Select", "Seleccionar" },
             { "Rescan", "Reescanear" },
             // ---- Music tab (MusicPlayerFeature.cs / HeartopiaComplete.UguiMusicContent.cs) ----
             { "Music", "Música" },
@@ -3667,7 +3671,9 @@ namespace HeartopiaMod
             { "Match Item", "匹配物品" },
             { "Select Food:", "选择食物：" },
             { "No food items found. Open your bag and try again.", "未找到食物。请打开背包后重试。" },
+            { "No edible food in the backpack.", "背包中没有可食用的食物。" },
             { "Open your bag to scan for food items...", "打开背包以扫描食物…" },
+            { "Select", "选择" },
             { "Rescan", "重新扫描" },
             // ---- Music tab (MusicPlayerFeature.cs / HeartopiaComplete.UguiMusicContent.cs) ----
             { "Music", "音乐" },
@@ -5014,7 +5020,9 @@ namespace HeartopiaMod
             { "Match Item", "Item a buscar" },
             { "Select Food:", "Selecionar comida:" },
             { "No food items found. Open your bag and try again.", "Nenhuma comida encontrada. Abra sua bolsa e tente novamente." },
+            { "No edible food in the backpack.", "Nenhuma comida comestível na mochila." },
             { "Open your bag to scan for food items...", "Abra sua bolsa para procurar comida..." },
+            { "Select", "Selecionar" },
             { "Rescan", "Reescanear" },
             // ---- Music tab (MusicPlayerFeature.cs / HeartopiaComplete.UguiMusicContent.cs) ----
             { "Music", "Música" },
@@ -6361,7 +6369,9 @@ namespace HeartopiaMod
             { "Match Item", "ไอเทมที่จับคู่" },
             { "Select Food:", "เลือกอาหาร:" },
             { "No food items found. Open your bag and try again.", "ไม่พบอาหาร เปิดกระเป๋าแล้วลองอีกครั้ง" },
+            { "No edible food in the backpack.", "ไม่มีอาหารที่กินได้ในกระเป๋า" },
             { "Open your bag to scan for food items...", "เปิดกระเป๋าเพื่อสแกนหาอาหาร..." },
+            { "Select", "เลือก" },
             { "Rescan", "สแกนใหม่" },
             // ---- Music tab (MusicPlayerFeature.cs / HeartopiaComplete.UguiMusicContent.cs) ----
             { "Music", "เพลง" },
@@ -7721,7 +7731,9 @@ namespace HeartopiaMod
             { "Match Item", "아이템 일치" },
             { "Select Food:", "음식 선택:" },
             { "No food items found. Open your bag and try again.", "음식을 찾지 못했습니다. 가방을 열고 다시 시도하세요." },
+            { "No edible food in the backpack.", "가방에 먹을 수 있는 음식이 없습니다." },
             { "Open your bag to scan for food items...", "가방을 열면 음식을 검사합니다..." },
+            { "Select", "선택" },
             { "Rescan", "다시 검사" },
             // ---- Music tab (MusicPlayerFeature.cs / HeartopiaComplete.UguiMusicContent.cs) ----
             { "Music", "음악" },

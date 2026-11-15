@@ -4233,228 +4233,59 @@ namespace HeartopiaMod
             return text;
         }
 
-        private string[] ScanBagForFoodItems()
+        // Backpack only (storage type 1). One tile per lookup key; counts are summed.
+        // The saved key is SpriteName, which GetAutoEatFoodKey normalizes into the
+        // substring DirectBackpackFoodDescriptorMatches searches for.
+        private List<TransferItemEntry> BuildCustomFoodPickerItems()
         {
-            var foodList = new System.Collections.Generic.List<string>();
-            HashSet<string> seenItems = new HashSet<string>();
-            this.scannedBagFoodDisplayNames.Clear();
+            List<TransferItemEntry> raw = new List<TransferItemEntry>();
+            int inspected = 0;
+            this.CollectTransferItemEntriesMono(raw, ref inspected, 1);
 
-            // Known food keywords to filter items
-            string[] foodKeywords = new[] { "food", "bread", "jam", "mushroom", "salad", "soup", "stew", "pie", "cake", "fish", "meat", "fruit", "vegetable", "berry", "apple", "cheese", "egg", "milk", "honey", "candy", "snack", "meal", "dish" };
-
-            foreach (Image img in GetBagPanelImages())
+            var grouped = new Dictionary<string, TransferItemEntry>(StringComparer.OrdinalIgnoreCase);
+            var order = new List<string>();
+            for (int i = 0; i < raw.Count; i++)
             {
-                if (img != null && img.sprite != null && img.gameObject.activeInHierarchy)
+                TransferItemEntry entry = raw[i];
+                if (entry == null || entry.NetId == 0U)
                 {
-                    string spriteName = img.sprite.name.ToLowerInvariant();
-                    bool isFood = false;
-                    string itemName = "";
-
-                    // Check if it's an item sprite (ui_item_normal_p_*)
-                    if (spriteName.StartsWith("ui_item_normal_p_"))
-                    {
-                        itemName = spriteName.Replace("ui_item_normal_p_", "");
-                        // Check if it contains any food keyword
-                        foreach (string keyword in foodKeywords)
-                        {
-                            if (itemName.Contains(keyword))
-                            {
-                                isFood = true;
-                                break;
-                            }
-                        }
-                        // Also check if it contains "food_", "gather_", or "fruit_" patterns
-                        if (!isFood && (itemName.Contains("food_") || itemName.Contains("gather_") || itemName.Contains("fruit_")))
-                            isFood = true;
-                    }
-                    // Also include gather_ and fruit_ items that don't have ui_item_normal_p_ prefix
-                    if (!isFood && (spriteName.Contains("gather_") || spriteName.Contains("fruit_")))
-                    {
-                        isFood = true;
-                    }
-
-                    if (isFood && !seenItems.Contains(spriteName))
-                    {
-                        seenItems.Add(spriteName);
-                        if (!this.IsEdibleBagFoodSprite(spriteName))
-                        {
-                            FeatureLog.Once("AutoEat", "picker-skip:" + spriteName, "Custom Food picker skipped " + spriteName + " - it is not an edible item.");
-                            continue;
-                        }
-
-                        foodList.Add(spriteName);
-                        this.CacheScannedBagFoodDisplayName(spriteName);
-                        if (!this.scannedBagFoodTextures.ContainsKey(spriteName)
-                            && this.autoSellBagItemTextures.TryGetValue(spriteName, out Texture2D directFoodTexture)
-                            && directFoodTexture != null)
-                        {
-                            this.scannedBagFoodTextures[spriteName] = directFoodTexture;
-                            continue;
-                        }
-                        // Copy the sprite texture for UI display (copy to survive bag scrolling)
-                        // Use RenderTexture approach since game textures are non-readable
-                        if (img.sprite.texture != null)
-                        {
-                            Texture2D original = img.sprite.texture;
-                            try
-                            {
-                                // Create a temporary RenderTexture to copy the non-readable texture
-                                RenderTexture rt = RenderTexture.GetTemporary(original.width, original.height, 0, RenderTextureFormat.ARGB32);
-                                Graphics.Blit(original, rt);
-                                
-                                // Create new readable texture and read from RenderTexture
-                                Texture2D copy = new Texture2D(original.width, original.height, TextureFormat.RGBA32, false);
-                                RenderTexture previousRT = RenderTexture.active;
-                                RenderTexture.active = rt;
-                                copy.ReadPixels(new Rect(0, 0, original.width, original.height), 0, 0);
-                                copy.Apply();
-                                RenderTexture.active = previousRT;
-                                RenderTexture.ReleaseTemporary(rt);
-                                
-                                this.scannedBagFoodTextures[spriteName] = copy;
-                            }
-                            catch (Exception texEx)
-                            {
-                                ModLogger.Msg($"[BagScan] Failed to copy texture for {spriteName}: {texEx.Message}");
-                            }
-                        }
-                    }
-                }
-            }
-
-            return foodList.ToArray();
-        }
-
-        private void CacheScannedBagFoodDisplayName(string spriteName)
-        {
-            string normalizedSprite = this.NormalizeAutoSellMatchKey(spriteName);
-            if (string.IsNullOrWhiteSpace(normalizedSprite) || this.scannedBagFoodDisplayNames.ContainsKey(normalizedSprite))
-            {
-                return;
-            }
-
-            string resolvedName = this.TryResolveScannedBagFoodDisplayName(spriteName, normalizedSprite, out string displayName)
-                ? displayName
-                : this.GetFoodDisplayName(spriteName);
-
-            if (!string.IsNullOrWhiteSpace(resolvedName))
-            {
-                this.scannedBagFoodDisplayNames[normalizedSprite] = resolvedName;
-            }
-        }
-
-        // The Custom Food picker offers whatever the open bag shows whose SPRITE NAME reads like
-        // food — and a decoration's sprite reads exactly like food:
-        // `ui_item_normal_p_food_bakemushroom_award` (staticId 302311, entityType 50 decoration)
-        // even matches the "Bake Mushroom" keyword. Picking one is a dead end now that Auto Eat
-        // validates its candidates — the eat lookup skips it and reports "no usable food" — so the
-        // list resolves each sprite back to a real bag item and applies the same test.
-        //
-        // Both sources carry StaticId + EntityType; a sprite that resolves to neither is left in
-        // the list, exactly as before this filter existed.
-        private bool IsEdibleBagFoodSprite(string spriteName)
-        {
-            string normalizedSprite = this.NormalizeAutoSellMatchKey(spriteName);
-            if (string.IsNullOrWhiteSpace(normalizedSprite))
-            {
-                return true;
-            }
-
-            try
-            {
-                if (this.TryRefreshDirectBackpackRuntimeSnapshot(false))
-                {
-                    for (int i = 0; i < this.directBackpackRuntimeItems.Count; i++)
-                    {
-                        DirectBackpackRuntimeItem item = this.directBackpackRuntimeItems[i];
-                        if (item == null || !this.DoesRuntimeBackpackItemMatchSprite(item, normalizedSprite))
-                        {
-                            continue;
-                        }
-
-                        return this.IsAutoEatFoodCandidate(0U, item.StaticId, item.EntityType, out _);
-                    }
+                    continue;
                 }
 
-                if (this.autoSellBagItems != null)
+                if (!this.IsAutoEatFoodCandidate(entry.NetId, entry.StaticId, entry.EntityType, out _))
                 {
-                    for (int i = 0; i < this.autoSellBagItems.Count; i++)
-                    {
-                        AutoSellBagItemEntry entry = this.autoSellBagItems[i];
-                        if (entry == null || !this.DoesBagItemEntryMatchSprite(entry, normalizedSprite))
-                        {
-                            continue;
-                        }
-
-                        return this.IsAutoEatFoodCandidate(0U, entry.StaticId, entry.EntityType, out _);
-                    }
+                    continue;
                 }
-            }
-            catch
-            {
-            }
 
-            return true;
-        }
-
-        private bool TryResolveScannedBagFoodDisplayName(string spriteName, string normalizedSprite, out string displayName)
-        {
-            displayName = string.Empty;
-
-            if (this.autoSellBagItems != null)
-            {
-                for (int i = 0; i < this.autoSellBagItems.Count; i++)
+                string savedKey = string.IsNullOrWhiteSpace(entry.SpriteName) ? entry.MatchKey : entry.SpriteName;
+                string groupKey = this.NormalizeAutoEatFoodLookupKey(savedKey);
+                if (string.IsNullOrEmpty(groupKey))
                 {
-                    AutoSellBagItemEntry entry = this.autoSellBagItems[i];
-                    if (entry == null)
-                    {
-                        continue;
-                    }
-
-                    if (!this.DoesBagItemEntryMatchSprite(entry, normalizedSprite))
-                    {
-                        continue;
-                    }
-
-                    if (this.TryGetResolvedFoodNameFromStaticId(entry.StaticId, out displayName))
-                    {
-                        return true;
-                    }
-
-                    string entryName = this.CleanResolvedBagFoodName(entry.DisplayName);
-                    if (!string.IsNullOrWhiteSpace(entryName))
-                    {
-                        displayName = entryName;
-                        return true;
-                    }
+                    continue;
                 }
-            }
 
-            if (this.TryRefreshDirectBackpackRuntimeSnapshot(false))
-            {
-                for (int i = 0; i < this.directBackpackRuntimeItems.Count; i++)
+                entry.SpriteName = savedKey;
+                if (!grouped.TryGetValue(groupKey, out TransferItemEntry kept))
                 {
-                    DirectBackpackRuntimeItem item = this.directBackpackRuntimeItems[i];
-                    if (item == null || !this.DoesRuntimeBackpackItemMatchSprite(item, normalizedSprite))
-                    {
-                        continue;
-                    }
-
-                    if (this.TryGetResolvedFoodNameFromStaticId(item.StaticId, out displayName))
-                    {
-                        return true;
-                    }
-
-                    string descriptorName = this.CleanResolvedBagFoodName(item.Descriptor);
-                    if (!string.IsNullOrWhiteSpace(descriptorName))
-                    {
-                        displayName = descriptorName;
-                        return true;
-                    }
+                    grouped[groupKey] = entry;
+                    order.Add(groupKey);
+                    continue;
                 }
+
+                kept.Count += Math.Max(1, entry.Count);
             }
 
-            return false;
+            var result = new List<TransferItemEntry>(order.Count);
+            for (int i = 0; i < order.Count; i++)
+            {
+                result.Add(grouped[order[i]]);
+            }
+
+            result.Sort((a, b) => string.Compare(
+                a.DisplayName ?? string.Empty,
+                b.DisplayName ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase));
+            return result;
         }
 
         private bool TryGetResolvedFoodNameFromStaticId(int staticId, out string displayName)
@@ -4670,14 +4501,90 @@ namespace HeartopiaMod
                 return cachedName;
             }
 
-            // Extract item name from sprite name
+            if (!string.IsNullOrWhiteSpace(normalizedSprite)
+                && this.TryResolveFoodDisplayNameFromSprite(normalizedSprite, out string resolved))
+            {
+                this.scannedBagFoodDisplayNames[normalizedSprite] = resolved;
+                return resolved;
+            }
+
+            return this.PrettifyFoodSpriteName(spriteName);
+        }
+
+        // The saved custom-food key is a sprite name. The icon index and a warm backpack
+        // snapshot both know its static id, and that id is what GetBackPackName localizes.
+        // A miss waits 2s so the per-frame dropdown label does not resolve every tick.
+        private bool TryResolveFoodDisplayNameFromSprite(string normalizedSprite, out string displayName)
+        {
+            displayName = null;
+            float now = Time.unscaledTime;
+            if (this.customFoodNameResolveRetryAt.TryGetValue(normalizedSprite, out float retryAt) && now < retryAt)
+            {
+                return false;
+            }
+
+            int staticId = this.FindFoodStaticIdForSprite(normalizedSprite);
+            if (staticId > 0
+                && this.TryGetResolvedFoodNameFromStaticId(staticId, out string tableName)
+                && !this.IsPoorBagItemDisplayName(tableName, staticId))
+            {
+                this.customFoodNameResolveRetryAt.Remove(normalizedSprite);
+                displayName = tableName;
+                return true;
+            }
+
+            this.customFoodNameResolveRetryAt[normalizedSprite] = now + 2f;
+            return false;
+        }
+
+        private int FindFoodStaticIdForSprite(string normalizedSprite)
+        {
+            int indexed = this.radarStaticIdToIconKey.Count;
+            if (this.foodSpriteToStaticId == null || this.foodSpriteToStaticIdCount != indexed)
+            {
+                var map = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (KeyValuePair<int, string> pair in this.radarStaticIdToIconKey)
+                {
+                    string key = this.NormalizeAutoSellMatchKey(pair.Value);
+                    if (string.IsNullOrEmpty(key) || map.ContainsKey(key))
+                    {
+                        continue;
+                    }
+
+                    map[key] = pair.Key;
+                }
+
+                this.foodSpriteToStaticId = map;
+                this.foodSpriteToStaticIdCount = indexed;
+            }
+
+            if (this.foodSpriteToStaticId.TryGetValue(normalizedSprite, out int staticId) && staticId > 0)
+            {
+                return staticId;
+            }
+
+            for (int i = 0; i < this.directBackpackRuntimeItems.Count; i++)
+            {
+                DirectBackpackRuntimeItem item = this.directBackpackRuntimeItems[i];
+                if (item == null || item.StaticId <= 0 || !this.DoesRuntimeBackpackItemMatchSprite(item, normalizedSprite))
+                {
+                    continue;
+                }
+
+                return item.StaticId;
+            }
+
+            return 0;
+        }
+
+        private string PrettifyFoodSpriteName(string spriteName)
+        {
             string itemName = spriteName
                 .Replace("ui_item_normal_p_", "")
                 .Replace("gather_", "")
                 .Replace("fruit_", "")
                 .Replace("_", " ");
 
-            // Capitalize first letter of each word
             var words = itemName.Split(' ');
             for (int i = 0; i < words.Length; i++)
             {

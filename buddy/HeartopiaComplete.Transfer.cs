@@ -799,6 +799,11 @@ namespace HeartopiaMod
 
         private void CollectTransferItemEntriesMono(List<TransferItemEntry> items, ref int inspected)
         {
+            this.CollectTransferItemEntriesMono(items, ref inspected, this.GetTransferScanStorageType());
+        }
+
+        private void CollectTransferItemEntriesMono(List<TransferItemEntry> items, ref int inspected, int storageTypeValue)
+        {
             try
             {
                 if (!this.TryResolveAuraMonoModule("XDTGameSystem.GameplaySystem.BackPack.BackPackSystem", out IntPtr backPackSystemObj) || backPackSystemObj == IntPtr.Zero)
@@ -819,7 +824,6 @@ namespace HeartopiaMod
                     return;
                 }
 
-                int storageTypeValue = this.GetTransferScanStorageType();
                 bool fromBackpack = storageTypeValue == 1;
                 IntPtr exc = IntPtr.Zero;
                 IntPtr itemListObj;

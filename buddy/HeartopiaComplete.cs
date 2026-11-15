@@ -274,11 +274,11 @@ namespace HeartopiaMod
         private int NormalFoodIndex => this.autoEatFoodOptions.Length - 1;
         private string autoEatCustomFoodName = "";
         private bool customFoodPickMode = false;
-        private string[] scannedBagFoods = null;
-        private Dictionary<string, Texture2D> scannedBagFoodTextures = new Dictionary<string, Texture2D>(); // Cached food textures (copied to survive bag scrolling)
+        private List<TransferItemEntry> customFoodPickerItems = null;
         private readonly Dictionary<string, string> scannedBagFoodDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        private Vector2 customFoodScrollPos = Vector2.zero;
-        private float customFoodScanRetryTime = 0f;
+        private readonly Dictionary<string, float> customFoodNameResolveRetryAt = new Dictionary<string, float>(StringComparer.Ordinal);
+        private Dictionary<string, int> foodSpriteToStaticId;
+        private int foodSpriteToStaticIdCount = -1;
 
 
         private List<AutoSellBagItemEntry> autoSellBagItems = null;
