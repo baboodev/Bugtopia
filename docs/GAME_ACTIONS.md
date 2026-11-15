@@ -147,6 +147,11 @@ detail and the method are in the sweep report; the operational summary:
 
 * **144 safe** — accepted, character unmoved, walking immediately afterwards. This set is the
   catalogue behind the mod's Action Panel (`buddy/ActionPanelFeature.cs`).
+* **Puzzle join pose** — `ActionId.JigsawPuzzleMotion` (483), context
+  `PlayerJigsawPuzzleMotionArg`, clip controller `ac_player_stand_empty_jigsaw`. This is the
+  default motion of `PlayerStateJigsawPuzzle` when the player enters a board. The Action Panel row
+  **Puzzle Pose** casts it; `jigsawPuzzleNetId` is filled with the nearest
+  `JigsawPuzzleComponent` (≤30 m) so the Upward/Forward/Downward lean bools can fire.
 * **26 drop the character under the map** — the §2 failure. Recoverable with a warp back.
 * **16 hold the body ~12 s** and release on their own. Not broken; that is the animation.
 * **3 wedge locomotion permanently** — relog only:

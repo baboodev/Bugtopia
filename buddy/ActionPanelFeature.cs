@@ -163,6 +163,11 @@ namespace HeartopiaMod
             new ActionPanelRow(456, "NPC Greets", "NpcCanvassNewYearStart", "XDTLevelAndEntity.Gameplay.Action.NpcCanvassNewYearStartArg", "actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
             new ActionPanelRow(463, "Drop Prop", "EquipOffDoubleSocialItemEntityAction", "XDTLevelAndEntity.Gameplay.Action.EquipOffDoubleSocialItemEntityActionArg", "initiatorPlayer:BaseActorComponent|responsePlayer:BaseActorComponent|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
             new ActionPanelRow(464, "Bird Whistle", "PlayerBirdWhistleAction", "XDTLevelAndEntity.Gameplay.Action.PlayerBirdWhistleArg", "actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool"),
+            // Puzzle poses (no board). Cast starts ac_player_stand_empty_jigsaw; lean= forces the
+            // visible clip because without a board OnMotionTick never sets Upward/Forward/Downward.
+            // 0 = DownwardJigsaw (floor / seated lean), 1 = ForwardJigsaw (standing lean).
+            new ActionPanelRow(483, "Puzzle Stand", "JigsawPuzzleMotion", "XDTLevelAndEntity.Gameplay.Locomotion.PlayerJigsawPuzzleMotionArg", "jigsawPuzzleNetId:uint|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", null, 0, "lean=1"),
+            new ActionPanelRow(483, "Puzzle Sit", "JigsawPuzzleMotion", "XDTLevelAndEntity.Gameplay.Locomotion.PlayerJigsawPuzzleMotionArg", "jigsawPuzzleNetId:uint|actor:ActorActionGraph|playPosition:LowAccuracyVec3|quickCast:bool", null, 0, "lean=0"),
         };
 
         private bool actionPanelVisible;
@@ -277,6 +282,11 @@ namespace HeartopiaMod
                     {
                         this.SetActionPanelInt(argObj, argClass, name, ActionPanelSocialType);
                     }
+                    else if (string.Equals(name, "jigsawPuzzleNetId", StringComparison.Ordinal))
+                    {
+                        // Filled below once lean= is known — remotes derive Forward/Downward from
+                        // this entity's height in PlayerJigsawPuzzleMotion.OnMotionTick.
+                    }
                     else if (string.Equals(name, "controllerFullName", StringComparison.Ordinal)
                              && !string.IsNullOrEmpty(row.ControllerShortName))
                     {
@@ -296,7 +306,8 @@ namespace HeartopiaMod
                 }
 
                 // Row-specific fixed values, applied last so they always win over the generic
-                // filler above.
+                // filler above. lean= is not an ActionContext field — handled after Cast.
+                int puzzleLean = -1;
                 string[] constants = (row.Constants ?? string.Empty).Split('|');
                 for (int i = 0; i < constants.Length; i++)
                 {
@@ -306,12 +317,55 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    if (int.TryParse(constants[i].Substring(eq + 1), NumberStyles.Integer,
-                                     CultureInfo.InvariantCulture, out int constantValue))
+                    string cName = constants[i].Substring(0, eq);
+                    if (!int.TryParse(constants[i].Substring(eq + 1), NumberStyles.Integer,
+                                      CultureInfo.InvariantCulture, out int constantValue))
                     {
-                        this.SetActionPanelInt(argObj, argClass, constants[i].Substring(0, eq),
-                                               constantValue);
+                        continue;
                     }
+
+                    if (string.Equals(cName, "lean", StringComparison.Ordinal))
+                    {
+                        puzzleLean = constantValue;
+                        continue;
+                    }
+
+                    this.SetActionPanelInt(argObj, argClass, cName, constantValue);
+                }
+
+                // Puzzle motion is an ActorMotionClip: AbilityCaster.Cast does NOT drive MotionGraph
+                // and remotes only learn about it via SetMotion → FsmStatus.MotionData.
+                // WriteBytes carries only jigsawPuzzleNetId — remotes set Forward/Downward/Upward
+                // from (player.y - entity.y). netId=0 → hide handhold only, no lean clip (what
+                // watchers were seeing). Pick an anchor whose height yields the requested lean.
+                if (puzzleLean >= 0)
+                {
+                    uint leanAnchor = 0U;
+                    string anchorKind = "none";
+                    if (this.TryResolveActionPanelPuzzleLeanAnchor(players[0], puzzleLean, selfPos,
+                            havePos, out leanAnchor, out anchorKind)
+                        && leanAnchor != 0U)
+                    {
+                        this.SetActionPanelUInt(argObj, argClass, "jigsawPuzzleNetId", leanAnchor);
+                    }
+
+                    if (havePos)
+                    {
+                        this.SetActionPanelPlayPosition(argObj, argClass, selfPos);
+                    }
+
+                    if (!this.TryActionPanelSetMotion(players[0], argObj, out string motionStatus))
+                    {
+                        status = motionStatus;
+                        return false;
+                    }
+
+                    // Local: ForceLean wins immediately (OnMotionTick only sets bools once when the
+                    // anchor entity resolves). Remotes rely on the anchor height in MotionData.
+                    this.ForceActionPanelPuzzleLean(players[0], puzzleLean);
+                    status = "SetMotion ok lean=" + puzzleLean
+                        + " anchor=" + leanAnchor + " (" + anchorKind + ")";
+                    return true;
                 }
 
                 IntPtr* args = stackalloc IntPtr[1];
@@ -325,6 +379,7 @@ namespace HeartopiaMod
                 }
 
                 int code = result == IntPtr.Zero ? 0 : this.ReadAuraMonoBoxedInt32(result);
+
                 // The controller id goes in the line too: a swing that is ACCEPTED and renders
                 // nothing is almost always this number pointing at the wrong clip family, and
                 // without it that costs a live debugging session to find (it already did once).
@@ -427,6 +482,19 @@ namespace HeartopiaMod
                     return false;
                 }
 
+                // Puzzle (and any other ActorMotionClip) lives on MotionPart, not AbilityCaster —
+                // EndCasting does not touch it. SetMotion(Free) ends the clip, writes Free into
+                // FsmStatus.MotionData (FreeMotionClip is an ActorMotionClip), and remotes drop
+                // the jigsaw pose. Local lean bools / controller are cleaned after.
+                if (!this.TryActionPanelRestoreFreeMotion(players[0], pins, out string freeStatus))
+                {
+                    status = "EndCasting ok; Free motion failed: " + freeStatus;
+                    this.ClearActionPanelPuzzlePose(players[0]);
+                    return false;
+                }
+
+                this.ClearActionPanelPuzzlePose(players[0]);
+
                 status = "ok";
                 return true;
             }
@@ -434,6 +502,125 @@ namespace HeartopiaMod
             {
                 FreeAuraMonoPins(pins);
             }
+        }
+
+        // CharacterPart.Body = 0. SetMotion → MotionPart.SetContext → OnActionStart →
+        // PlayerSyncStatus.SendAction → FsmStatus.MotionData for ActorMotionClip args.
+        private const int ActionPanelCharacterPartBody = 0;
+
+        private unsafe bool TryActionPanelSetMotion(IntPtr player, IntPtr argObj, out string status)
+        {
+            status = "unavailable";
+            if (player == IntPtr.Zero || argObj == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            IntPtr playerClass = this.FindAuraMonoClassInAllLoadedImages(
+                "LocalPlayerComponent", "XDTLevelAndEntity.Gameplay.Component.Player");
+            IntPtr setMotion = playerClass == IntPtr.Zero
+                ? IntPtr.Zero
+                : this.FindAuraMonoMethodOnHierarchy(playerClass, "SetMotion", 2);
+            if (setMotion == IntPtr.Zero)
+            {
+                status = "SetMotion(2) unresolved";
+                return false;
+            }
+
+            int part = ActionPanelCharacterPartBody;
+            IntPtr* args = stackalloc IntPtr[2];
+            args[0] = (IntPtr)(&part);
+            args[1] = argObj;
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(setMotion, player, (IntPtr)args, ref exc);
+            if (exc != IntPtr.Zero)
+            {
+                status = "SetMotion threw 0x" + exc.ToInt64().ToString("X");
+                return false;
+            }
+
+            status = "ok";
+            return true;
+        }
+
+        // LowAccuracyVec3 is three packed millimetre ints, not a Vector3 — writing floats corrupts
+        // the sync payload and remotes reconstruct the pose at the wrong place.
+        private unsafe void SetActionPanelPlayPosition(IntPtr argObj, IntPtr argClass, Vector3 pos)
+        {
+            if (argObj == IntPtr.Zero || argClass == IntPtr.Zero || auraMonoClassGetFieldFromName == null
+                || auraMonoFieldSetValue == null)
+            {
+                return;
+            }
+
+            IntPtr field = auraMonoClassGetFieldFromName(argClass, "playPosition");
+            if (field == IntPtr.Zero)
+            {
+                // playPosition is declared on ActionContext; walk one parent if the concrete
+                // arg class does not redeclare it.
+                IntPtr parent = auraMonoClassGetParent != null
+                    ? auraMonoClassGetParent(argClass)
+                    : IntPtr.Zero;
+                if (parent != IntPtr.Zero)
+                {
+                    field = auraMonoClassGetFieldFromName(parent, "playPosition");
+                }
+            }
+
+            if (field == IntPtr.Zero)
+            {
+                return;
+            }
+
+            int* lav = stackalloc int[3];
+            lav[0] = (int)(pos.x * 1000f);
+            lav[1] = (int)(pos.y * 1000f);
+            lav[2] = (int)(pos.z * 1000f);
+            auraMonoFieldSetValue(argObj, field, (IntPtr)lav);
+        }
+
+        private unsafe bool TryActionPanelRestoreFreeMotion(IntPtr player,
+            System.Collections.Generic.List<uint> pins, out string status)
+        {
+            status = "unavailable";
+            if (auraMonoObjectNew == null)
+            {
+                return false;
+            }
+
+            IntPtr freeClass = this.FindAuraMonoClassByFullName(
+                "XDTLevelAndEntity.Gameplay.Component.Player.PlayerFreeMotionArg");
+            if (freeClass == IntPtr.Zero)
+            {
+                freeClass = this.FindAuraMonoClassInAllLoadedImages(
+                    "PlayerFreeMotionArg", "XDTLevelAndEntity.Gameplay.Component.Player");
+            }
+
+            if (freeClass == IntPtr.Zero)
+            {
+                status = "PlayerFreeMotionArg unresolved";
+                return false;
+            }
+
+            IntPtr freeObj = auraMonoObjectNew(this.auraMonoRootDomain, freeClass);
+            if (freeObj == IntPtr.Zero)
+            {
+                status = "PlayerFreeMotionArg alloc failed";
+                return false;
+            }
+
+            uint pin = AuraMonoPinNew(freeObj);
+            if (pin != 0u)
+            {
+                pins.Add(pin);
+            }
+
+            if (this.TryGetAuraMonoEntityPositionFromComponent(player, out Vector3 selfPos))
+            {
+                this.SetActionPanelPlayPosition(freeObj, freeClass, selfPos);
+            }
+
+            return this.TryActionPanelSetMotion(player, freeObj, out status);
         }
 
         private static bool IsActionPanelPositionField(string name)
@@ -496,12 +683,572 @@ namespace HeartopiaMod
             }
         }
 
+        private unsafe void SetActionPanelUInt(IntPtr obj, IntPtr klass, string fieldName, uint value)
+        {
+            IntPtr field = auraMonoClassGetFieldFromName(klass, fieldName);
+            if (field != IntPtr.Zero)
+            {
+                auraMonoFieldSetValue(obj, field, (IntPtr)(&value));
+            }
+        }
+
         private unsafe void SetActionPanelVector3(IntPtr obj, IntPtr klass, string fieldName, Vector3 value)
         {
             IntPtr field = auraMonoClassGetFieldFromName(klass, fieldName);
             if (field != IntPtr.Zero)
             {
                 auraMonoFieldSetValue(obj, field, (IntPtr)(&value));
+            }
+        }
+
+        // After Cast(JigsawPuzzleMotion) with netId=0 the controller loads but lean bools stay false
+        // (OnMotionTick only sets them when a board entity exists). Force Forward (1) or Downward (0).
+        private const uint ActionPanelJigsawController = 33592442u; // ac_player_stand_empty_jigsaw
+
+        private bool TryGetActionPanelAnimationComponent(IntPtr player, out IntPtr anim)
+        {
+            anim = IntPtr.Zero;
+            if (player == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (this.TryGetMonoObjectMember(player, "<animationComponent>k__BackingField", out anim)
+                && anim != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            if (this.TryGetMonoObjectMember(player, "animationComponent", out anim) && anim != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            IntPtr playerClass = this.FindAuraMonoClassInAllLoadedImages(
+                "LocalPlayerComponent", "XDTLevelAndEntity.Gameplay.Component.Player");
+            IntPtr getAnim = playerClass == IntPtr.Zero
+                ? IntPtr.Zero
+                : this.FindAuraMonoMethodOnHierarchy(playerClass, "get_animationComponent", 0);
+            if (getAnim == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            {
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            anim = auraMonoRuntimeInvoke(getAnim, player, IntPtr.Zero, ref exc);
+            return exc == IntPtr.Zero && anim != IntPtr.Zero;
+        }
+
+        // Undo ForceActionPanelPuzzleLean: clear lean bools and switch back to stand+pose with the
+        // player's current handhold override (same shape StandLocomotion uses).
+        private unsafe void ClearActionPanelPuzzlePose(IntPtr player)
+        {
+            if (!this.TryGetActionPanelAnimationComponent(player, out IntPtr anim) || auraMonoRuntimeInvoke == null)
+            {
+                return;
+            }
+
+            IntPtr animClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.EntityView.AnimationComponent");
+            IntPtr paramClass = this.FindAuraMonoClassByFullName(
+                "XDTLevelAndEntity.ResHandle.AnimationRes.AnimParamHash");
+            IntPtr charClass = this.FindAuraMonoClassByFullName(
+                "XDTLevelAndEntity.ResHandle.AnimationRes.ControllerCharType");
+            IntPtr poseClass = this.FindAuraMonoClassByFullName(
+                "XDTLevelAndEntity.ResHandle.AnimationRes.ControllerPoseType");
+            IntPtr shortClass = this.FindAuraMonoClassByFullName(
+                "XDTLevelAndEntity.ResHandle.AnimationRes.ControllerShortName");
+            if (animClass == IntPtr.Zero || paramClass == IntPtr.Zero)
+            {
+                return;
+            }
+
+            IntPtr setBool = this.FindAuraMonoMethodOnHierarchy(animClass, "SetBool", 2);
+            if (setBool != IntPtr.Zero
+                && this.TryReadAuraMonoStaticIntField(paramClass, new[] { "DownwardJigsaw" }, out int hashDown)
+                && this.TryReadAuraMonoStaticIntField(paramClass, new[] { "ForwardJigsaw" }, out int hashForward)
+                && this.TryReadAuraMonoStaticIntField(paramClass, new[] { "UpwardJigsaw" }, out int hashUp))
+            {
+                void ClearBool(int hash)
+                {
+                    int h = hash;
+                    bool v = false;
+                    IntPtr* bArgs = stackalloc IntPtr[2];
+                    bArgs[0] = (IntPtr)(&h);
+                    bArgs[1] = (IntPtr)(&v);
+                    IntPtr excB = IntPtr.Zero;
+                    auraMonoRuntimeInvoke(setBool, anim, (IntPtr)bArgs, ref excB);
+                }
+
+                ClearBool(hashDown);
+                ClearBool(hashForward);
+                ClearBool(hashUp);
+            }
+
+            // Only slam stand+pose when the jigsaw controller is still active — other Stop targets
+            // (OnceInteract etc.) already restore via EndCasting and must not be overridden.
+            IntPtr getCtrl = this.FindAuraMonoMethodOnHierarchy(animClass, "get_controllerFullName", 0);
+            if (getCtrl != IntPtr.Zero && auraMonoObjectUnbox != null)
+            {
+                IntPtr excC = IntPtr.Zero;
+                IntPtr boxed = auraMonoRuntimeInvoke(getCtrl, anim, IntPtr.Zero, ref excC);
+                if (excC == IntPtr.Zero && boxed != IntPtr.Zero)
+                {
+                    IntPtr raw = auraMonoObjectUnbox(boxed);
+                    uint current = raw == IntPtr.Zero ? 0u : unchecked((uint)System.Runtime.InteropServices.Marshal.ReadInt32(raw));
+                    if (current != ActionPanelJigsawController)
+                    {
+                        return;
+                    }
+                }
+            }
+
+            IntPtr play5 = this.FindAuraMonoMethodOnHierarchy(animClass, "PlayController", 5);
+            if (play5 == IntPtr.Zero || charClass == IntPtr.Zero || poseClass == IntPtr.Zero || shortClass == IntPtr.Zero)
+            {
+                return;
+            }
+
+            if (!this.TryReadAuraMonoStaticIntField(charClass, new[] { "player" }, out int charType)
+                || !this.TryReadAuraMonoStaticIntField(poseClass, new[] { "stand" }, out int poseType)
+                || !this.TryReadAuraMonoStaticIntField(shortClass, new[] { "pose" }, out int shortName))
+            {
+                return;
+            }
+
+            IntPtr playerClass = this.FindAuraMonoClassInAllLoadedImages(
+                "LocalPlayerComponent", "XDTLevelAndEntity.Gameplay.Component.Player");
+            int overrideType = this.ReadActionPanelControllerOverride(playerClass, player);
+
+            int* id = stackalloc int[4];
+            id[0] = charType;
+            id[1] = poseType;
+            id[2] = overrideType;
+            id[3] = shortName;
+            bool fallback = true;
+            float blend = 0.25f;
+            int dst = 0;
+            bool force = true;
+            IntPtr* playArgs = stackalloc IntPtr[5];
+            playArgs[0] = (IntPtr)id;
+            playArgs[1] = (IntPtr)(&fallback);
+            playArgs[2] = (IntPtr)(&blend);
+            playArgs[3] = (IntPtr)(&dst);
+            playArgs[4] = (IntPtr)(&force);
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(play5, anim, (IntPtr)playArgs, ref exc);
+        }
+
+        private unsafe void ForceActionPanelPuzzleLean(IntPtr player, int lean)
+        {
+            if (player == IntPtr.Zero || auraMonoRuntimeInvoke == null)
+            {
+                return;
+            }
+
+            if (!this.TryGetActionPanelAnimationComponent(player, out IntPtr anim))
+            {
+                return;
+            }
+
+            IntPtr animClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.EntityView.AnimationComponent");
+            IntPtr paramClass = this.FindAuraMonoClassByFullName(
+                "XDTLevelAndEntity.ResHandle.AnimationRes.AnimParamHash");
+            IntPtr stateClass = this.FindAuraMonoClassByFullName(
+                "XDTLevelAndEntity.ResHandle.AnimationRes.AnimStateHash");
+            if (animClass == IntPtr.Zero || paramClass == IntPtr.Zero || stateClass == IntPtr.Zero)
+            {
+                return;
+            }
+
+            int hashDown, hashForward, hashUp, hashStart, hashLoop;
+            if (!this.TryReadAuraMonoStaticIntField(paramClass, new[] { "DownwardJigsaw" }, out hashDown)
+                || !this.TryReadAuraMonoStaticIntField(paramClass, new[] { "ForwardJigsaw" }, out hashForward)
+                || !this.TryReadAuraMonoStaticIntField(paramClass, new[] { "UpwardJigsaw" }, out hashUp))
+            {
+                return;
+            }
+
+            string startName = lean == 0 ? "DownwardJigsawStart" : "ForwardJigsawStart";
+            string loopName = lean == 0 ? "DownwardJigsaw" : "ForwardJigsaw";
+            if (!this.TryReadAuraMonoStaticIntField(stateClass, new[] { startName }, out hashStart)
+                || !this.TryReadAuraMonoStaticIntField(stateClass, new[] { loopName }, out hashLoop))
+            {
+                return;
+            }
+
+            IntPtr play5 = this.FindAuraMonoMethodOnHierarchy(animClass, "PlayController", 5);
+            IntPtr setBool = this.FindAuraMonoMethodOnHierarchy(animClass, "SetBool", 2);
+            IntPtr playState = this.FindAuraMonoMethodOnHierarchy(animClass, "PlayState", 3);
+            if (play5 == IntPtr.Zero || setBool == IntPtr.Zero)
+            {
+                return;
+            }
+
+            // ControllerFullNameId = 4 ints unpacked from the enum uint.
+            int* id = stackalloc int[4];
+            uint c = ActionPanelJigsawController;
+            id[0] = (int)((c >> 25) & 0x7Fu);
+            id[1] = (int)((c >> 15) & 0x3FFu);
+            id[2] = (int)((c >> 10) & 0x1Fu);
+            id[3] = (int)(c & 0x3FFu);
+            bool fallback = true;
+            float blend = 0.05f;
+            int dst = hashStart;
+            bool force = true;
+            IntPtr* playArgs = stackalloc IntPtr[5];
+            playArgs[0] = (IntPtr)id;
+            playArgs[1] = (IntPtr)(&fallback);
+            playArgs[2] = (IntPtr)(&blend);
+            playArgs[3] = (IntPtr)(&dst);
+            playArgs[4] = (IntPtr)(&force);
+            IntPtr exc = IntPtr.Zero;
+            auraMonoRuntimeInvoke(play5, anim, (IntPtr)playArgs, ref exc);
+
+            void SetLeanBool(int hash, bool on)
+            {
+                int h = hash;
+                bool v = on;
+                IntPtr* bArgs = stackalloc IntPtr[2];
+                bArgs[0] = (IntPtr)(&h);
+                bArgs[1] = (IntPtr)(&v);
+                IntPtr excB = IntPtr.Zero;
+                auraMonoRuntimeInvoke(setBool, anim, (IntPtr)bArgs, ref excB);
+            }
+
+            SetLeanBool(hashDown, lean == 0);
+            SetLeanBool(hashForward, lean == 1);
+            SetLeanBool(hashUp, false);
+
+            if (playState != IntPtr.Zero)
+            {
+                int layer = 0;
+                float t = 0f;
+                int start = hashStart;
+                int loop = hashLoop;
+                IntPtr* sArgs = stackalloc IntPtr[3];
+                sArgs[0] = (IntPtr)(&start);
+                sArgs[1] = (IntPtr)(&layer);
+                sArgs[2] = (IntPtr)(&t);
+                IntPtr excS = IntPtr.Zero;
+                auraMonoRuntimeInvoke(playState, anim, (IntPtr)sArgs, ref excS);
+                sArgs[0] = (IntPtr)(&loop);
+                auraMonoRuntimeInvoke(playState, anim, (IntPtr)sArgs, ref excS);
+            }
+        }
+
+        // PlayerJigsawPuzzleMotion.OnMotionTick lean from (player.y - entity.y):
+        //   > 0 or |d|<=0.1 → Downward (sit) | |d|<=0.5 → Forward (stand) | else Upward
+        // FaceDirection aims at the same entity — pick one already in the look cone so the
+        // turn is a no-op. Sit keeps self (dy=0 → Downward, zero aim).
+        //
+        // BuildComponent netIds often resolve locally (FaceDirection turns us) but remotes'
+        // EntityUtil.GetEntity misses them → hide-handhold only. Prefer puzzle boards and
+        // other players (always networked).
+        private const float ActionPanelPuzzleAnchorScanMeters = 30f;
+        private const float ActionPanelPuzzleLeanDownMaxAbs = 0.1f;
+        private const float ActionPanelPuzzleLeanForwardMaxAbs = 0.5f;
+        // ~25° half-angle — wider cones made FaceDirection spins obvious.
+        private const float ActionPanelPuzzleLookDotMin = 0.9f;
+
+        private static readonly string[] ActionPanelPuzzleBoardAnchorTypeNames = new string[]
+        {
+            "XDTLevelAndEntity.Gameplay.Component.Homeland.JigsawPuzzleComponent",
+            "XDTLevelAndEntity.GamePlay.Component.Homeland.JigsawPuzzleComponent",
+        };
+
+        private static readonly string[] ActionPanelPuzzlePlayerAnchorTypeNames = new string[]
+        {
+            "XDTLevelAndEntity.Gameplay.Component.Player.RemotePlayerComponent",
+            "XDTLevelAndEntity.Gameplay.Component.Player.LocalPlayerComponent",
+        };
+
+        private static int ClassifyActionPanelPuzzleLean(float playerY, float entityY)
+        {
+            float num = playerY - entityY;
+            if (num > 0f)
+            {
+                return 0;
+            }
+
+            float abs = num < 0f ? -num : num;
+            if (abs <= ActionPanelPuzzleLeanDownMaxAbs)
+            {
+                return 0;
+            }
+
+            if (abs <= ActionPanelPuzzleLeanForwardMaxAbs)
+            {
+                return 1;
+            }
+
+            return 2;
+        }
+
+        private bool TryResolveActionPanelPuzzleLeanAnchor(IntPtr player, int desiredLean,
+            Vector3 playerPos, bool havePos, out uint anchorNetId, out string kind)
+        {
+            anchorNetId = 0U;
+            kind = "none";
+
+            if (desiredLean == 0)
+            {
+                if (this.TryGetAuraMonoEntityNetIdFromComponent(player, out uint selfId) && selfId != 0U)
+                {
+                    anchorNetId = selfId;
+                    kind = "self";
+                    return true;
+                }
+
+                kind = "self-miss";
+                return false;
+            }
+
+            if (!havePos)
+            {
+                kind = "no-pos";
+                return false;
+            }
+
+            if (!this.TryGetActionPanelLookForward(out Vector3 forward))
+            {
+                kind = "no-forward";
+                return false;
+            }
+
+            if (this.TryFindLookDirEntityForActionPanelLean(playerPos, forward, desiredLean,
+                    out uint lookId, out string lookKind)
+                && lookId != 0U)
+            {
+                anchorNetId = lookId;
+                kind = lookKind;
+                return true;
+            }
+
+            // Tight cone missed — allow any board in the front hemisphere with Forward height so
+            // remotes still get lean (FaceDirection may turn a bit).
+            if (this.TryFindFrontBoardForActionPanelLean(playerPos, forward, desiredLean,
+                    out uint frontId, out string frontKind)
+                && frontId != 0U)
+            {
+                anchorNetId = frontId;
+                kind = frontKind;
+                return true;
+            }
+
+            kind = "no-look-anchor";
+            return false;
+        }
+
+        private bool TryGetActionPanelLookForward(out Vector3 forward)
+        {
+            forward = Vector3.forward;
+            if (this.TryGetNoclipSelfAnchorPose(out _, out Quaternion selfRot, out bool hasRot, out _)
+                && hasRot)
+            {
+                forward = selfRot * Vector3.forward;
+            }
+            else
+            {
+                try
+                {
+                    GameObject p = GetLocalPlayer();
+                    if (p != null)
+                    {
+                        forward = p.transform.forward;
+                    }
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 1e-4f)
+            {
+                return false;
+            }
+
+            forward.Normalize();
+            return true;
+        }
+
+        private bool TryGetAuraMonoEntityNetIdFromComponent(IntPtr component, out uint netId)
+        {
+            netId = 0U;
+            if (component == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryGetMonoObjectMember(component, "entity", out IntPtr entity) || entity == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            return this.TryGetAuraMonoEntityNetId(entity, out netId) && netId != 0U;
+        }
+
+        private bool TryFindLookDirEntityForActionPanelLean(Vector3 playerPos, Vector3 forward,
+            int desiredLean, out uint boardNetId, out string kind)
+        {
+            boardNetId = 0U;
+            kind = "none";
+            if (!AuraMonoPinningAvailable || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                return false;
+            }
+
+            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                return false;
+            }
+
+            uint selfNetId = 0U;
+            this.TryGetLocalPlayerNetId(out selfNetId);
+
+            // Boards first (vanilla join path), then other players (always in EntityUtil on remotes).
+            if (this.TryScoreLookDirAnchors(playerPos, forward, desiredLean, selfNetId,
+                    ActionPanelPuzzleLookDotMin, ActionPanelPuzzleBoardAnchorTypeNames, "board",
+                    out boardNetId, out kind))
+            {
+                return true;
+            }
+
+            return this.TryScoreLookDirAnchors(playerPos, forward, desiredLean, selfNetId,
+                ActionPanelPuzzleLookDotMin, ActionPanelPuzzlePlayerAnchorTypeNames, "player",
+                out boardNetId, out kind);
+        }
+
+        private bool TryFindFrontBoardForActionPanelLean(Vector3 playerPos, Vector3 forward,
+            int desiredLean, out uint boardNetId, out string kind)
+        {
+            boardNetId = 0U;
+            kind = "none";
+            if (!AuraMonoPinningAvailable || !this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                return false;
+            }
+
+            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                return false;
+            }
+
+            uint selfNetId = 0U;
+            this.TryGetLocalPlayerNetId(out selfNetId);
+            return this.TryScoreLookDirAnchors(playerPos, forward, desiredLean, selfNetId,
+                0f, ActionPanelPuzzleBoardAnchorTypeNames, "board-front",
+                out boardNetId, out kind);
+        }
+
+        private bool TryGetLocalPlayerNetId(out uint netId)
+        {
+            netId = 0U;
+            IntPtr playerClass = this.FindAuraMonoClassInAllLoadedImages(
+                "LocalPlayerComponent", "XDTLevelAndEntity.Gameplay.Component.Player");
+            if (playerClass == IntPtr.Zero || !AuraMonoPinningAvailable)
+            {
+                return false;
+            }
+
+            System.Collections.Generic.List<uint> pins = new System.Collections.Generic.List<uint>();
+            try
+            {
+                if (!this.TryAuraMonoGetComponentObjects(playerClass,
+                        out System.Collections.Generic.List<IntPtr> players, pins)
+                    || players == null || players.Count == 0)
+                {
+                    return false;
+                }
+
+                return this.TryGetAuraMonoEntityNetIdFromComponent(players[0], out netId) && netId != 0U;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+        }
+
+        private bool TryScoreLookDirAnchors(Vector3 playerPos, Vector3 forward, int desiredLean,
+            uint selfNetId, float minLookDot, string[] typeNames, string typeKind,
+            out uint bestId, out string kind)
+        {
+            bestId = 0U;
+            kind = "none";
+            float bestScore = float.MaxValue;
+
+            System.Collections.Generic.List<uint> pins = new System.Collections.Generic.List<uint>();
+            try
+            {
+                for (int t = 0; t < typeNames.Length; t++)
+                {
+                    IntPtr klass = this.FindAuraMonoClassByFullName(typeNames[t]);
+                    if (klass == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    if (!this.TryAuraMonoGetComponentObjects(klass, out System.Collections.Generic.List<IntPtr> comps, pins)
+                        || comps == null || comps.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    for (int i = 0; i < comps.Count; i++)
+                    {
+                        IntPtr comp = comps[i];
+                        if (comp == IntPtr.Zero
+                            || !this.TryGetMonoObjectMember(comp, "entity", out IntPtr entity) || entity == IntPtr.Zero
+                            || !this.TryGetAuraMonoEntityNetId(entity, out uint netId) || netId == 0U
+                            || (selfNetId != 0U && netId == selfNetId)
+                            || !this.TryGetAuraMonoEntityPosition(entity, out Vector3 pos))
+                        {
+                            continue;
+                        }
+
+                        Vector3 delta = pos - playerPos;
+                        float distSq = delta.sqrMagnitude;
+                        if (distSq < 0.25f
+                            || distSq > ActionPanelPuzzleAnchorScanMeters * ActionPanelPuzzleAnchorScanMeters)
+                        {
+                            continue;
+                        }
+
+                        Vector3 flat = new Vector3(delta.x, 0f, delta.z);
+                        float flatSq = flat.sqrMagnitude;
+                        if (flatSq < 0.25f)
+                        {
+                            continue;
+                        }
+
+                        float lookDot = Vector3.Dot(flat / Mathf.Sqrt(flatSq), forward);
+                        if (lookDot < minLookDot)
+                        {
+                            continue;
+                        }
+
+                        if (ClassifyActionPanelPuzzleLean(playerPos.y, pos.y) != desiredLean)
+                        {
+                            continue;
+                        }
+
+                        float dist = Mathf.Sqrt(distSq);
+                        float score = dist / (0.05f + lookDot * lookDot);
+                        if (score < bestScore)
+                        {
+                            bestScore = score;
+                            bestId = netId;
+                            kind = typeKind + "-look";
+                        }
+                    }
+                }
+
+                return bestId != 0U;
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
             }
         }
     }
