@@ -187,6 +187,13 @@ namespace HeartopiaMod
         private const int DailyClaimsSeaCycleLevelUpdatedEventBytes = 1;   // empty struct
         private const float DailyClaimsAutoSeaCycleMinIntervalSeconds = 5f;
 
+        // Puzzle sign (LittlePonySignWidget and every other PuzzleSignActivity). The widget's
+        // click sends UncoverPuzzle; the reward line is the same ReceiveReward the sign-in sweep
+        // already sends, so this hook only re-arms the uncover plus that sweep.
+        private const string DailyClaimsPuzzleCheckinChangedEventName =
+            "XDTDataAndProtocol.Events.PuzzleCheckinChangedEvent";
+        private const int DailyClaimsPuzzleCheckinChangedEventBytes = 0;
+
         private const string DailyClaimsAutoWorldReadyCallbackName = "DailyClaimsAutoClaim";
 
         // One send per tick at this spacing — the same "no burst the game never produces" rule the
@@ -278,6 +285,9 @@ namespace HeartopiaMod
         private bool dailyClaimsAutoCatchUpTasks;
         private bool dailyClaimsAutoCatchUpBattlePass;
         private bool dailyClaimsAutoCatchUpWhalefall;
+        private bool dailyClaimsAutoPendingPuzzle;
+        private float dailyClaimsAutoPuzzleNextAllowedAt;
+        private readonly List<int> dailyClaimsAutoAttemptedPuzzlePieces = new List<int>(16);
 
         // ----------------------------------------------------------------------------------------
         // Registration — HARD RULE: hook installs go on the world-ready gate, never a fresh poll in
@@ -356,6 +366,10 @@ namespace HeartopiaMod
                     DailyClaimsHobbyUpgradedEventName,
                     DailyClaimsHobbyUpgradedEventBytes,
                     this.OnDailyClaimsAutoHobbyUpgradedEvent);
+                bool puzzle = this.RegisterGameEventHook(
+                    DailyClaimsPuzzleCheckinChangedEventName,
+                    DailyClaimsPuzzleCheckinChangedEventBytes,
+                    this.OnDailyClaimsAutoPuzzleCheckinChanged);
                 bool loopTask = this.RegisterGameEventHook(
                     DailyClaimsLoopTaskUpdateEventName,
                     DailyClaimsLoopTaskUpdateEventBytes,
@@ -363,13 +377,13 @@ namespace HeartopiaMod
 
                 this.dailyClaimsAutoHooksRegistered =
                     redPoint || activityTasks || mail || dream || sticker || battlePass
-                    || taskUpdated || seaCycle || socialReport || loopTask || hobby;
+                    || taskUpdated || seaCycle || socialReport || loopTask || hobby || puzzle;
                 this.DailyClaimsLog("auto-claim hooks registered: redPoint=" + redPoint
                     + " activityTasks=" + activityTasks + " mail=" + mail + " dream=" + dream
                     + " sticker=" + sticker + " battlePass=" + battlePass
                     + " taskUpdated=" + taskUpdated + " seaCycle=" + seaCycle
                     + " socialReport=" + socialReport + " loopTask=" + loopTask
-                    + " hobby=" + hobby);
+                    + " hobby=" + hobby + " puzzle=" + puzzle);
 
                 if (!this.dailyClaimsAutoHooksRegistered)
                 {
@@ -392,6 +406,8 @@ namespace HeartopiaMod
             }
 
             this.dailyClaimsAutoCatchUpEpoch = epoch;
+            this.dailyClaimsAutoAttemptedPuzzlePieces.Clear();
+            this.dailyClaimsAutoPendingPuzzle = true;
             this.dailyClaimsAutoCatchUpActivities = true;
             this.dailyClaimsAutoCatchUpTasks = true;
             this.dailyClaimsAutoCatchUpBattlePass = true;
@@ -2363,6 +2379,30 @@ namespace HeartopiaMod
                 return true;
             }
 
+            // Puzzle sign before the sign-in catch-up: uncovering is what turns the reward-line
+            // nodes into WaitClaim, and the sign-in step below is what collects them.
+            if (this.dailyClaimsAutoPendingPuzzle
+                && Time.realtimeSinceStartup >= this.dailyClaimsAutoPuzzleNextAllowedAt)
+            {
+                if (!this.DailyClaimsAutoUncoverOnePuzzle(out string puzzleStatus, out bool puzzleSent))
+                {
+                    // A missed class or a DataModule that is not up yet must not burn the claim for
+                    // the rest of the world. Back off and let the other steps run.
+                    this.dailyClaimsAutoPuzzleNextAllowedAt = Time.realtimeSinceStartup + 2f;
+                    this.DailyClaimsAutoReport(false, "puzzle sign", puzzleStatus);
+                }
+                else if (puzzleSent)
+                {
+                    this.dailyClaimsAutoCatchUpActivities = true;
+                    this.DailyClaimsAutoReport(true, "puzzle sign", puzzleStatus);
+                    return true;
+                }
+                else
+                {
+                    this.dailyClaimsAutoPendingPuzzle = false;
+                }
+            }
+
             // --- world-ready catch-up --------------------------------------------------------------
             if (this.dailyClaimsAutoCatchUpBattlePass)
             {
@@ -2585,6 +2625,57 @@ namespace HeartopiaMod
             }
 
             this.DailyClaimsAutoReport(queued > 0, "catch-up whalefall (queued=" + queued + ")", listStatus);
+        }
+
+        private void OnDailyClaimsAutoPuzzleCheckinChanged(GameEventSnapshot e)
+        {
+            if (!this.dailyClaimsAutoClaimEnabled)
+            {
+                return;
+            }
+
+            // The component write is also what flips reward-line nodes to WaitClaim. Re-arm both
+            // so a piece that just opened is followed by the claim, including the echo of our own
+            // uncover.
+            this.dailyClaimsAutoPendingPuzzle = true;
+            this.dailyClaimsAutoCatchUpActivities = true;
+        }
+
+        // One UncoverPuzzle per drain tick. The index is memoed for this world epoch so a slow
+        // component write cannot send the same piece again. Nothing left to send returns sent=false
+        // and the caller falls through to the sign-in catch-up.
+        private bool DailyClaimsAutoUncoverOnePuzzle(out string status, out bool sent)
+        {
+            sent = false;
+            status = string.Empty;
+            List<DailyClaimsPuzzleUncover> pieces = new List<DailyClaimsPuzzleUncover>();
+            if (!this.DailyClaimsTryCollectPuzzleUncovers(pieces, null, out status))
+            {
+                return false;
+            }
+
+            for (int i = 0; i < pieces.Count; i++)
+            {
+                int memo = pieces[i].ActivityId * 64 + pieces[i].PuzzleIndex;
+                if (this.dailyClaimsAutoAttemptedPuzzlePieces.Contains(memo))
+                {
+                    continue;
+                }
+
+                if (!this.TryUncoverPuzzle(pieces[i].ActivityId, pieces[i].PuzzleIndex, out status))
+                {
+                    status = "activityId=" + pieces[i].ActivityId + " index=" + pieces[i].PuzzleIndex + " " + status;
+                    return false;
+                }
+
+                this.dailyClaimsAutoAttemptedPuzzlePieces.Add(memo);
+                sent = true;
+                status = "activityId=" + pieces[i].ActivityId + " index=" + pieces[i].PuzzleIndex + " " + status;
+                return true;
+            }
+
+            status = pieces.Count == 0 ? status : "puzzle pieces already attempted";
+            return true;
         }
 
         // Sign-in sweep with a session-wide attempt memo. ClaimSignInRewards treats a dispatched

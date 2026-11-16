@@ -77,6 +77,8 @@ namespace HeartopiaMod
 
         private IntPtr dailyClaimsGuidesChapterInfoListClass = IntPtr.Zero;
         private IntPtr dailyClaimsAuraBattlePassSystemClass = IntPtr.Zero;
+        private IntPtr dailyClaimsAuraGameActivitySystemClass = IntPtr.Zero;
+        private IntPtr dailyClaimsAuraPuzzleSignClass = IntPtr.Zero;
         private IntPtr dailyClaimsAuraPictorialSystemClass = IntPtr.Zero;
 
         private const int DailyClaimsBattlePassSlotCanGet = 1;
@@ -116,6 +118,16 @@ namespace HeartopiaMod
         // id GetAliveActivityIds returns. This constant only drives the explicit fallback for the
         // case where 1003 is missing from that list.
         private const int DailyClaimsNewLifeLogActivityId = 1003;
+
+        // Every live puzzle-sign panel (Little Pony, Goat, Sanrio, Little Pony 2026, …) is
+        // PuzzleSignActivity, registered under GameActivity(1041), with its own activityId.
+        // LittlePonySignWidget.OnClickPuzzle sends UncoverPuzzle; the reward line is ReceiveReward,
+        // which Claim Sign-In already sends for WaitClaim nodes.
+        private static readonly string[] DailyClaimsLevelEntityActivityImages =
+        {
+            "XDTLevelAndEntity",
+            "XDTLevelAndEntity.dll",
+        };
 
         // EPictorialNewType (XDT.Scene.Shared.Modules.Pictorial): 1..16 are the visible collection
         // categories, 1000 = CurrentBpTotal. GetPictorialRewardCommand{id} claims EVERY pending
@@ -222,6 +234,10 @@ namespace HeartopiaMod
             string signInDetail = this.LogSignInRewardState(out int activityCount, out int waitClaimNodes);
             this.DailyClaimsLog("Sign-in: activities=" + activityCount + " waitClaimNodes=" + waitClaimNodes);
             this.DailyClaimsLog(signInDetail);
+
+            string puzzleDetail = this.LogPuzzleSignState(out int puzzleActivities, out int puzzleUncovers);
+            this.DailyClaimsLog("Puzzle sign: activities=" + puzzleActivities + " uncovers=" + puzzleUncovers);
+            this.DailyClaimsLog(puzzleDetail);
 
             string townGuideDetail = this.LogTownGuideRewardState(out int nodeRewards, out int chapterRewards);
             this.DailyClaimsLog("Town guide: nodeReward=" + nodeRewards + " chapterReward=" + chapterRewards);
@@ -1211,6 +1227,7 @@ namespace HeartopiaMod
         {
             this.DailyClaimsLog("=== Claim All Daily start ===");
 
+            yield return this.DailyClaimsClaimPuzzleSignRoutine(true);
             yield return this.DailyClaimsClaimSignInRoutine();
             yield return this.DailyClaimsClaimMailRoutine();
             yield return this.DailyClaimsClaimMiniBpAllRoutine();
@@ -1401,6 +1418,377 @@ namespace HeartopiaMod
 
             detail = string.Join("\n", lines.ToArray());
             return sent;
+        }
+
+        private struct DailyClaimsPuzzleUncover
+        {
+            public int ActivityId;
+            public int PuzzleIndex;
+        }
+
+        // Live PuzzleSignActivity rows from GameActivitySystem.GetAllActivityInfo. Piece count is
+        // the number of TablePuzzlePiecess rows for that activityId — the widget uncovers child
+        // index i, which is bit i of PictureStatusBits, and it never walks past the prefab children.
+        private bool DailyClaimsTryCollectPuzzleUncovers(
+            List<DailyClaimsPuzzleUncover> pieces,
+            List<int> activityIds,
+            out string status)
+        {
+            if (pieces != null)
+            {
+                pieces.Clear();
+            }
+
+            if (activityIds != null)
+            {
+                activityIds.Clear();
+            }
+
+            status = "puzzle sign unavailable";
+            if (!this.TryDailyClaimsGetGameActivitySystem(out IntPtr system, out string systemStatus)
+                || system == IntPtr.Zero)
+            {
+                status = systemStatus;
+                return false;
+            }
+
+            if (auraMonoObjectGetClass == null || auraMonoRuntimeInvoke == null)
+            {
+                status = "AuraMono invoke unavailable";
+                return false;
+            }
+
+            IntPtr puzzleClass = this.DailyClaimsResolvePuzzleSignClass();
+            if (puzzleClass == IntPtr.Zero)
+            {
+                status = "PuzzleSignActivity class missing";
+                return false;
+            }
+
+            IntPtr getter = this.FindAuraMonoMethodOnHierarchy(auraMonoObjectGetClass(system), "GetAllActivityInfo", 0);
+            if (getter == IntPtr.Zero)
+            {
+                status = "GetAllActivityInfo method missing";
+                return false;
+            }
+
+            IntPtr exc = IntPtr.Zero;
+            IntPtr listObj = auraMonoRuntimeInvoke(getter, system, IntPtr.Zero, ref exc);
+            if (exc != IntPtr.Zero || listObj == IntPtr.Zero)
+            {
+                status = "GetAllActivityInfo invoke failed";
+                return false;
+            }
+
+            Dictionary<int, int> pieceCounts = new Dictionary<int, int>();
+            bool tableOk = this.DailyClaimsForEachTableRow("TablePuzzlePiecess", row =>
+            {
+                if (this.TryGetMonoIntMember(row, "activityId", out int rowActivityId) && rowActivityId > 0)
+                {
+                    pieceCounts.TryGetValue(rowActivityId, out int count);
+                    pieceCounts[rowActivityId] = count + 1;
+                }
+            }, out string tableStatus);
+
+            List<IntPtr> items = new List<IntPtr>();
+            List<uint> pins = new List<uint>();
+            uint listPin = AuraMonoPinNew(listObj);
+            int seen = 0;
+            try
+            {
+                if (!this.TryEnumerateAuraMonoCollectionItems(listObj, items, pins))
+                {
+                    status = "no activities";
+                    return true;
+                }
+
+                for (int i = 0; i < items.Count; i++)
+                {
+                    IntPtr activity = items[i];
+                    if (activity == IntPtr.Zero || auraMonoObjectGetClass(activity) != puzzleClass)
+                    {
+                        continue;
+                    }
+
+                    if (!this.TryGetMonoIntMember(activity, "activityId", out int activityId) || activityId <= 0)
+                    {
+                        continue;
+                    }
+
+                    if (!this.DailyClaimsTryReadPuzzleCheckin(activity, out int remain, out uint bits))
+                    {
+                        continue;
+                    }
+
+                    seen++;
+                    if (activityIds != null)
+                    {
+                        activityIds.Add(activityId);
+                    }
+
+                    if (pieces == null || remain <= 0 || !pieceCounts.TryGetValue(activityId, out int pieceCount) || pieceCount <= 0)
+                    {
+                        continue;
+                    }
+
+                    if (pieceCount > 31)
+                    {
+                        pieceCount = 31;
+                    }
+
+                    int budget = remain;
+                    for (int bit = 0; bit < pieceCount && budget > 0; bit++)
+                    {
+                        if ((bits & (1u << bit)) != 0)
+                        {
+                            continue;
+                        }
+
+                        pieces.Add(new DailyClaimsPuzzleUncover
+                        {
+                            ActivityId = activityId,
+                            PuzzleIndex = bit
+                        });
+                        budget--;
+                    }
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+                if (listPin != 0)
+                {
+                    AuraMonoPinFree(listPin);
+                }
+            }
+
+            status = "puzzle activities=" + seen + (tableOk ? string.Empty : " table=" + tableStatus);
+            return true;
+        }
+
+        private unsafe bool DailyClaimsTryReadPuzzleCheckin(IntPtr activity, out int remain, out uint bits)
+        {
+            remain = 0;
+            bits = 0;
+            if (activity == IntPtr.Zero || auraMonoObjectGetClass == null || auraMonoFieldGetValue == null)
+            {
+                return false;
+            }
+
+            IntPtr field = this.FindAuraMonoFieldOnHierarchy(auraMonoObjectGetClass(activity), "puzzleCheckinComponent");
+            if (field == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            // RemainCount@0, PictureStatusBits@4. Boxed offsets 16/20 on the live build.
+            int* raw = stackalloc int[2];
+            auraMonoFieldGetValue(activity, field, (IntPtr)raw);
+            remain = raw[0];
+            bits = (uint)raw[1];
+            return true;
+        }
+
+        private IntPtr DailyClaimsResolvePuzzleSignClass()
+        {
+            if (this.dailyClaimsAuraPuzzleSignClass != IntPtr.Zero)
+            {
+                return this.dailyClaimsAuraPuzzleSignClass;
+            }
+
+            this.dailyClaimsAuraPuzzleSignClass = this.DailyClaimsResolveLevelEntityActivityClass("PuzzleSignActivity");
+            return this.dailyClaimsAuraPuzzleSignClass;
+        }
+
+        // Namespace is XDTGameSystem.GameplaySystem.GameActivity, but the image is XDTLevelAndEntity.
+        // FindAuraMonoClassByFullName only probes XDTGameSystem for that prefix, and the managed
+        // AppDomain fallback cannot see an embedded-Mono image, so both misses are permanent.
+        private IntPtr DailyClaimsResolveLevelEntityActivityClass(string className)
+        {
+            IntPtr found = this.FindAuraMonoClassInImages(
+                "XDTGameSystem.GameplaySystem.GameActivity",
+                className,
+                DailyClaimsLevelEntityActivityImages);
+            if (found != IntPtr.Zero)
+            {
+                return found;
+            }
+
+            return this.FindAuraMonoClassByFullNameExhaustive(
+                "XDTGameSystem.GameplaySystem.GameActivity." + className);
+        }
+
+        private bool TryDailyClaimsGetGameActivitySystem(out IntPtr system, out string status)
+        {
+            system = IntPtr.Zero;
+            status = "GameActivitySystem unavailable";
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                return false;
+            }
+
+            if (this.dailyClaimsAuraGameActivitySystemClass == IntPtr.Zero)
+            {
+                this.dailyClaimsAuraGameActivitySystemClass = this.DailyClaimsResolveLevelEntityActivityClass(
+                    "GameActivitySystem");
+            }
+
+            if (this.dailyClaimsAuraGameActivitySystemClass == IntPtr.Zero)
+            {
+                status = "AuraMono GameActivitySystem class missing";
+                return false;
+            }
+
+            system = this.TryGetAuraMonoDataModuleInstance(this.dailyClaimsAuraGameActivitySystemClass);
+            if (system == IntPtr.Zero)
+            {
+                status = "AuraMono DataModule<GameActivitySystem>.Instance missing";
+                return false;
+            }
+
+            status = "AuraMono GameActivitySystem";
+            return true;
+        }
+
+        private bool TryUncoverPuzzle(int activityId, int puzzleIndex, out string status)
+        {
+            object[] args = { activityId, puzzleIndex };
+            return this.TryInvokeDailyClaimsProtocolAuraMono(
+                "XDTDataAndProtocol.ProtocolService.OperationActivity.OperationActivityProtocolMananger",
+                "OperationActivityProtocolMananger",
+                "UncoverPuzzle",
+                args,
+                out status);
+        }
+
+        private int ClaimPuzzleSignNodes(List<int> activityIds, out string detail)
+        {
+            detail = string.Empty;
+            if (activityIds == null || activityIds.Count == 0)
+            {
+                detail = "no puzzle activities";
+                return 0;
+            }
+
+            if (!this.TryEnsureDailyClaimsActivityService(out DailyClaimsServiceBinding binding, out string serviceStatus))
+            {
+                detail = "IOperationActivityCenterService unavailable: " + serviceStatus;
+                return 0;
+            }
+
+            List<string> lines = new List<string>();
+            List<string> nodeParts = this.dailyClaimsNodeStateBuffer;
+            int sent = 0;
+            for (int i = 0; i < activityIds.Count; i++)
+            {
+                int activityId = activityIds[i];
+                nodeParts.Clear();
+                if (!this.DailyClaimsTryGetActivityNodeStateNames(binding, activityId, nodeParts, out string nodeStatus))
+                {
+                    lines.Add("activityId=" + activityId + " state read failed: " + nodeStatus);
+                    continue;
+                }
+
+                for (int n = 0; n < nodeParts.Count; n++)
+                {
+                    if (!string.Equals(nodeParts[n], "WaitClaim", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (this.TryReceiveActivityReward(activityId, n, out string claimStatus))
+                    {
+                        sent++;
+                        lines.Add("claimed activityId=" + activityId + " nodeIndex=" + n + " (" + claimStatus + ")");
+                    }
+                    else
+                    {
+                        lines.Add("FAILED activityId=" + activityId + " nodeIndex=" + n + " (" + claimStatus + ")");
+                    }
+                }
+            }
+
+            if (lines.Count == 0)
+            {
+                lines.Add("no WaitClaim nodes on " + activityIds.Count + " puzzle activities");
+            }
+
+            detail = string.Join("\n", lines.ToArray());
+            return sent;
+        }
+
+        private string LogPuzzleSignState(out int activityCount, out int uncoverCount)
+        {
+            activityCount = 0;
+            uncoverCount = 0;
+            List<DailyClaimsPuzzleUncover> pieces = new List<DailyClaimsPuzzleUncover>();
+            List<int> activityIds = new List<int>();
+            if (!this.DailyClaimsTryCollectPuzzleUncovers(pieces, activityIds, out string status))
+            {
+                return "puzzle sign unavailable: " + status;
+            }
+
+            activityCount = activityIds.Count;
+            uncoverCount = pieces.Count;
+            List<string> lines = new List<string> { "--- puzzle sign " + status + " ---" };
+            for (int i = 0; i < pieces.Count; i++)
+            {
+                lines.Add("uncover activityId=" + pieces[i].ActivityId + " index=" + pieces[i].PuzzleIndex);
+            }
+
+            if (pieces.Count == 0)
+            {
+                lines.Add("nothing to uncover");
+            }
+
+            return string.Join("\n", lines.ToArray());
+        }
+
+        // claimNodes: the reward line. Claim All passes true and then runs the sign-in sweep, which
+        // claims the same WaitClaim nodes again only if the server has not applied the first send yet.
+        private IEnumerator DailyClaimsClaimPuzzleSignRoutine(bool claimNodes)
+        {
+            this.dailyClaimsLastStatus = "Claiming puzzle sign...";
+            List<DailyClaimsPuzzleUncover> pieces = new List<DailyClaimsPuzzleUncover>();
+            List<int> activityIds = new List<int>();
+            if (!this.DailyClaimsTryCollectPuzzleUncovers(pieces, activityIds, out string status))
+            {
+                this.dailyClaimsLastStatus = "Puzzle sign failed: " + status;
+                this.DailyClaimsLog(this.dailyClaimsLastStatus);
+                yield return ModWait.Realtime(DailyClaimsActionDelaySeconds);
+                yield break;
+            }
+
+            int sent = 0;
+            for (int i = 0; i < pieces.Count; i++)
+            {
+                if (this.TryUncoverPuzzle(pieces[i].ActivityId, pieces[i].PuzzleIndex, out string uncoverStatus))
+                {
+                    sent++;
+                    this.DailyClaimsLog("uncover activityId=" + pieces[i].ActivityId
+                        + " index=" + pieces[i].PuzzleIndex + " (" + uncoverStatus + ")");
+                }
+                else
+                {
+                    this.DailyClaimsLog("FAILED uncover activityId=" + pieces[i].ActivityId
+                        + " index=" + pieces[i].PuzzleIndex + " (" + uncoverStatus + ")");
+                }
+
+                yield return ModWait.Realtime(DailyClaimsCommandSpacingSeconds);
+            }
+
+            int claimed = 0;
+            if (claimNodes && activityIds.Count > 0)
+            {
+                yield return ModWait.Realtime(0.5f);
+                claimed = this.ClaimPuzzleSignNodes(activityIds, out string claimDetail);
+                this.DailyClaimsLog(claimDetail);
+            }
+
+            this.dailyClaimsLastStatus = "Puzzle sign done: uncovered=" + sent
+                + " nodes=" + claimed + " activities=" + activityIds.Count;
+            this.DailyClaimsLog(this.dailyClaimsLastStatus + " " + status);
+            yield return ModWait.Realtime(DailyClaimsActionDelaySeconds);
         }
 
         private bool TryClaimMailAll(out string status)

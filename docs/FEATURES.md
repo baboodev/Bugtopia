@@ -2078,6 +2078,13 @@ non-null callback as "Submit pressed" (Cancel sends it null), reads the selectio
 
 Does **not** use `AutoSubmitNpcTaskItem` success alone — that only opens NPC dialogue in vanilla UI.
 
+**Puzzle sign** (the activity-center panel `LittlePonySignWidget`, including Little Pony 2026): **Claim Puzzle Sign**
+on the Daily Claims card, **Claim All Daily**, and **Auto-Claim Rewards**. The click on a covered piece is
+`OperationActivityProtocolMananger.UncoverPuzzle(activityId, index)` while `PuzzleCheckinComponent.RemainCount > 0`
+and bit `index` of `PictureStatusBits` is clear. Piece count is the `TablePuzzlePiecess` row count for that
+activity. The reward line is `ReceiveReward`, sent for `WaitClaim` nodes after the uncovers; auto-claim
+re-arms the sign-in sweep on `PuzzleCheckinChangedEvent` so those nodes are taken once the server writes them.
+
 Details and troubleshooting: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#daily-quests-detail).
 
 ---
