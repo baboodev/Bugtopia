@@ -83,6 +83,8 @@ namespace HeartopiaMod
 
             public Toggle EnabledToggle;
             public Toggle PerfectPhotoToggle;
+            public Toggle SpawnNearPlayerToggle;
+            public Toggle BirdVacuumToggle;
 
             public Dropdown CaptureModeDropdown;
             public bool CaptureModeListenerWired;
@@ -236,12 +238,22 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiBirdsPerfectPhotoToggled));
             PlaceUguiTopLeft(handle.PerfectPhotoToggle.gameObject, 16f, 111f, 280f, 25f);
 
+            handle.SpawnNearPlayerToggle = this.CreateUguiCheckbox(scrollContent, "SpawnNearPlayerToggle",
+                this.L("Spawn Near Player"), BirdNetFarm.GetSpawnNearPlayerEnabled(),
+                new System.Action<bool>(this.OnUguiBirdsSpawnNearPlayerToggled));
+            PlaceUguiTopLeft(handle.SpawnNearPlayerToggle.gameObject, 16f, 141f, 280f, 25f);
+
+            handle.BirdVacuumToggle = this.CreateUguiCheckbox(scrollContent, "BirdVacuumToggle",
+                this.L("Bird Vacuum (Client Side)"), this.birdVacuumEnabled,
+                new System.Action<bool>(this.OnUguiBirdsBirdVacuumToggled));
+            PlaceUguiTopLeft(handle.BirdVacuumToggle.gameObject, 16f, 171f, 280f, 25f);
+
             // BirdNetFarm.cs:495-505 — label mirrors UI_DrawSingleSelectDropdown's own bold-13
             // label row (drawn at rect.y-22, width = the control's 260); options pre-localized
             // like the IMGUI widget renders them (see file header).
             GameObject captureLabel = this.CreateUguiBodyLabel(scrollContent, "CaptureModeLabel",
                 this.L("Capture Mode"), 13f);
-            PlaceUguiTopLeft(captureLabel, 16f, 141f, 260f, 20f);
+            PlaceUguiTopLeft(captureLabel, 16f, 201f, 260f, 20f);
 
             string[] captureModeRaw = BirdNetFarm.GetCaptureModeOptions();
             string[] captureModeNames = new string[captureModeRaw.Length];
@@ -256,23 +268,23 @@ namespace HeartopiaMod
                 captureModeNames, captureInitial,
                 new System.Action<int>(this.OnUguiBirdsCaptureModePicked), out captureWired);
             handle.CaptureModeListenerWired = captureWired;
-            PlaceUguiTopLeft(handle.CaptureModeDropdown.gameObject, 16f, 163f, 260f, 28f);
+            PlaceUguiTopLeft(handle.CaptureModeDropdown.gameObject, 16f, 223f, 260f, 28f);
 
             // BirdNetFarm.cs:507-512 — safe to seed at build time (pure reads with their own
             // Idle/Unknown fallbacks). IMGUI `small` style = fontSize 12. Status/Tool wrap the
             // inner value in L() (double-localization, see file header); Birds passes plain ints.
             handle.StatusShown = this.LF("Status: {0}", this.L(BirdNetFarm.GetLastStatus()));
             handle.StatusLabel = this.CreateUguiBodyLabel(scrollContent, "StatusLabel", handle.StatusShown, 12f);
-            PlaceUguiTopLeft(handle.StatusLabel, 16f, 221f, 360f, 20f);
+            PlaceUguiTopLeft(handle.StatusLabel, 16f, 281f, 360f, 20f);
 
             handle.ToolShown = this.LF("Tool: {0}", this.L(BirdNetFarm.GetLastToolStatus()));
             handle.ToolLabel = this.CreateUguiBodyLabel(scrollContent, "ToolLabel", handle.ToolShown, 12f);
-            PlaceUguiTopLeft(handle.ToolLabel, 16f, 245f, 360f, 20f);
+            PlaceUguiTopLeft(handle.ToolLabel, 16f, 305f, 360f, 20f);
 
             handle.BirdsShown = this.LF("Birds: {0} caught | {1} scared",
                 BirdNetFarm.GetSessionCatchCount(), BirdNetFarm.GetSessionScaredCount());
             handle.BirdsLabel = this.CreateUguiBodyLabel(scrollContent, "BirdsLabel", handle.BirdsShown, 12f);
-            PlaceUguiTopLeft(handle.BirdsLabel, 16f, 269f, 360f, 20f);
+            PlaceUguiTopLeft(handle.BirdsLabel, 16f, 329f, 360f, 20f);
 
             // BirdNetFarm.cs:514-545 — the three slider blocks, one loop over the binding array.
             // The change closure captures the array element directly (not the handle, which is
@@ -280,7 +292,7 @@ namespace HeartopiaMod
             // so a stale closure after a shell rebuild behaves identically anyway.
             UguiBirdsSliderBinding[] bindings = BuildUguiBirdsSliderBindings();
             handle.SliderBindings = bindings;
-            float yCur = 293f;
+            float yCur = 353f;
             for (int i = 0; i < bindings.Length; i++)
             {
                 int indexCopy = i; // capture a copy for the change closure
@@ -300,8 +312,7 @@ namespace HeartopiaMod
                 yCur += 30f;
             }
 
-            // yCur = 449 here = DrawSection's own returned cursor with the dropdown closed (see
-            // builder header).
+            // yCur = 509 here = DrawSection cursor + spawn-near and bird-vacuum rows with the dropdown closed.
             this.SetUguiScrollContentHeight(scrollContent, yCur);
 
             handle.Root = block;
@@ -341,6 +352,8 @@ namespace HeartopiaMod
                 // and resets both session counters on disable).
                 this.SyncUguiToggleFromField(handle.EnabledToggle, BirdNetFarm.IsEnabled);
                 this.SyncUguiToggleFromField(handle.PerfectPhotoToggle, BirdNetFarm.GetPerfectPhotoEnabled());
+                this.SyncUguiToggleFromField(handle.SpawnNearPlayerToggle, BirdNetFarm.GetSpawnNearPlayerEnabled());
+                this.SyncUguiToggleFromField(handle.BirdVacuumToggle, this.birdVacuumEnabled);
 
                 // Dropdown external re-sync (the IMGUI twin or ApplyBirdFarmConfig moved the
                 // backend) — Settings→Main's approach: WithoutNotify + LastValue update.
@@ -427,6 +440,21 @@ namespace HeartopiaMod
                 return;
             }
             BirdNetFarm.SetPerfectPhotoEnabledFromUi(value);
+        }
+
+        private void OnUguiBirdsSpawnNearPlayerToggled(bool value)
+        {
+            if (value == BirdNetFarm.GetSpawnNearPlayerEnabled())
+            {
+                return;
+            }
+            BirdNetFarm.SetSpawnNearPlayerEnabledFromUi(value);
+        }
+
+        // Flag only: no save, no notification. Hotkey still toggles the same field.
+        private void OnUguiBirdsBirdVacuumToggled(bool value)
+        {
+            this.birdVacuumEnabled = value;
         }
 
         // BirdNetFarm.cs:495-505 — shared by the wired listener AND the poll fallback (the

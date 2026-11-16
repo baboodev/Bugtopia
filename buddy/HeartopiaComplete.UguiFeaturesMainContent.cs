@@ -80,7 +80,6 @@ namespace HeartopiaMod
             public Toggle NoCollisionVehicleToggle;
             public Toggle PersistentHudToggle;
             public Toggle BunnyHopToggle;
-            public Toggle BirdVacuumToggle;       // flag only (source has no save/notification)
             public Toggle FastBubbleGenToggle;
 
             public GameObject BubbleRateLabel;    // conditional row (fastBubbleGenEnabled)
@@ -234,9 +233,6 @@ namespace HeartopiaMod
             handle.NoCollisionVehicleToggle = this.CreateUguiCheckbox(scrollContent, "NoCollisionVehicleToggle",
                 this.L("Drive through invisible barriers"), this.noCollisionVehicleEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesMainNoCollisionVehicleToggled));
-            handle.BirdVacuumToggle = this.CreateUguiCheckbox(scrollContent, "BirdVacuumToggle",
-                this.L("Bird Vacuum (Client Side)"), this.birdVacuumEnabled,
-                new System.Action<bool>(this.OnUguiFeaturesMainBirdVacuumToggled));
             handle.FastBubbleGenToggle = this.CreateUguiCheckbox(scrollContent, "FastBubbleGenToggle",
                 this.L("Fast Bubble Gen"), this.fastBubbleGenEnabled,
                 new System.Action<bool>(this.OnUguiFeaturesMainFastBubbleGenToggled));
@@ -331,11 +327,6 @@ namespace HeartopiaMod
             if (handle.NoCollisionVehicleToggle != null)
             {
                 PlaceUguiTopLeft(handle.NoCollisionVehicleToggle.gameObject, rowX, yCur, rowW, 24f);
-            }
-            yCur += 30f;
-            if (handle.BirdVacuumToggle != null)
-            {
-                PlaceUguiTopLeft(handle.BirdVacuumToggle.gameObject, rowX, yCur, rowW, 24f);
             }
             yCur += 30f;
             if (handle.FastBubbleGenToggle != null)
@@ -437,7 +428,6 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.BunnyHopToggle, this.bunnyHopEnabled);
                 this.SyncUguiToggleFromField(handle.NoCollisionPlayerToggle, this.noCollisionPlayerEnabled);
                 this.SyncUguiToggleFromField(handle.NoCollisionVehicleToggle, this.noCollisionVehicleEnabled);
-                this.SyncUguiToggleFromField(handle.BirdVacuumToggle, this.birdVacuumEnabled);
                 this.SyncUguiToggleFromField(handle.FastBubbleGenToggle, this.fastBubbleGenEnabled);
                 this.SyncUguiToggleFromField(handle.BubbleSpawnAtPlayerToggle, this.bubbleSpawnAtPlayerEnabled);
                 this.SyncUguiToggleFromField(handle.AutoBubbleCollectToggle, this.autoBubbleCollectEnabled);
@@ -561,12 +551,6 @@ namespace HeartopiaMod
                 this.ResetBunnyHopState();
             }
             try { this.SaveKeybinds(false); } catch { }
-        }
-
-        // Gui.cs:481-482 — flag only: the source genuinely has no save and no notification.
-        private void OnUguiFeaturesMainBirdVacuumToggled(bool value)
-        {
-            this.birdVacuumEnabled = value;
         }
 
         // Gui.cs:485-493 — accumulator reset + immediate retry on ANY change (both directions).

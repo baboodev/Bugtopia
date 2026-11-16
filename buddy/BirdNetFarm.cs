@@ -16,6 +16,7 @@ namespace HeartopiaMod
 
         private static bool enabled = false;
         private static bool perfectPhotoEnabled = false;
+        private static bool spawnNearPlayerEnabled;
         private static int captureMode = 0;
         private static float catchCooldown = 1.5f;
         private static float scanRange = 35f;
@@ -252,6 +253,14 @@ namespace HeartopiaMod
             pendingSaveAt = Time.unscaledTime + 2f;
         }
 
+        public static bool GetSpawnNearPlayerEnabled() => spawnNearPlayerEnabled;
+        public static void SetSpawnNearPlayerEnabledFromUi(bool value)
+        {
+            if (value == spawnNearPlayerEnabled) return;
+            spawnNearPlayerEnabled = value;
+            pendingSaveAt = Time.unscaledTime + 2f;
+        }
+
         public static string[] GetCaptureModeOptions() => CaptureModeOptions;
         public static int GetCaptureMode() => captureMode;
         // DrawSection's FULL Capture Mode change cascade, extracted verbatim so both rendering
@@ -462,6 +471,7 @@ namespace HeartopiaMod
         {
             if (data == null) return;
             data.perfectPhotoEnabled = perfectPhotoEnabled;
+            data.spawnNearPlayerEnabled = spawnNearPlayerEnabled;
             data.autoScareMaxPhotoEnabled = true;
             data.captureMode = captureMode;
             data.catchCooldown = catchCooldown;
@@ -473,6 +483,7 @@ namespace HeartopiaMod
         {
             if (data == null) return;
             perfectPhotoEnabled = data.perfectPhotoEnabled;
+            spawnNearPlayerEnabled = data.spawnNearPlayerEnabled;
             captureMode = Mathf.Clamp(data.captureMode, 0, CaptureModeOptions.Length - 1);
             catchCooldown = Mathf.Clamp(data.catchCooldown, 0.2f, 10f);
             scanRange = Mathf.Clamp(data.scanRange, 1f, 100f);

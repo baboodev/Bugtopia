@@ -22,6 +22,7 @@ namespace HeartopiaMod
         private static float scanRange = ScanRangeMax;
         private static int batchSize = 3;
         private static bool teleportEnabled = true;
+        private static bool spawnNearPlayerEnabled;
         private static bool pauseTeleportOnRepairEnabled = false;
         private static bool pauseTeleportOnEatEnabled = false;
         
@@ -227,6 +228,11 @@ namespace HeartopiaMod
         public static void SetBatchSize(int v) { batchSize = Mathf.Clamp(v, 1, 10); }
         public static bool GetTeleportEnabled() => teleportEnabled;
         public static void SetTeleportEnabled(bool v) { teleportEnabled = v; }
+        public static bool GetSpawnNearPlayerEnabled() => spawnNearPlayerEnabled;
+        public static void SetSpawnNearPlayerEnabled(bool v)
+        {
+            spawnNearPlayerEnabled = v;
+        }
         public static bool GetPauseTeleportOnTriggersEnabled() => pauseTeleportOnRepairEnabled || pauseTeleportOnEatEnabled;
         public static void SetPauseTeleportOnTriggersEnabled(bool v)
         {

@@ -466,6 +466,7 @@ namespace HeartopiaMod
             public float insectScanRange;
             public int insectBatchSize = 3;
             public bool insectTeleportEnabled = true;
+            public bool insectSpawnNearPlayerEnabled;
             public bool insectPauseTeleportOnTriggersEnabled;
             public bool insectPauseTeleportOnRepairEnabled;
             public bool insectPauseTeleportOnEatEnabled;
@@ -644,6 +645,7 @@ namespace HeartopiaMod
         public class BirdFarmConfigData
         {
             public bool perfectPhotoEnabled = false;
+            public bool spawnNearPlayerEnabled;
             public bool autoScareMaxPhotoEnabled = true;
             public int captureMode = 0;
             public float catchCooldown = 1.5f;

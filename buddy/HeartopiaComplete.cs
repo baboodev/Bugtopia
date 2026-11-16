@@ -549,6 +549,7 @@ namespace HeartopiaMod
             this.LoadUiTheme();
             this.LoadRadarSettings();
             this.LoadBirdFarmSettings();
+            this.EnsureSpawnRadiusDetourWorldReadyRegistered();
             // Startup menu hint (StartupMenuHintFeature.cs) — after LoadKeybinds so the toast names
             // the player's own key. Queued here, at mod start: the toast stack already renders this
             // early (LoadUiTheme's toast just above proves it), and a session that never leaves the
@@ -663,6 +664,7 @@ namespace HeartopiaMod
             // once the world is actually up. Must tick BEFORE the feature ticks below so a feature
             // reading IsWorldReady this frame sees the state the events left.
             this.ProcessWorldReadyOnUpdate();
+            this.NoteSpawnRadiusPlayerAnchor();
             // Sandbox plugins (PluginHostFeature.cs). One empty-collection walk when nothing is
             // loaded. Independent of the MCP pump: disk plugins tick in a build without the bridge.
             PluginHost.Tick();

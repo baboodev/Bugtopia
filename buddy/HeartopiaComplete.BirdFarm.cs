@@ -4724,7 +4724,7 @@ namespace HeartopiaMod
                 {
                     string text = gameObject2.name.ToLower();
                     bool flag3 = text.Contains("p_bird") && !text.Contains("birdscanner");
-                    if (flag3)
+                    if (flag3 && this.IsRadarBirdObjectAllowed(gameObject2))
                     {
                         gameObject2.transform.position = position;
                     }

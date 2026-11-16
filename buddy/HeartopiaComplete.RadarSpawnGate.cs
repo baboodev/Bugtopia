@@ -11,8 +11,9 @@ namespace HeartopiaMod
     //    PictorialBase the quick-filter scan already pins (PictorialBase.get_SeasonType =
     //    PictorialSystem.GetSeasonType(pedia.BpPeriod, resurface); GetUnlockState evaluates the
     //    Pedia.unlockCondition DuringPeriod[Date] expression) - zero content drift;
-    //  - month mask + day-period schedule (plan sections 6.2/6.3): TableBird/TableInsect
-    //    appearMonth / timePeriod columns, same semantics as BaseAIClientService.IsSatisfyForCreateAi.
+    //  - month mask (plan section 6.2): TableBird/TableInsect appearMonth, same bit layout as
+    //    BaseAIClientService.IsSatisfyForCreateAi. timePeriod is still read into TimePeriodMask
+    //    but does not hide a cell — the day-period filter was removed; see FEATURES.md.
     // Everything fails open: unresolved API, missing row, pre-world, unreadable config -> visible.
     public partial class HeartopiaComplete
     {
@@ -583,9 +584,9 @@ namespace HeartopiaMod
             }
         }
 
-        // The single hide predicate (plan section 6.3). Semantics copied from the game:
-        // Pictorial season verdict first (festival window, section 11.4), then the month bit
-        // mask and the day-period schedule (IsSatisfyForCreateAi). Unknown -> fail open.
+        // Hide predicate. Pictorial season verdict first (festival window), then the month bit
+        // mask. Day period is not a hide: TimePeriodMask stays filled for a later feature.
+        // Unknown -> fail open.
         private bool RadarSpeciesInSpawnWindow(RadarSpeciesFilterEntry entry)
         {
             if (entry == null)
@@ -605,13 +606,6 @@ namespace HeartopiaMod
 
             int month = this.radarSpawnGateMonth;
             if (month >= 1 && month <= 12 && ((1 << (month - 1)) & entry.AppearMonthMask) == 0)
-            {
-                return false;
-            }
-
-            int period = this.radarSpawnGatePeriodId;
-            if (entry.TimePeriodMask != 0 && period > 0
-                && ((1 << period) & entry.TimePeriodMask) == 0)
             {
                 return false;
             }

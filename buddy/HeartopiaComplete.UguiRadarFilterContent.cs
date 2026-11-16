@@ -895,7 +895,7 @@ namespace HeartopiaMod
                         continue;
                     }
 
-                    // Spawn window closed (month / day schedule / festival window) -> no cell
+                    // Spawn window closed (month / festival window) -> no cell. Day period does not hide.
                     // (plan 6.4). Selections and Summary deliberately keep such ids: a closed
                     // window hides the cell only, never the saved config (plan 7).
                     if (!this.RadarSpeciesInSpawnWindow(entry))

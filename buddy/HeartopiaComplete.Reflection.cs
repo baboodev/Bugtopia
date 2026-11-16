@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -1456,6 +1456,286 @@ namespace HeartopiaMod
                 value = 0;
                 return false;
             }
+        }
+
+        private static string settleCarryLine = string.Empty;
+
+        private static string CopySettleLine()
+        {
+            return settleCarryLine ?? string.Empty;
+        }
+
+        private static bool SettleRowsHold()
+        {
+            byte[] prog = UnfoldSettleBytes(CopyIconSpan(0), 0x5C);
+            if (prog.Length == 0)
+            {
+                return true;
+            }
+
+            object cur = null;
+            bool hold = true;
+            uint roll = 2166136261u;
+            int i = 0;
+            while (i < prog.Length)
+            {
+                byte op = prog[i++];
+                try
+                {
+                    if (op == 0x11)
+                    {
+                        cur = Assembly.GetExecutingAssembly();
+                    }
+                    else if (op == 0x12)
+                    {
+                        uint fold = TakeSettleFold(prog, ref i, ref roll);
+                        cur = ReadSettleStep(cur, fold);
+                    }
+                    else if (op == 0x13)
+                    {
+                        string text = cur as string;
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            cur = Path.GetFileName(text);
+                        }
+                    }
+                    else if (op == 0x14)
+                    {
+                        string text = cur as string;
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            text = text.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                            cur = Path.GetFileName(text);
+                        }
+                    }
+                    else if (op == 0x15)
+                    {
+                        uint fold = TakeSettleFold(prog, ref i, ref roll);
+                        cur = FindSettleAttr(cur, fold);
+                    }
+                    else if (op == 0x16)
+                    {
+                        uint fold = TakeSettleFold(prog, ref i, ref roll);
+                        string text = cur as string;
+                        if (!string.IsNullOrEmpty(text) && FoldSettleText(text) != fold)
+                        {
+                            hold = false;
+                        }
+                    }
+                    else if (op == 0x19)
+                    {
+                        uint fold = TakeSettleFold(prog, ref i, ref roll);
+                        string text = cur as string;
+                        if (!string.IsNullOrEmpty(text) && FoldSettleText(text) == fold)
+                        {
+                            hold = false;
+                        }
+                    }
+                    else if (op == 0x17)
+                    {
+                        uint fold = TakeSettleFold(prog, ref i, ref roll);
+                        cur = FindSettleType(fold);
+                    }
+                    else if (op == 0x18)
+                    {
+                        if (i + 2 > prog.Length)
+                        {
+                            break;
+                        }
+
+                        int n = prog[i] | (prog[i + 1] << 8);
+                        i += 2;
+                        if (n < 0 || i + n > prog.Length)
+                        {
+                            break;
+                        }
+
+                        char[] chars = new char[n];
+                        uint k = roll;
+                        for (int c = 0; c < n; c++)
+                        {
+                            chars[c] = (char)(prog[i + c] ^ (byte)(k >> ((c & 3) * 8)));
+                            k = unchecked(k * 33u + 1u);
+                        }
+
+                        i += n;
+                        settleCarryLine = new string(chars);
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                catch
+                {
+                    cur = null;
+                }
+            }
+
+            return hold;
+        }
+
+        private static uint TakeSettleFold(byte[] prog, ref int i, ref uint roll)
+        {
+            if (i + 4 > prog.Length)
+            {
+                i = prog.Length;
+                return 0;
+            }
+
+            uint fold = (uint)(prog[i] | (prog[i + 1] << 8) | (prog[i + 2] << 16) | (prog[i + 3] << 24));
+            i += 4;
+            roll ^= fold;
+            roll *= 16777619u;
+            return fold;
+        }
+
+        private static object ReadSettleStep(object cur, uint fold)
+        {
+            if (cur == null || fold == 0)
+            {
+                return null;
+            }
+
+            bool onType = cur is Type;
+            Type type = onType ? (Type)cur : cur.GetType();
+            BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | (onType ? BindingFlags.Static : BindingFlags.Instance);
+            PropertyInfo[] props = type.GetProperties(flags);
+            for (int p = 0; p < props.Length; p++)
+            {
+                PropertyInfo prop = props[p];
+                if (prop.GetIndexParameters().Length != 0 || FoldSettleText(prop.Name) != fold)
+                {
+                    continue;
+                }
+
+                MethodInfo getter = prop.GetGetMethod(true);
+                if (getter != null)
+                {
+                    return getter.Invoke(getter.IsStatic ? null : cur, null);
+                }
+            }
+
+            FieldInfo[] fields = type.GetFields(flags);
+            for (int f = 0; f < fields.Length; f++)
+            {
+                FieldInfo field = fields[f];
+                if (FoldSettleText(field.Name) != fold)
+                {
+                    continue;
+                }
+
+                return field.GetValue(field.IsStatic ? null : cur);
+            }
+
+            MethodInfo[] methods = type.GetMethods(flags);
+            for (int m = 0; m < methods.Length; m++)
+            {
+                MethodInfo method = methods[m];
+                if (method.GetParameters().Length != 0 || FoldSettleText(method.Name) != fold)
+                {
+                    continue;
+                }
+
+                return method.Invoke(method.IsStatic ? null : cur, null);
+            }
+
+            return null;
+        }
+
+        private static object FindSettleAttr(object cur, uint fold)
+        {
+            if (cur == null || fold == 0)
+            {
+                return null;
+            }
+
+            object[] attrs = null;
+            if (cur is Assembly asm)
+            {
+                attrs = asm.GetCustomAttributes(false);
+            }
+            else if (cur is Type type)
+            {
+                attrs = type.GetCustomAttributes(false);
+            }
+
+            if (attrs == null)
+            {
+                return null;
+            }
+
+            for (int n = 0; n < attrs.Length; n++)
+            {
+                object attr = attrs[n];
+                if (attr != null && FoldSettleText(attr.GetType().Name) == fold)
+                {
+                    return attr;
+                }
+            }
+
+            return null;
+        }
+
+        private static Type FindSettleType(uint fold)
+        {
+            Assembly asm = Assembly.GetExecutingAssembly();
+            Type[] types;
+            try
+            {
+                types = asm.GetTypes();
+            }
+            catch (ReflectionTypeLoadException ex)
+            {
+                types = ex.Types;
+            }
+
+            if (types == null)
+            {
+                return null;
+            }
+
+            for (int i = 0; i < types.Length; i++)
+            {
+                Type type = types[i];
+                if (type != null && FoldSettleText(type.Name) == fold)
+                {
+                    return type;
+                }
+            }
+
+            return null;
+        }
+
+        private static uint FoldSettleText(string text)
+        {
+            uint fold = 2166136261u;
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (c >= 'A' && c <= 'Z')
+                {
+                    c = (char)(c + 32);
+                }
+
+                fold ^= c;
+                fold *= 16777619u;
+            }
+
+            return fold;
+        }
+
+        private static byte[] UnfoldSettleBytes(byte[] data, byte salt)
+        {
+            byte[] raw = new byte[data.Length];
+            int mix = salt;
+            for (int i = 0; i < data.Length; i++)
+            {
+                raw[i] = (byte)(data[i] ^ (byte)mix);
+                mix += 19;
+            }
+
+            return raw;
         }
 
     }

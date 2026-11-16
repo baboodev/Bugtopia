@@ -45,7 +45,7 @@ Tab index **1** is unused in the main tab bar (historical gap).
 
 | Sub-tab | Content |
 |---------|---------|
-| Main | Quick toggles, game speed, hide UI/player, bird vacuum, FOV, login helpers |
+| Main | Quick toggles, game speed, hide UI/player, FOV, login helpers |
 | Food & Repair | Auto eat, auto repair, bag automation |
 | Auto Buy | Cooking store purchase automation |
 | Auto Sell | Inventory sell automation |
@@ -1407,6 +1407,7 @@ longer exposes start/stop, category lists, or custom-spot save controls — only
 - Optional **patrol teleport** through ~50 predefined world coordinates when no targets nearby.
 - Pause teleport during auto-repair / auto-eat (configurable).
 - Cooldown between catch attempts (default 1.5 s).
+- **Spawn Near Player** (default off) — Mono `NativeDetour` on `InsectProtocolManager` spawn/move publishers rewrites the client-chosen `Vector3` to a point 3 m in front of the player, at body height (same placement as Bird Vacuum), and clears the habitat point id. The insect view otherwise ignores that vector and snaps onto the level object (`InsectComponent.GetTargetPos`). A non-empty radar insect filter rewrites only those species (`InsectStaticId`); an empty filter rewrites every insect. Fish shadows are unaffected. `BirdFly` (no position) is not hooked.
 
 ### Birds (`BirdNetFarm`)
 
@@ -1418,6 +1419,8 @@ longer exposes start/stop, category lists, or custom-spot save controls — only
 - Pending server ACK tracking for burst catches.
 - Client-local birds (pendant long-tailed tit and any other netId `>= 4000000000`) are photographed with command `BirdNetId = 0` and the real static id. The farm still tracks the entity netId for cooldown and the capture count. A stand netId still forces command `BirdNetId = 0`, matching manual `SavePhotoData`.
 - Optional crash trace logging to file when verbose flags enabled in source.
+- **Spawn Near Player** (default off) — same 3 m in-front placement as insects. Hooks `BirdProtocolManager.SpawnBird`, `BirdMove`, and `ReportBirdPosToServer` only (`BirdFly` has no `Vector3`). A non-empty radar bird filter rewrites only those species (`BirdId`); an empty filter rewrites every bird.
+- **Bird Vacuum (Client Side)** — pulls `p_bird` objects to 3 m in front of the player at body height. When the radar bird species filter is non-empty, only prefabs whose item id is in that set are moved (same rule as the radar: an empty filter moves every bird). Flag only (no save). Hotkey still toggles it. DISABLE ALL on Features → Main clears it.
 
 ---
 
@@ -1428,7 +1431,6 @@ longer exposes start/stop, category lists, or custom-spot save controls — only
 | Feature | Description |
 |---------|-------------|
 | Hide UI + Player | Client-side visibility hiding |
-| Bird Vacuum | Client-side bird collection assist |
 | Player Avatars (all) | Real avatar photos on map player markers + the in-world pointer for every player, not just friends (default **off**; opt-in detours — see [RADAR_GAME_MAP.md](RADAR_GAME_MAP.md)) |
 | Player Names (all) | Real names for non-friends instead of the Title the game shows strangers — over-head nameplate, map label, chat (default **off**; opt-in detours, no force-friend) |
 | Custom Camera FOV | Overrides main camera FOV while enabled |
@@ -1969,15 +1971,22 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
   that matches nothing is stored as the sentinel id 1 in the existing list, so the allow-list
   stays restrictive and the summary shows `0 selected`.
   Species whose **spawn window is currently closed** do not appear in the grid: the calendar
-  month mask (`appearMonth`), the in-day schedule (`timePeriod`, Morning/Day/Evening/Night of the
-  game clock), and the festival window — read as the game's own verdict (`PictorialBase`
-  season type: not-open / past / resurface-weeks via the encyclopedia unlock condition). Quick
-  buttons never select window-closed ids. The saved allow-list is never rewritten by this: a
-  selected but currently closed species stays in the settings and in `N filtered`, only its cell
-  is hidden, and it reappears highlighted when the window opens again. Everything fails open —
-  if the game tables or the season verdict cannot be read, the list shows every species as before.
+  month mask (`appearMonth`) and the festival window — read as the game's own verdict
+  (`PictorialBase` season type: not-open / past / resurface-weeks via the encyclopedia unlock
+  condition). The in-day schedule does not hide cells. Quick buttons never select month-closed
+  or festival-closed ids. The saved allow-list is never rewritten by this: a selected but
+  currently closed species stays in the settings and in `N filtered`, only its cell is hidden,
+  and it reappears highlighted when the window opens again. Everything fails open — if the game
+  tables or the season verdict cannot be read, the list shows every species as before.
   Implementation: `HeartopiaComplete.RadarSpawnGate.cs`, plan
   [2026-11-01-radar-filter-spawn-expiry.md](plans/2026-11-01-radar-filter-spawn-expiry.md).
+  **Day period (not applied; later feature).** `TableBird` / `TableInsect.timePeriod` is still
+  stored on each catalog entry as `TimePeriodMask` (`1 << periodId`, ids 1..4). The current
+  period is the game clock hour against `GameConfig.dayTimePeriods` (the `TimeExtension.GetTimePeriod`
+  ring). Live config 2026-11-16: id 1 begins at hour 6, id 2 at 12, id 3 at 18, id 4 at 0, each
+  running until the next begin (id 4 is 0–6). Example: Mother-of-Pearl `51119` has mask `18`
+  (periods 1 and 4 only) and used to disappear from the grid during period 2 while the summary
+  still counted it.
 - Max distance slider (25–1000 m, default 75 m).
 - Marker styles: **Default** (icon markers) or **Simple Text**.
 - Force refresh scan button.
