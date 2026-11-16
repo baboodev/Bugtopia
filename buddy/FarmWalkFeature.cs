@@ -807,7 +807,7 @@ namespace HeartopiaMod
         internal bool FarmWalkRunActive => (this.farmWalkToNodeEnabled && this.autoFarmActive)
                                            || this.questWalkFollowing
                                            || this.CleanupBossDrivingWalker
-                                           || FishingRouteFeature.Walking;
+                                           || GatherLocationsFeature.Walking;
 
         // ⛔ NODES THE WALKER NEVER TARGETS. Spots whose surrounding geometry defeats routing:
         // the straight leg is blocked by a ledge, the graph answers with a loop across the map,
@@ -3652,9 +3652,14 @@ namespace HeartopiaMod
             // The seat cannot leak: the farm's Stop path calls AbortFarmWalk unconditionally,
             // and its early return now dismounts an owned seat even with no walk active.
             //
+            // Get Out At = never (0): skip this arrival backstop too — proximity dismount is already
+            // gated the same way. Stuck / no-route still call TryFarmWalkDismount directly.
+            //
             // Live check, not ownership, for the same reason as the approach dismount: arriving to
-            // collect means arriving on foot no matter who took the seat.
-            if (this.IsFarmWalkVehicleSteering() && !(this.farmWalkSkipToScan && !areaWalk))
+            // collect means arriving on foot no matter who took the seat (unless never).
+            if (this.farmWalkVehicleDismountDistance > 0f
+                && this.IsFarmWalkVehicleSteering()
+                && !(this.farmWalkSkipToScan && !areaWalk))
             {
                 this.TryFarmWalkDismount(areaWalk ? "zone haul finished" : "arrived to collect");
             }

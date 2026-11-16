@@ -20,8 +20,7 @@ namespace HeartopiaMod
     //    BirdNetFarm gained five Get/Set*FromUi groups (BirdNetFarm.cs:161-231) plus ONE
     //    sanctioned call-site simplification: DrawSection's Capture Mode block now routes its
     //    change cascade through the shared SetCaptureModeFromUi (the private pending-confirm/
-    //    burst state it clears is unreachable from outside the class — the
-    //    FishingRouteFeature.RemoveCustomSpotAt precedent).
+    //    burst state it clears is unreachable from outside the class).
     //  - SAVE MODEL IS DIFFERENT FROM EVERY SIBLING: BirdNetFarm saves on a 2s DEBOUNCE
     //    (pendingSaveAt, flushed by BirdNetFarm.Update via host.SaveAllSettings — runs every
     //    frame regardless of menu state, BirdNetFarm.cs:562-566). The new setters arm that same

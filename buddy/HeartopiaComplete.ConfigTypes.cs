@@ -197,8 +197,9 @@ namespace HeartopiaMod
             public bool farmWalkUseVehicleEnabled;
             public bool farmWalkVehicleFixEnabled;
             public float farmWalkVehicleMinDistance;
-            // Distance from the destination at which the driver gets out.
-            public float farmWalkVehicleDismountDistance;
+            // Distance from the destination at which the driver gets out. 0 = never (proximity).
+            // -1 = absent from older configs (load falls back to 10).
+            public float farmWalkVehicleDismountDistance = -1f;
             // Seconds walked on foot before the vehicle is summoned; 0 = at the start. -1 = absent.
             public float farmWalkVehicleDelaySeconds = -1f;
             public float farmWalkCornerReachFoot = -1f;      // -1 = absent; 0 is a real value
@@ -455,6 +456,9 @@ namespace HeartopiaMod
             public bool autoFishKeepCameraAndHud = false;
             public bool autoFishServerSide = false;
             public bool fishingRouteCustomOnly = false;
+            public float locationsEmptyWaitSeconds = 10f;
+            // Start Gather Locations at the nearest flattened spot (on) or at index 0 (off).
+            public bool locationsStartNearest = true;
             public float autoFishReelMaxDuration = -1f;
             public float autoFishReelHoldDuration = -1f;
             public float autoFishReelPauseDuration = -1f;
@@ -672,6 +676,24 @@ namespace HeartopiaMod
         }
 
         [Serializable]
+        public class LocationSpotEntry
+        {
+            public string name = "";
+            public float x;
+            public float y;
+            public float z;
+        }
+
+        [Serializable]
+        public class LocationCategoryEntry
+        {
+            public string id = "";
+            public string name = "";
+            public bool enabledOnRoute = true;
+            public List<LocationSpotEntry> spots = new List<LocationSpotEntry>();
+        }
+
+        [Serializable]
         public class UnifiedConfigData
         {
             public List<GameKeyOverrideEntry> GameKeyOverrides = new List<GameKeyOverrideEntry>();
@@ -680,7 +702,11 @@ namespace HeartopiaMod
             public RadarConfigData Radar = new RadarConfigData();
             public BirdFarmConfigData BirdFarm = new BirdFarmConfigData();
             public List<CustomTeleportEntry> CustomTeleports = new List<CustomTeleportEntry>();
+            // Read for one-release migrate from FishingRouteSpots; stop writing after migrate.
             public List<CustomTeleportEntry> FishingRouteSpots = new List<CustomTeleportEntry>();
+            public List<LocationCategoryEntry> LocationCategories = new List<LocationCategoryEntry>();
+            // Once true, an empty LocationCategories list is intentional — do not re-seed Fishing.
+            public bool locationsLegacyMigrated = false;
             public string Language = "en";
         }
 

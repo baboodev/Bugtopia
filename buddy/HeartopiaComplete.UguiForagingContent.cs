@@ -583,7 +583,7 @@ namespace HeartopiaMod
                 this.farmWalkVehicleMinDistance, true,
                 new System.Action<float>(this.OnUguiForagingWalkVehicleDistanceChanged));
 
-            handle.WalkVehicleDismountShown = this.LF("Get Out At: {0}m", (int)this.farmWalkVehicleDismountDistance);
+            handle.WalkVehicleDismountShown = this.BuildUguiForagingWalkVehicleDismountText();
             handle.WalkVehicleDismountLabel = this.CreateUguiBodyLabel(settings.transform,
                 "WalkVehicleDismountLabel", handle.WalkVehicleDismountShown, 13f);
             handle.WalkVehicleDismountSlider = this.CreateUguiSlider(settings.transform, "WalkVehicleDismountSlider",
@@ -1014,7 +1014,7 @@ namespace HeartopiaMod
                 this.SyncUguiSelfLabelText(handle.WalkVehicleDistanceLabel, ref handle.WalkVehicleDistanceShown,
                     this.LF("Vehicle From: {0}m", (int)this.farmWalkVehicleMinDistance));
                 this.SyncUguiSelfLabelText(handle.WalkVehicleDismountLabel, ref handle.WalkVehicleDismountShown,
-                    this.LF("Get Out At: {0}m", (int)this.farmWalkVehicleDismountDistance));
+                    this.BuildUguiForagingWalkVehicleDismountText());
                 this.SyncUguiSelfLabelText(handle.WalkVehicleDelayLabel, ref handle.WalkVehicleDelayShown,
                     this.LF("Vehicle Delay: {0}s", (int)this.farmWalkVehicleDelaySeconds));
                 this.SyncUguiToggleFromField(handle.WalkVehicleFixToggle, this.farmWalkVehicleFixEnabled);
@@ -1389,6 +1389,13 @@ namespace HeartopiaMod
 
             this.farmWalkVehicleMinDistance = clamped;
             try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private string BuildUguiForagingWalkVehicleDismountText()
+        {
+            return this.farmWalkVehicleDismountDistance <= 0f
+                ? this.L("Get Out At: never")
+                : this.LF("Get Out At: {0}m", (int)this.farmWalkVehicleDismountDistance);
         }
 
         private void OnUguiForagingWalkVehicleDismountChanged(float value)

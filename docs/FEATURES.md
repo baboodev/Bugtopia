@@ -1348,7 +1348,7 @@ UI displays user-friendly status:
 
 - Scanning for fish, Waiting for bite, Fish hooked, Reeling, Catch secured, Fish escaped, etc.
 
-Optional hotkeys: toggle auto fish, teleport fishing route (if configured).
+Optional hotkeys: toggle auto fish.
 
 **Don't Wait for Regrowth** (Foraging settings, off by default): a mushroom spot picked during the
 run is not targeted again for 20 minutes. Mushrooms regrow as new entities 90–120 s after a pick, so
@@ -1356,13 +1356,44 @@ a field never empties and Auto Farm would otherwise stay in it for the whole run
 on the scan runs dry once every spot is picked and the farm relocates to the next area, the way it
 already does for truffles (whose regrowth takes hours).
 
-**Fishing Locations with Walk to Nodes on:** hops between spots are walked (and driven, by the
-Foraging vehicle settings) instead of teleported. Fishing keeps running on the way — a cast, bite
-or battle stops the walk and it resumes once the session is over; an auto repair on the way (kit
-queued, in use, or its aura running) stops the walk the same way. Aura Farm is stopped when the
-route starts driving the walker. A spot the walker cannot reach (route refused, walk failed twice,
-300 s of travel) is skipped for the next one on the list; the teleport remains only when the walker
-is not available at all (a boss run) or every spot refused in a row.
+### Gather Locations (`GatherLocationsFeature`)
+
+**Menu:** Resource Gathering → **Locations** sub-tab (`HeartopiaComplete.UguiLocationsContent.cs`).
+
+Replaces the old **Fishing Locations** route that lived on the Fishing tab. The Fishing sub-tab no
+longer exposes start/stop, category lists, or custom-spot save controls — only the fish farm itself.
+
+**What it does**
+
+- Builds one flattened route from every **enabled** category, in list order. Categories can be
+  created, renamed, deleted, reordered (↑/↓), and toggled on/off for the route. Spot order within a
+  category is editable the same way. Reorder controls are **hidden while the route is running**.
+- **Start at nearest spot** (toggle, default on): Start opens at the nearest flattened spot to the
+  player; off starts at index 0 (first spot of the first enabled category).
+- **Start Locations** does not flip Fish / Insect / Bird on — those farms must already be enabled.
+  At each stop the already-running farms work the area; when every **currently scanning** farm
+  (Combined Farm skips suspended slices) has gone through an empty scan for **Empty wait** seconds
+  (slider, 1–120 s, default 10), the route hops to the next spot. Insects have no busy flag — hops
+  are only blocked by fishing sessions and bird pending confirms.
+- **Walk to Nodes** travel is unchanged from the old fishing route: hops are walked (and driven via
+  Foraging vehicle settings) when the walker is available; Combined Farm allows hops on whichever
+  enabled Fish/Insect/Bird slice owns the tool. Unreachable spots are skipped; teleport is fallback
+  when walking is unavailable.
+- Status line shows category/spot index, empty-range timer, and travel state (`RouteTravelHelper`).
+
+**Default data / migration**
+
+- Fresh installs get a built-in **Fishing** category with the measured world fishing spots.
+- Legacy configs migrate into **Fishing** plus **Custom Fishing** (user spots that were separate).
+  After that migrate flag is set, deleting every category stays empty across reloads.
+
+**Export / import**
+
+- **Export Selected** writes every category currently enabled on the route to the clipboard **and**
+  `%LocalLow%\Bugtopia\location-categories-export.json` (warns if only one channel succeeds).
+- **Import** prefers a valid versioned JSON payload on the clipboard; otherwise it reads that file.
+  Categories merge by id (replace or add). **Save Current Location** adds a spot to the selected
+  category.
 
 **Note:** Startup log explicitly states `AutoFish subsystem disabled` — refers to the **old** `AutoFishLogic` pipeline, not `AutoFishingFarm`.
 

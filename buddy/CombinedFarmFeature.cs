@@ -35,7 +35,7 @@ namespace HeartopiaMod
     //   * the repair pause — a serial equip→repair cycle, because the restore aura only ever fixes
     //     the tool in hand, so the two stowed tools would otherwise wear down invisibly (phase 2),
     //   * movement — an anchor at the fishing spot that bounds the insect farm's teleports and gates
-    //     FishingRouteFeature's hops to the Fish slice (phase 3).
+    //     route hops to the Fish slice (phase 3).
     // Settings live in Resource Gathering → Combined (phase 4).
     public static class CombinedFarmFeature
     {
@@ -383,7 +383,7 @@ namespace HeartopiaMod
 
         // ── Movement arbitration (phase 3) ───────────────────────────────────────────────────────
         // Two of the farms move the player: the insect farm teleports (to its target, and along a
-        // 55-point patrol when the area is empty) and FishingRouteFeature hops between fishing spots.
+        // 55-point patrol when the area is empty) and GatherLocationsFeature hops between gather spots.
         // Run them together and they undo each other — the insect patrol walks away from the water
         // the route just picked. Suspension already stops the inactive farm from moving; what is left
         // is bounding what the ACTIVE one may do.
@@ -398,9 +398,20 @@ namespace HeartopiaMod
         private static Vector3 moveAnchor;
         private static bool hasMoveAnchor;
 
-        // FishingRouteFeature: hop only while the Fish slice actually owns the tool.
+        // GatherLocationsFeature: hop only while an enabled gather slice (Fish / Insect / Bird) owns the tool.
         public static bool AllowsRouteHop =>
-            !coordinating || (!repairCycleActive && activeSlice == FarmSlice.Fish);
+            !coordinating || (!repairCycleActive && IsGatherRouteSlice(activeSlice));
+
+        private static bool IsGatherRouteSlice(FarmSlice slice)
+        {
+            switch (slice)
+            {
+                case FarmSlice.Fish: return AutoFishingFarm.IsEnabled;
+                case FarmSlice.Insect: return InsectNetFarm.IsEnabled;
+                case FarmSlice.Bird: return BirdNetFarm.IsEnabled;
+                default: return false;
+            }
+        }
 
         private static float GetMoveAnchorRadius()
         {

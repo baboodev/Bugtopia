@@ -748,17 +748,23 @@ namespace HeartopiaMod
 
         private bool ShouldSkipRecentBirdFarmNetId(uint netId)
         {
-            if (netId != 0U && this.birdFarmBurstSentNetIds.Contains(netId))
+            if (netId == 0U)
+            {
+                return false;
+            }
+
+            // Exhausted (OnlyTakeOnceDaily / MaxPhoto) always skips — including Spam Capture mode.
+            if (this.IsBirdFarmPhotoExhausted(netId))
+            {
+                return true;
+            }
+
+            if (this.birdFarmBurstSentNetIds.Contains(netId))
             {
                 return true;
             }
 
             if (this.birdFarmSpamMaxPhotoModeActive)
-            {
-                return false;
-            }
-
-            if (netId == 0U)
             {
                 return false;
             }
@@ -775,6 +781,46 @@ namespace HeartopiaMod
 
             this.recentBirdFarmPhotoNetIds.Remove(netId);
             return false;
+        }
+
+        private bool IsBirdFarmPhotoExhausted(uint netId)
+        {
+            if (netId == 0U)
+            {
+                return false;
+            }
+
+            if (!this.birdFarmPhotoExhaustedNetIds.TryGetValue(netId, out float until))
+            {
+                return false;
+            }
+
+            if (Time.unscaledTime <= until)
+            {
+                return true;
+            }
+
+            this.birdFarmPhotoExhaustedNetIds.Remove(netId);
+            return false;
+        }
+
+        // House-perch daily limit and wild MaxPhoto both leave the bird in the world. Mark it so
+        // Spam Capture stops burning scanner durability and Gather Locations can treat the spot empty.
+        private const float BirdFarmPhotoExhaustedDurationSeconds = 12f * 60f * 60f;
+
+        private void MarkBirdFarmPhotoExhausted(uint netId, string reason)
+        {
+            if (netId == 0U)
+            {
+                return;
+            }
+
+            this.birdFarmPhotoExhaustedNetIds[netId] = Time.unscaledTime + BirdFarmPhotoExhaustedDurationSeconds;
+            this.RememberRecentBirdFarmNetId(netId, 60f);
+            this.RemovePendingBirdFarmAttempt(netId);
+            this.cachedBirdFarmAuraCandidates.Clear();
+            this.cachedBirdFarmAuraCandidatesAt = -999f;
+            this.BirdFarmNetLog($"Bird photo exhausted netId={netId} reason={reason} ttl={BirdFarmPhotoExhaustedDurationSeconds:F0}s");
         }
 
         private void RememberRecentBirdFarmNetId(uint netId, float durationSeconds = 180f)
@@ -3688,6 +3734,12 @@ namespace HeartopiaMod
                 return false;
             }
 
+            if (this.IsBirdFarmPhotoExhausted(birdNetId))
+            {
+                status = "Skipping daily-limit bird";
+                return false;
+            }
+
             if (this.ShouldSkipRecentBirdFarmNetId(birdNetId))
             {
                 status = "Waiting for bird capture cooldown";
@@ -3816,14 +3868,19 @@ namespace HeartopiaMod
             }
         }
 
-        // MaxPhoto auto-scare detection — anti-cheat-safe path.
+        // Photo-reject handling — anti-cheat-safe path.
         // The game dispatches TakingBirdPhotoResultEvent through EventCenter (BirdProtocolManager.InformTakingPhotoResult
         // -> EventCenter.DispatchEvent(in evt)), so we subscribe via the embedded-Mono dispatch-detour engine
         // (RegisterGameEventHook) instead of the old IL2CPP Harmony postfixes on BirdWatchingSystem.InformUiResult /
         // BirdManager.BirdPhotoErrorToast — those wrote GameAssembly .text and were visible to the Themis integrity hash.
         // Payload: { BirdErrorCode errorCode @0 (int32); bool IsTriggerPassive @4 }.
+        //
+        // OnlyTakeOnceDaily (house perch, toast "Can only photograph once per day") leaves the bird in the world.
+        // MaxPhoto (wild card limit) is scare-able. Both must exhaust the netId so Spam Capture and Gather Locations
+        // stop treating the bird as a live target.
         private const string BirdFarmMaxPhotoResultEventName = "ScriptsRefactory.DataAndProtocol.Events.TakingBirdPhotoResultEvent";
-        private const int BirdErrorCodeMaxPhoto = 15; // BirdErrorCode.MaxPhoto (enum ordinal)
+        private const int BirdErrorCodeOnlyTakeOnceDaily = 13; // BirdErrorCode.OnlyTakeOnceDaily
+        private const int BirdErrorCodeMaxPhoto = 15; // BirdErrorCode.MaxPhoto
 
         public void TryEnsureBirdFarmMaxPhotoEventHook()
         {
@@ -3836,7 +3893,7 @@ namespace HeartopiaMod
             if (this.RegisterGameEventHook(BirdFarmMaxPhotoResultEventName, 8, this.OnTakingBirdPhotoResultMaxPhotoEvent))
             {
                 this.birdFarmMaxPhotoHookRegistered = true;
-                ModLogger.Msg("[BirdFarm] Subscribed to TakingBirdPhotoResultEvent for MaxPhoto auto-scare (EventCenter, no IL2CPP patch).");
+                ModLogger.Msg("[BirdFarm] Subscribed to TakingBirdPhotoResultEvent for OnlyTakeOnceDaily/MaxPhoto (EventCenter, no IL2CPP patch).");
             }
         }
 
@@ -3844,14 +3901,34 @@ namespace HeartopiaMod
         // so the AuraMono escape/remove invokes in TryHandleBirdFarmMaxPhotoAutoScare stay main-thread-safe.
         private void OnTakingBirdPhotoResultMaxPhotoEvent(GameEventSnapshot e)
         {
-            // errorCode @0 (BirdErrorCode, int32-backed). Only MaxPhoto triggers the auto-scare.
-            if (e.ReadInt32(0) != BirdErrorCodeMaxPhoto)
+            int errorCode = e.ReadInt32(0);
+            if (errorCode == BirdErrorCodeOnlyTakeOnceDaily)
+            {
+                this.BirdFarmNetLog("[BirdPhotoReject] TakingBirdPhotoResultEvent observed: OnlyTakeOnceDaily");
+                this.TryHandleBirdFarmDailyPhotoExhaust("TakingBirdPhotoResultEvent");
+                return;
+            }
+
+            if (errorCode != BirdErrorCodeMaxPhoto)
             {
                 return;
             }
 
             this.BirdFarmNetLog("[MaxPhotoDirect] TakingBirdPhotoResultEvent observed: MaxPhoto");
             this.TryHandleBirdFarmMaxPhotoAutoScare("TakingBirdPhotoResultEvent");
+        }
+
+        private void TryHandleBirdFarmDailyPhotoExhaust(string source)
+        {
+            if (!this.TryPeekRecentBirdFarmAttempt(out uint netId) || netId == 0U)
+            {
+                this.BirdFarmNetLog($"OnlyTakeOnceDaily observed via {source} but no recent bird farm netId was available.");
+                return;
+            }
+
+            this.MarkBirdFarmPhotoExhausted(netId, "OnlyTakeOnceDaily");
+            BirdNetFarm.NotifyBirdPhotoExhausted(netId, "OnlyTakeOnceDaily (house perch daily limit)");
+            this.BirdFarmNetLog($"OnlyTakeOnceDaily exhausted netId={netId} source={source} — no scare (perch bird stays).");
         }
 
         private void TryHandleBirdFarmMaxPhotoAutoScare(string source)
@@ -3875,7 +3952,7 @@ namespace HeartopiaMod
 
             this.lastBirdFarmMaxPhotoScareNetId = netId;
             this.lastBirdFarmMaxPhotoScareAt = now;
-            this.RemovePendingBirdFarmAttempt(netId);
+            this.MarkBirdFarmPhotoExhausted(netId, "MaxPhoto");
 
             bool escapeSuccess = this.TryInvokeAuraMonoBirdEscapeProtocol(netId, 0, out string escapeStatus);
             bool removeSuccess = this.TryInvokeAuraMonoBirdRemove(netId, out string removeStatus);
@@ -3883,15 +3960,12 @@ namespace HeartopiaMod
             string status = escapeStatus + "; " + removeStatus;
             if (success)
             {
-                this.RememberRecentBirdFarmNetId(netId, 20f);
                 if (this.lastBirdFarmRecentPhotoNetId == netId)
                 {
                     this.lastBirdFarmRecentPhotoNetId = 0U;
                     this.lastBirdFarmRecentPhotoNetIdAt = -999f;
                 }
 
-                this.cachedBirdFarmAuraCandidates.Clear();
-                this.cachedBirdFarmAuraCandidatesAt = -999f;
                 this.BirdFarmNetLog($"MaxPhoto auto-scare sent for netId={netId} source={source} escape={escapeSuccess} remove={removeSuccess}.");
             }
             else
@@ -4670,7 +4744,9 @@ namespace HeartopiaMod
                 || (lower.Contains("photo") && lower.Contains("limit"))
                 || (lower.Contains("info") && lower.Contains("limit"))
                 || (lower.Contains("card") && lower.Contains("limit"))
-                || (lower.Contains("max") && lower.Contains("photo"));
+                || (lower.Contains("max") && lower.Contains("photo"))
+                || (lower.Contains("once") && lower.Contains("day"))
+                || lower.Contains("onlytakeoncedaily");
         }
 
         private sealed class BirdFarmAuraCandidate

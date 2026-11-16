@@ -1476,7 +1476,13 @@ namespace HeartopiaMod
                     {
                         if (entry != null) this.customTeleportList.Add(entry);
                     }
-                    FishingRouteFeature.ImportCustomSpots(config.FishingRouteSpots);
+                    GatherLocationsFeature.SetLegacyMigrated(config.locationsLegacyMigrated);
+                    GatherLocationsFeature.ImportCategories(config.LocationCategories);
+                    // Seed only once: after migrate the flag stays set even if the user deletes every category.
+                    if (GatherLocationsFeature.CategoryCount == 0 && !GatherLocationsFeature.LegacyMigrated)
+                    {
+                        GatherLocationsFeature.SeedFromLegacyFishing(config.FishingRouteSpots);
+                    }
                     ModLogger.Msg($"Loaded {this.customTeleportList.Count} custom teleports.");
                     return;
                 }
@@ -1503,6 +1509,11 @@ namespace HeartopiaMod
                         }
                     }
                     ModLogger.Msg($"Loaded {this.customTeleportList.Count} custom teleports.");
+                }
+                // No unified config yet (fresh install): seed the built-in fishing category once.
+                if (GatherLocationsFeature.CategoryCount == 0 && !GatherLocationsFeature.LegacyMigrated)
+                {
+                    GatherLocationsFeature.SeedFromLegacyFishing(null);
                 }
             }
             catch (Exception ex)

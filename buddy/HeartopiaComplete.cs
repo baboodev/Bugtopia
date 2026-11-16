@@ -1370,7 +1370,7 @@ namespace HeartopiaMod
             if (this.autoRepairOnToastEnabled)
             {
                 // Aura-window events make IsAutoRepairBusy() cover the restore phase too; without
-                // them only FishingRouteFeature.Start registered these, so standalone Auto Fishing
+                // them only the former fishing route registered these, so standalone Auto Fishing
                 // + Auto Repair resumed casting the moment the kit was consumed.
                 this.EnsureRepairAuraEventHooks();
             }
@@ -1469,10 +1469,10 @@ namespace HeartopiaMod
                 try { AutoFishingFarm.Update(this); this.autoFishingFarmBreaker.Success(); }
                 catch (Exception ex) { this.autoFishingFarmBreaker.Failure("AutoFishingFarm", ex, Time.unscaledTime); }
             }
-            if (this.fishingRouteBreaker.ShouldRun(Time.unscaledTime))
+            if (this.gatherLocationsBreaker.ShouldRun(Time.unscaledTime))
             {
-                try { FishingRouteFeature.Update(this); this.fishingRouteBreaker.Success(); }
-                catch (Exception ex) { this.fishingRouteBreaker.Failure("FishingRoute", ex, Time.unscaledTime); }
+                try { GatherLocationsFeature.Update(this); this.gatherLocationsBreaker.Success(); }
+                catch (Exception ex) { this.gatherLocationsBreaker.Failure("GatherLocations", ex, Time.unscaledTime); }
             }
             this.ProcessAutoSell();
             this.RunLobbyAutoActions();
@@ -2392,7 +2392,7 @@ namespace HeartopiaMod
         private FeatureBreakerState insectNetFarmBreaker;
         private FeatureBreakerState puzzleNetBreaker;
         private FeatureBreakerState autoFishingFarmBreaker;
-        private FeatureBreakerState fishingRouteBreaker;
+        private FeatureBreakerState gatherLocationsBreaker;
         private FeatureBreakerState combinedFarmBreaker;
 
 
@@ -4868,6 +4868,9 @@ namespace HeartopiaMod
         private readonly List<uint> lastBirdFarmSentNetIds = new List<uint>();
         private readonly HashSet<uint> birdFarmBurstSentNetIds = new HashSet<uint>();
         private readonly Dictionary<uint, float> recentBirdFarmPhotoNetIds = new Dictionary<uint, float>();
+        // Daily / MaxPhoto rejects: spam mode still respects these. Not cleared by ClearBirdFarmRuntimeState
+        // (resume would otherwise re-spam a house-perch bird that stays in world all day).
+        private readonly Dictionary<uint, float> birdFarmPhotoExhaustedNetIds = new Dictionary<uint, float>();
         private readonly Dictionary<uint, int> birdFarmPhotoCountByNetId = new Dictionary<uint, int>();
         private bool birdFarmSpamMaxPhotoModeActive = false;
         private readonly List<BirdFarmAuraCandidate> cachedBirdFarmAuraCandidates = new List<BirdFarmAuraCandidate>();

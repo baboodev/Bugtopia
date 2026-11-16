@@ -36,6 +36,8 @@ ilspy-dumps*
 gameassembly-dumps*
 scratch
 
+*Internal.md
+
 # Local research tooling and notes — kept out of the repo on purpose, not published.
 # (Game-data decryption/unpacking pipelines, dump readers, generated indexes, session notes.)
 # Throwaway sandbox-plugin probe for docs/plans/2026-08-23-aura-farm-radius.md — scaffolding,

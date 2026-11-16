@@ -2333,7 +2333,7 @@ namespace HeartopiaMod
             return true;
         }
 
-        // --- Public accessors for FishingRouteFeature (static class; the fields are private) ---
+        // --- Public accessors for the static route features (the fields are private) ---
         public bool IsAutoRepairBusy()
         {
             return this.IsAutoRepairActiveOrQueued() || this.IsRepairAuraActive();

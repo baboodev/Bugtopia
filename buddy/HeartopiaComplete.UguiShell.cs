@@ -222,6 +222,7 @@ namespace HeartopiaMod
             this.ProcessUguiShellInsectsOnUpdate();
             this.ProcessUguiShellBirdsOnUpdate();
             this.ProcessUguiShellCombinedFarmOnUpdate();
+            this.ProcessUguiShellLocationsOnUpdate();
             this.ProcessUguiShellNewFeaturesAnimalCareOnUpdate();
             this.ProcessUguiShellNewFeaturesSandSculptureOnUpdate();
             this.ProcessUguiShellNewFeaturesPicturesOnUpdate();
@@ -467,7 +468,7 @@ namespace HeartopiaMod
                 string[][] subTabLabels = new string[][]
                 {
                     new string[] { this.L("Main"), this.L("Building"), this.L("Fun"), this.L("Privacy"), this.L("Game UI"), this.L("Game LOD"), this.L("Minimap") },
-                    new string[] { this.L("Foraging"), this.L("Fishing"), this.L("Insects"), this.L("Birds"), this.L("Combined") },
+                    new string[] { this.L("Foraging"), this.L("Fishing"), this.L("Insects"), this.L("Birds"), this.L("Combined"), this.L("Locations") },
                     new string[] { this.L("Main"), this.L("Food & Repair"), this.L("Auto Buy"), this.L("Auto Sell"), this.L("Mass Cook"), this.L("Puzzle"), this.L("Pet Care") },
                     new string[] { this.L("Animal Care"), this.L("Daily Quests"), this.L("homeland_farm.title"), this.L("pictures.title"), this.L("Ice Skating"), this.L("extra.title"), this.L("Sea Clean") },
                     new string[] { this.L("Pumpkin Carving"), this.L("Sand Sculpture"), this.L("Snow Sculpting") },
@@ -783,6 +784,12 @@ namespace HeartopiaMod
                                     // Combined Farming coordinator settings + live state
                                     // (HeartopiaComplete.UguiCombinedFarmContent.cs).
                                     subContents[j] = this.BuildUguiShellCombinedFarmContent(
+                                        container.transform, 0f, 44f, contentColW, contentH - 44f);
+                                }
+                                else if (i == UguiShellResourceGatheringTabIndex && j == UguiShellLocationsSubIndex)
+                                {
+                                    // Gather Locations (HeartopiaComplete.UguiLocationsContent.cs).
+                                    subContents[j] = this.BuildUguiShellLocationsContent(
                                         container.transform, 0f, 44f, contentColW, contentH - 44f);
                                 }
                                 else if (i == UguiShellRadarTabIndex && j == UguiShellRadarMainSubIndex)

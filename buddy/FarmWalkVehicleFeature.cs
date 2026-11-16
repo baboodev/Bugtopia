@@ -22,10 +22,11 @@ namespace HeartopiaMod
     // polling GetUsingVehicle() rather than by waiting for an event.
     public partial class HeartopiaComplete
     {
-        // How far from the target we dismount. A slider: below the floor the vehicle delivers us
-        // right on top of the node and gets in the way of the approach; above the ceiling the walk
-        // that is left takes longer than the ride saved.
-        internal const float FarmWalkVehicleDismountFloor = 1f;
+        // How far from the target we dismount. Slider floor 0 = never get out for proximity or
+        // arrival (stay seated; AbortWalk / collect-arrival keep the seat). Stuck / no-route
+        // escapes and an explicit farm Stop still dismount. Above the ceiling the leftover walk
+        // takes longer than the ride saved.
+        internal const float FarmWalkVehicleDismountFloor = 0f;
         internal const float FarmWalkVehicleDismountCeiling = 20f;
         internal float farmWalkVehicleDismountDistance = 10f;
 
@@ -152,7 +153,7 @@ namespace HeartopiaMod
             // out without the fix: three summons in one session, not one "movement fix applied".
             // Any walker driver qualifies — the same set FarmWalkRunActive names.
             if (!this.farmWalkVehicleFixEnabled
-                || (!this.autoFarmActive && !this.questWalkFollowing && !FishingRouteFeature.Walking))
+                || (!this.autoFarmActive && !this.questWalkFollowing && !GatherLocationsFeature.Walking))
             {
                 return;
             }
@@ -858,6 +859,12 @@ namespace HeartopiaMod
         internal void ProcessFarmWalkVehicleDismount(Vector3 selfPos)
         {
             if (!this.IsFarmWalkVehicleSteering())
+            {
+                return;
+            }
+
+            // 0 = never get out for approaching the target (stuck/no-route escapes still dismount).
+            if (this.farmWalkVehicleDismountDistance <= 0f)
             {
                 return;
             }

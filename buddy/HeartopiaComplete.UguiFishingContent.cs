@@ -8,18 +8,16 @@ namespace HeartopiaMod
     // ============================================================================================
     // UGUI SHELL — Phase 3 tab CONTENT, Resource Gathering round 2 of 4 (migration plan:
     // cosmic-waddling-rainbow.md, item 6): the FISHING sub-tab only — AutoFishingFarm.DrawSection
-    // (AutoFishingFarm.cs:641-790) plus FishingRouteFeature.DrawSection (FishingRouteFeature.cs),
-    // which IMGUI embeds right below it in the same scrolling flow. Insects/Birds are separate
-    // follow-up rounds and are untouched (their cells stay shell placeholders).
+    // (AutoFishingFarm.cs:641-790). Insects/Birds are separate follow-up rounds and are
+    // untouched (their cells stay shell placeholders). Fishing Locations now live in Gather
+    // Locations (GatherLocationsFeature).
     //
     // Ground rules (same as Foraging and every prior round):
     //  - Both IMGUI drawers and every backend method they call stay fully functional and
     //    untouched — this file only READS the same state and CALLS the same action methods.
     //    Two independent rendering paths over one backend. The only backend additions this round
     //    are purely-additive interop: AutoFishingFarm.SetDetectRangeFromUi (the IMGUI slider
-    //    block's round/status/log behavior as a callable) and FishingRouteFeature's read-only
-    //    accessors + SaveCurrentLocationFromUi + RemoveCustomSpotAt (the removal-plus-index-fixup
-    //    extracted so BOTH surfaces share one implementation).
+    //    block's round/status/log behavior as a callable).
     //  - Wiring is by STATIC display-position index (UguiShellResourceGatheringTabIndex = 1 +
     //    UguiShellFishingSubIndex = 1, declared next to their siblings in UguiShellTabIndices.cs;
     //    Fishing = autoFarmSubTab 1 per DrawAutoFarmTab's dispatcher), never label comparison.
@@ -30,8 +28,7 @@ namespace HeartopiaMod
     // controls straight onto the tab background (no DrawExentriSectionPanel anywhere) — so this
     // is one flat stack inside a transparent scroll view (Logging idiom: alpha-0 images still
     // raycast, so wheel/drag scrolling works over the block's own ContentBg). The layout replays
-    // the IMGUI functions' own `num +=` cursor chain, including the `num + 10f` hand-off between
-    // the two DrawSections. Everything above the Auto Bait toggle never moves (positioned once in
+    // the IMGUI function's own `num +=` cursor chain. Everything above the Auto Bait toggle never moves (positioned once in
     // the builder); everything at/below the Auto Bait conditional block is owned by
     // RelayoutUguiShellFishing (relayout-on-signature-change, Foraging shape — one longer chain
     // instead of three panels).
@@ -42,18 +39,7 @@ namespace HeartopiaMod
     //    reset or SetAutoBaitEnabled's counter reset), the Status/Tool/Target readouts (pure
     //    string-remapping formatters, no side effects — IMGUI formats them per drawn frame too),
     //    slider value labels and button labels (cached-string diffs), and the layout signature
-    //    (autoBait / route active / paused / custom-only / spot count).
-    //  - 0.5s tick (NextSlowSyncAt idiom): the custom-spot count probe — the list is private to
-    //    FishingRouteFeature, so the only read is ExportCustomSpots(), which COPIES entries; that
-    //    allocation belongs on the throttle, not per frame. Save/Delete clicks from THIS surface
-    //    refresh immediately instead of waiting for the probe.
-    //
-    // The custom-spot rows reuse the Teleport-Custom CRUD idiom (destroy-all + rebuild-from-0 on
-    // count change — a small user-curated list, deliberately NOT the Bag/Warehouse virtualized
-    // pool) but with row shape (b): a non-clickable name+coords LABEL plus one trailing danger
-    // "X" button, matching the source's GUI.Label rows — NOT Teleport-Custom's labelless
-    // two-button rows. Deletion routes through FishingRouteFeature.RemoveCustomSpotAt so the
-    // route-pointer fixup (the one genuinely delicate piece here) has exactly one implementation.
+    //    (autoBait).
     // ============================================================================================
     public partial class HeartopiaComplete
     {
@@ -100,25 +86,7 @@ namespace HeartopiaMod
             public string RemainingShown;
             public GameObject BaitResetButton;
 
-            // Part B — Fishing Locations (everything moves with the Auto Bait block above it)
-            public GameObject RouteHeader;
-            public GameObject RouteActionButton;  // label swaps Start/Stop Fishing Locations
-            public string RouteActionShown;
-            public Toggle CustomOnlyToggle;
-            public GameObject NoCustomHintLabel;  // custom-only on + zero spots
-            public GameObject LocationLabel;      // active-only
-            public string LocationShown;
-            public GameObject RouteStatusLabel;   // active-only
-            public string RouteStatusShown;
-            public GameObject PausedLabel;        // active + pausedForRepair
-            public GameObject SaveLocationButton;
-            public GameObject CustomCountLabel;   // list-only
-            public string CustomCountShown;
-            public readonly List<GameObject> SpotRows = new List<GameObject>();
-            public int CustomSpotsCount;          // 0.5s-probe cache (+ forced after Save/Delete)
-
-            public int LayoutSignature = -1;      // packed autoBait/active/paused/customOnly/count
-            public float NextSlowSyncAt;          // 0.5s tick
+            public int LayoutSignature = -1;      // autoBait flag
             public int ErrorCount;                // per-frame sync disabled at 3 (LIVE rail idiom)
         }
 
@@ -148,36 +116,9 @@ namespace HeartopiaMod
                 : this.L("Item: Attractor");
         }
 
-        private string BuildUguiFishingRouteActionText()
-        {
-            // FishingRouteFeature.cs draw — DrawPrimaryActionButton localizes internally.
-            return FishingRouteFeature.Active
-                ? this.L("Stop Fishing Locations")
-                : this.L("Start Fishing Locations");
-        }
-
-        private string BuildUguiFishingLocationText()
-        {
-            return this.LF("Location: {0}/{1} ({2})",
-                FishingRouteFeature.CurrentIndex + 1,
-                FishingRouteFeature.TotalSpotCount,
-                FishingRouteFeature.GetSpotName(FishingRouteFeature.CurrentIndex));
-        }
-
-        private string BuildUguiFishingRouteStatusText()
-        {
-            // Source: UI_LocalizeFormat("Route: {0}", UI_Localize(lastStatus)) — the INNER value
-            // is localized; the outer format has no other translatable text.
-            return "Route: " + this.L(FishingRouteFeature.LastStatus);
-        }
-
         private int ComputeUguiFishingLayoutSignature(UguiShellFishingHandle handle)
         {
-            return (AutoFishingFarm.GetAutoBaitEnabled() ? 1 : 0)
-                 | (FishingRouteFeature.Active ? 2 : 0)
-                 | (FishingRouteFeature.PausedForRepair ? 4 : 0)
-                 | (FishingRouteFeature.GetCustomSpotsOnly() ? 8 : 0)
-                 | (handle.CustomSpotsCount << 4);
+            return AutoFishingFarm.GetAutoBaitEnabled() ? 1 : 0;
         }
 
         // ----------------------------------------------------------------------------------------
@@ -335,100 +276,12 @@ namespace HeartopiaMod
             handle.BaitResetButton = this.CreateUguiSecondaryButton(scrollContent, "BaitResetButton",
                 this.L("Reset"), new System.Action(this.OnUguiFishingBaitResetClicked));
 
-            // ------------- Part B: Fishing Locations (FishingRouteFeature.DrawSection) ----------
-            handle.RouteHeader = this.CreateUguiHeaderLabel(scrollContent, "RouteHeader",
-                this.L("Fishing Locations"), 14f);
-
-            handle.RouteActionShown = this.BuildUguiFishingRouteActionText();
-            handle.RouteActionButton = this.CreateUguiPrimaryButton(scrollContent, "RouteActionButton",
-                handle.RouteActionShown, new System.Action(this.OnUguiFishingRouteActionClicked));
-
-            handle.CustomOnlyToggle = this.CreateUguiCheckbox(scrollContent, "CustomOnlyToggle",
-                this.L("Custom Spots Only"), FishingRouteFeature.GetCustomSpotsOnly(),
-                new System.Action<bool>(this.OnUguiFishingCustomOnlyToggled));
-
-            handle.NoCustomHintLabel = this.CreateUguiLabel(scrollContent, "NoCustomHint",
-                this.L("No custom spots saved - using all spots"), 12f, new Color(1f, 0.7f, 0.45f), false);
-
-            handle.LocationShown = this.BuildUguiFishingLocationText();
-            handle.LocationLabel = this.CreateUguiBodyLabel(scrollContent, "LocationLabel", handle.LocationShown, 12f);
-
-            handle.RouteStatusShown = this.BuildUguiFishingRouteStatusText();
-            handle.RouteStatusLabel = this.CreateUguiBodyLabel(scrollContent, "RouteStatusLabel", handle.RouteStatusShown, 12f);
-
-            handle.PausedLabel = this.CreateUguiLabel(scrollContent, "PausedWarn",
-                this.L("Teleport paused until repair finishes"), 12f, new Color(1f, 0.7f, 0.45f), false);
-
-            handle.SaveLocationButton = this.CreateUguiSecondaryButton(scrollContent, "SaveLocationButton",
-                this.L("Save Current Location"), new System.Action(this.OnUguiFishingSaveLocationClicked));
-
-            handle.CustomCountLabel = this.CreateUguiBodyLabel(scrollContent, "CustomCountLabel", "", 12f);
-
-            this.RebuildUguiShellFishingSpotRows(handle);
             handle.LayoutSignature = this.ComputeUguiFishingLayoutSignature(handle);
             this.RelayoutUguiShellFishing(handle);
 
             handle.Root = block;
             this.uguiShellFishing = handle;
             return block;
-        }
-
-        // ----------------------------------------------------------------------------------------
-        // Custom-spot rows — Teleport-Custom CRUD idiom (destroy all + rebuild from 0). Rows are
-        // created at y=0; RelayoutUguiShellFishing must ALWAYS run right after (every call site
-        // does) — it owns the y positions, so create/position stay two halves of one refresh.
-        // ----------------------------------------------------------------------------------------
-
-        private void RebuildUguiShellFishingSpotRows(UguiShellFishingHandle handle)
-        {
-            for (int i = 0; i < handle.SpotRows.Count; i++)
-            {
-                GameObject row = handle.SpotRows[i];
-                if (row != null)
-                {
-                    try { UnityEngine.Object.Destroy(row); } catch { }
-                }
-            }
-            handle.SpotRows.Clear();
-
-            // ExportCustomSpots copies (the live list is private to FishingRouteFeature); it also
-            // filters nulls, so rows and count always agree.
-            List<CustomTeleportEntry> spots = FishingRouteFeature.ExportCustomSpots();
-            handle.CustomSpotsCount = spots.Count;
-            this.SyncUguiSelfLabelText(handle.CustomCountLabel, ref handle.CustomCountShown,
-                this.LF("Custom spots: {0}", spots.Count));
-
-            Transform content = handle.ScrollContent;
-            if (content == null)
-            {
-                return;
-            }
-
-            for (int i = 0; i < spots.Count; i++)
-            {
-                CustomTeleportEntry entry = spots[i];
-                if (entry == null)
-                {
-                    continue;
-                }
-                Vector3 p = entry.position;
-                int indexCopy = i; // capture copy for the click closure
-                // Row shape (b): name+coords LABEL (the source uses GUI.Label, not a button) +
-                // one trailing danger "X" — string unlocalized like the source's own row label.
-                UguiListRowHandle row = this.CreateUguiListRow(content, "Spot" + i, 16f, 0f, 312f, 26f,
-                    $"{entry.name} ({p.x:F0}, {p.y:F0}, {p.z:F0})",
-                    null, null,
-                    false, true, null,
-                    new UguiListRowButtonSpec[]
-                    {
-                        new UguiListRowButtonSpec
-                        {
-                            Label = "X", Tier = UguiListRowTierDanger, Width = 26f, Enabled = true,
-                            OnClick = new System.Action(() => this.OnUguiFishingSpotDeleteClicked(indexCopy))
-                        }
-                    });
-                handle.SpotRows.Add(row.Root);
-            }
         }
 
         // ----------------------------------------------------------------------------------------
@@ -450,18 +303,12 @@ namespace HeartopiaMod
         }
 
         // Relayout — the UGUI analog of both IMGUI cursor chains from the Auto Bait conditional
-        // down (AutoFishingFarm.cs:745-790 + all of FishingRouteFeature.DrawSection), including
-        // the `num + 10f` hand-off between them. Reposition/SetActive/resize only.
+        // down (AutoFishingFarm.cs:745-790). Reposition/SetActive/resize only.
         // ----------------------------------------------------------------------------------------
 
         private void RelayoutUguiShellFishing(UguiShellFishingHandle handle)
         {
             bool autoBait = AutoFishingFarm.GetAutoBaitEnabled();
-            bool routeActive = FishingRouteFeature.Active;
-            bool paused = FishingRouteFeature.PausedForRepair;
-            bool hintVisible = FishingRouteFeature.GetCustomSpotsOnly() && handle.CustomSpotsCount == 0;
-            bool listVisible = handle.CustomSpotsCount > 0;
-
             SetUguiGoActive(handle.BaitChoiceButton, autoBait);
             SetUguiGoActive(handle.BaitMaxLabel, autoBait);
             SetUguiGoActive(handle.BaitMaxSlider != null ? handle.BaitMaxSlider.gameObject : null, autoBait);
@@ -495,64 +342,6 @@ namespace HeartopiaMod
                 yCur += 32f;
             }
 
-            yCur += 10f; // AutoFishingFarm.cs:787 hands FishingRouteFeature.DrawSection num+10f
-
-            PlaceUguiTopLeft(handle.RouteHeader, 16f, yCur, 320f, 22f);
-            yCur += 28f;
-            PlaceUguiTopLeft(handle.RouteActionButton, 16f, yCur, 260f, 35f);
-            yCur += 42f;
-            if (handle.CustomOnlyToggle != null)
-            {
-                PlaceUguiTopLeft(handle.CustomOnlyToggle.gameObject, 16f, yCur, 280f, 25f);
-            }
-            yCur += 30f;
-
-            SetUguiGoActive(handle.NoCustomHintLabel, hintVisible);
-            if (hintVisible)
-            {
-                PlaceUguiTopLeft(handle.NoCustomHintLabel, 16f, yCur, 360f, 20f);
-                yCur += 24f;
-            }
-
-            SetUguiGoActive(handle.LocationLabel, routeActive);
-            SetUguiGoActive(handle.RouteStatusLabel, routeActive);
-            SetUguiGoActive(handle.PausedLabel, routeActive && paused);
-            if (routeActive)
-            {
-                PlaceUguiTopLeft(handle.LocationLabel, 16f, yCur, 360f, 20f);
-                yCur += 24f;
-                PlaceUguiTopLeft(handle.RouteStatusLabel, 16f, yCur, 360f, 20f);
-                yCur += 24f;
-                if (paused)
-                {
-                    PlaceUguiTopLeft(handle.PausedLabel, 16f, yCur, 360f, 20f);
-                    yCur += 24f;
-                }
-            }
-
-            PlaceUguiTopLeft(handle.SaveLocationButton, 16f, yCur, 260f, 30f);
-            yCur += 38f;
-
-            SetUguiGoActive(handle.CustomCountLabel, listVisible);
-            if (listVisible)
-            {
-                PlaceUguiTopLeft(handle.CustomCountLabel, 16f, yCur, 320f, 20f);
-                yCur += 24f;
-                for (int i = 0; i < handle.SpotRows.Count; i++)
-                {
-                    GameObject row = handle.SpotRows[i];
-                    if (row == null)
-                    {
-                        continue;
-                    }
-                    // Source pitch is 26 (rows touching); 32 here gives the row buttons the same
-                    // 6px breathing room as Teleport-Custom's list.
-                    PlaceUguiTopLeft(row, 16f, yCur, 312f, 26f);
-                    yCur += 32f;
-                }
-            }
-
-            yCur += 10f; // FishingRouteFeature.DrawSection returns num + 10f
             // AutoFishingFarm.DrawSection returns num + 20f — that's the stack's bottom margin.
             this.SetUguiScrollContentHeight(handle.ScrollContent, yCur + 20f);
         }
@@ -574,7 +363,7 @@ namespace HeartopiaMod
             {
                 // Toggle re-syncs (external IMGUI/hotkey edits) — WithoutNotify only; the plain
                 // setters would replay side effects (SetEnabled's session reset, SetAutoBait's
-                // counter reset, SetCustomSpotsOnly's rotation restart).
+                // counter reset).
                 this.SyncUguiToggleFromField(handle.ShadowNetToggle, AutoFishingFarm.IsEnabled);
                 this.SyncUguiToggleFromField(handle.InstantCatchToggle, AutoFishingFarm.GetInstantCatchEnabled());
                 this.SyncUguiToggleFromField(handle.SkipCatchToggle, AutoFishingFarm.GetSkipCatchAnimEnabled());
@@ -585,8 +374,6 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.KeepCameraHudToggle, this.GetFishingCameraHudKeepEnabled());
                 this.SyncUguiToggleFromField(handle.ServerSideToggle, this.GetServerSideFishingEnabled());
                 this.SyncUguiToggleFromField(handle.AutoBaitToggle, AutoFishingFarm.GetAutoBaitEnabled());
-                this.SyncUguiToggleFromField(handle.CustomOnlyToggle, FishingRouteFeature.GetCustomSpotsOnly());
-
                 // Status readouts — every gated frame like the IMGUI drawer (pure string
                 // remapping, no side effects); cached diffs limit SetText churn.
                 this.SyncUguiSelfLabelText(handle.StatusLabel, ref handle.StatusShown,
@@ -634,41 +421,12 @@ namespace HeartopiaMod
                         this.BuildUguiFishingBaitRemainingText());
                 }
 
-                // Route action label + active-only status lines.
-                string actionText = this.BuildUguiFishingRouteActionText();
-                if (!string.Equals(actionText, handle.RouteActionShown, StringComparison.Ordinal))
-                {
-                    handle.RouteActionShown = actionText;
-                    this.SetUguiButtonLabel(handle.RouteActionButton, actionText);
-                }
-                if (FishingRouteFeature.Active)
-                {
-                    this.SyncUguiSelfLabelText(handle.LocationLabel, ref handle.LocationShown,
-                        this.BuildUguiFishingLocationText());
-                    this.SyncUguiSelfLabelText(handle.RouteStatusLabel, ref handle.RouteStatusShown,
-                        this.BuildUguiFishingRouteStatusText());
-                }
-
-                // 0.5s tick: the custom-spot count probe (ExportCustomSpots allocates a copy —
-                // cross-surface adds/deletes land within half a second; this surface's own
-                // Save/Delete refresh immediately in their handlers).
-                if (Time.unscaledTime >= handle.NextSlowSyncAt)
-                {
-                    handle.NextSlowSyncAt = Time.unscaledTime + 0.5f;
-                    handle.CustomSpotsCount = FishingRouteFeature.ExportCustomSpots().Count;
-                }
-
-                // Conditional-layout signature (bait block / route lines / hint / row count).
+                // Conditional-layout signature (bait block).
                 int signature = this.ComputeUguiFishingLayoutSignature(handle);
                 if (signature != handle.LayoutSignature)
                 {
                     handle.LayoutSignature = signature;
-                    if (handle.SpotRows.Count != handle.CustomSpotsCount)
-                    {
-                        this.RebuildUguiShellFishingSpotRows(handle);
-                    }
                     this.RelayoutUguiShellFishing(handle);
-                    handle.NextSlowSyncAt = 0f; // labels/probe must not lag a layout change
                 }
             }
             catch (Exception ex)
@@ -864,72 +622,6 @@ namespace HeartopiaMod
         private void OnUguiFishingBaitResetClicked()
         {
             AutoFishingFarm.ResetAutoBaitCounter();
-        }
-
-        // FishingRouteFeature.DrawSection:436-449 — Start/Stop no-op on a null host, so `this`
-        // is mandatory; they own every snapshot/restore side effect.
-        private void OnUguiFishingRouteActionClicked()
-        {
-            if (FishingRouteFeature.Active)
-            {
-                FishingRouteFeature.Stop(this);
-                this.AddMenuNotification(this.L("Fishing Locations stopped"), new Color(1f, 0.55f, 0.55f));
-            }
-            else
-            {
-                FishingRouteFeature.Start(this);
-                this.AddMenuNotification(this.L("Fishing Locations started"), new Color(0.45f, 1f, 0.55f));
-            }
-        }
-
-        // FishingRouteFeature.DrawSection:452-460 — two direction-dependent messages/colors.
-        private void OnUguiFishingCustomOnlyToggled(bool value)
-        {
-            if (value == FishingRouteFeature.GetCustomSpotsOnly())
-            {
-                return;
-            }
-            FishingRouteFeature.SetCustomSpotsOnly(value);
-            this.AddMenuNotification(
-                this.L(value ? "Route: custom spots only" : "Route: all spots"),
-                value ? new Color(0.45f, 1f, 0.55f) : new Color(1f, 0.75f, 0.5f));
-            try { this.SaveKeybinds(false); } catch { }
-        }
-
-        // FishingRouteFeature.DrawSection:487-490 via the pass-through wrapper (the save itself
-        // notifies + persists internally); the row list refreshes immediately, not on the probe.
-        private void OnUguiFishingSaveLocationClicked()
-        {
-            FishingRouteFeature.SaveCurrentLocationFromUi(this);
-            this.RefreshUguiFishingSpotListNow();
-        }
-
-        // FishingRouteFeature.RemoveCustomSpotAt = DrawSection's old removal block (route-pointer
-        // fixup + save) extracted so both surfaces share one implementation. Destroying the
-        // clicked row's own button inside its click is safe (Unity defers Destroy to frame end).
-        private void OnUguiFishingSpotDeleteClicked(int index)
-        {
-            FishingRouteFeature.RemoveCustomSpotAt(index, this);
-            this.RefreshUguiFishingSpotListNow();
-        }
-
-        private void RefreshUguiFishingSpotListNow()
-        {
-            UguiShellFishingHandle handle = this.uguiShellFishing;
-            if (handle == null || handle.Root == null)
-            {
-                return;
-            }
-            try
-            {
-                this.RebuildUguiShellFishingSpotRows(handle);
-                handle.LayoutSignature = this.ComputeUguiFishingLayoutSignature(handle);
-                this.RelayoutUguiShellFishing(handle);
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Msg("[UguiShell] Fishing spot list refresh error: " + ex.Message);
-            }
         }
     }
 }

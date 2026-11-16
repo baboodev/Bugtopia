@@ -234,12 +234,12 @@ namespace HeartopiaMod
         private const float EnergyHoldRetryDelay = 1f;
 
         public static bool IsEnabled => enabled;
-        // True while the pre-cast energy gate is holding the run (FishingRouteFeature parks its
+        // True while the pre-cast energy gate is holding the run (Gather Locations parks its
         // spot rotation on this, the same way it parks on an auto repair).
         public static bool IsHeldForEnergy => energyHoldActive;
         public static bool IsDebugLoggingEnabled() => debugLoggingEnabled;
 
-        // --- Read-only signals for FishingRouteFeature (location rotation) ---
+        // --- Read-only signals for GatherLocationsFeature (location rotation) ---
         // Last fish-shadow scan result: when it ran and how many shadows were inside the radius.
         public static float LastScanAt { get; private set; } = -999f;
         public static int LastInRangeCount { get; private set; }
@@ -256,7 +256,7 @@ namespace HeartopiaMod
         // UGUI slider entry — the IMGUI slider block's own behavior (DrawSection ~721-731:
         // round, change-detect, "Range updated" status, log) as a callable. Deliberately a
         // SEPARATE method from SetDetectRange, which stays the silent clamp-and-store used by
-        // config load and FishingRouteFeature's forced-200m/restore-snapshot paths.
+        // config load and the forced-200m/restore-snapshot paths.
         public static void SetDetectRangeFromUi(float value)
         {
             float rounded = Mathf.Round(Mathf.Clamp(value, 1f, 200f));

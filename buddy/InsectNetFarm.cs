@@ -149,6 +149,8 @@ namespace HeartopiaMod
                 lastPatrolTeleportAt = -999f;
                 repairTeleportPauseUntil = -999f;
                 eatTeleportPauseUntil = -999f;
+                LastScanAt = -999f;
+                LastInRangeCount = 0;
             }
             // TIER 1 — unconditional. MasterLogInsectFarm ships OFF, so before the split the only
             // evidence a run had ever happened was the NetCaughtInsectEvent hook install, and that
@@ -215,6 +217,8 @@ namespace HeartopiaMod
         public static string GetLastStatus() => string.IsNullOrWhiteSpace(lastStatus) ? "Idle" : lastStatus;
         public static string GetLastToolStatus() => string.IsNullOrWhiteSpace(lastToolStatus) ? "Unknown" : lastToolStatus;
         public static int GetSessionCatchCount() => sessionCatchCount;
+        public static float LastScanAt { get; private set; } = -999f;
+        public static int LastInRangeCount { get; private set; }
         public static float GetCatchCooldown() => catchCooldown;
         public static void SetCatchCooldown(float v) { catchCooldown = Mathf.Clamp(v, 0.2f, 10f); }
         public static float GetScanRange() => scanRange;
@@ -580,6 +584,7 @@ namespace HeartopiaMod
 
                 bool hasPendingTarget = pendingTargetNetId != 0U && now < pendingTargetUntil;
                 bool teleportPaused = IsTeleportTemporarilyPaused(host, out string teleportPauseReason, out float teleportPauseRemaining);
+                bool rangeTelemetryPublished = false;
                 if (teleportEnabled && !hasPendingTarget && !teleportPaused)
                 {
                     int scannedCount;
@@ -596,10 +601,16 @@ namespace HeartopiaMod
                         Vector3 playerPos = player != null ? player.transform.position : (Camera.main != null ? Camera.main.transform.position : Vector3.zero);
                         int chosenIndex = -1;
                         float nearestDistance = float.MaxValue;
+                        int inRangeCount = 0;
 
                         for (int i = 0; i < scannedPositions.Count && i < scannedIds.Count; i++)
                         {
                             float distance = Vector3.Distance(playerPos, scannedPositions[i]);
+                            if (distance <= scanRange)
+                            {
+                                inRangeCount++;
+                            }
+
                             uint targetId = scannedIds[i];
                             float until;
                             bool recentlyTargeted = targetId != 0U
@@ -616,6 +627,10 @@ namespace HeartopiaMod
                                 chosenIndex = i;
                             }
                         }
+
+                        LastScanAt = now;
+                        LastInRangeCount = inRangeCount;
+                        rangeTelemetryPublished = true;
 
                         if (chosenIndex >= 0)
                         {
@@ -668,6 +683,9 @@ namespace HeartopiaMod
                     }
                     else
                     {
+                        LastScanAt = now;
+                        LastInRangeCount = 0;
+                        rangeTelemetryPublished = true;
                         Log("Loaded insect scan found no usable insect target: " + scanStatus);
                         if (patrolPositions.Length > 0 && now - lastPatrolTeleportAt >= PatrolTeleportCooldown)
                         {
@@ -709,6 +727,11 @@ namespace HeartopiaMod
                 Log(hasPendingTarget
                     ? $"Tick start: attempting catch on pending target netId={pendingTargetNetId} range={scanRange:F0} batch={batchSize} cooldown={catchCooldown:F1}"
                     : $"Tick start: range={scanRange:F0} batch={batchSize} cooldown={catchCooldown:F1}");
+                if (!rangeTelemetryPublished)
+                {
+                    PublishLoadedInsectInRangeTelemetry(host, now);
+                }
+
                 result = host.TryNetCatchNearbyInsects(scanRange, batchSize, out detectedCount, out resolvedCount, out sentCount, out status);
                 lastAttemptAt = now;
                 lastStatus = status;
@@ -782,6 +805,37 @@ namespace HeartopiaMod
             lastPatrolTeleportAt = -999f;
             repairTeleportPauseUntil = -999f;
             eatTeleportPauseUntil = -999f;
+            LastScanAt = -999f;
+            LastInRangeCount = 0;
+        }
+
+        private static void PublishLoadedInsectInRangeTelemetry(HeartopiaComplete host, float now)
+        {
+            if (host.TryGetLoadedInsectTargets(out int _, out List<uint> ids, out List<Vector3> positions, out string _)
+                && ids != null
+                && positions != null
+                && ids.Count > 0
+                && positions.Count > 0)
+            {
+                GameObject player = host.GetPlayerObject();
+                Vector3 playerPos = player != null ? player.transform.position : (Camera.main != null ? Camera.main.transform.position : Vector3.zero);
+                int inRangeCount = 0;
+                int count = Mathf.Min(ids.Count, positions.Count);
+                for (int i = 0; i < count; i++)
+                {
+                    if (Vector3.Distance(playerPos, positions[i]) <= scanRange)
+                    {
+                        inRangeCount++;
+                    }
+                }
+
+                LastScanAt = now;
+                LastInRangeCount = inRangeCount;
+                return;
+            }
+
+            LastScanAt = now;
+            LastInRangeCount = 0;
         }
 
         private static void CleanupRecentCountWindow(float now)

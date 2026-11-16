@@ -125,7 +125,7 @@ namespace HeartopiaMod
         // {"Foraging","Fishing","Insects","Birds"} display indices match autoFarmSubTab's own
         // 0-3 exactly (SetAutoFarmSubTab, HeartopiaComplete.Farm.cs:112); Foraging = 0 →
         // DrawAutoFarmTab's default branch (Farm.cs:137); Fishing = 1 → the
-        // AutoFishingFarm.DrawSection + FishingRouteFeature.DrawSection flow; Insects = 2 →
+        // AutoFishingFarm.DrawSection flow; Insects = 2 →
         // InsectNetFarm.DrawSection (Farm.cs:128-131); Birds = 3 → BirdNetFarm.DrawSection
         // (Farm.cs:132-135) — with it, this tab's sub range is fully covered.
         private const int UguiShellResourceGatheringTabIndex = 1;    // Resource Gathering (internal id 2)
@@ -136,6 +136,8 @@ namespace HeartopiaMod
         // "Combined" — added with CombinedFarmFeature (no IMGUI ancestor; the coordinator postdates
         // the IMGUI menu). Sits after the three farms it arbitrates between.
         private const int UguiShellCombinedSubIndex = 4;             // "Combined" within its subs
+        // "Locations" — Gather Locations route (GatherLocationsFeature); no IMGUI ancestor.
+        private const int UguiShellLocationsSubIndex = 5;            // "Locations" within its subs
 
         // Radar (Phase 3 item 7, HeartopiaComplete.UguiRadarContent.cs): display position 4
         // carries internal id 4 (UguiShellInternalTabIds[4]) = IMGUI selectedTab 4 = DrawRadarTab

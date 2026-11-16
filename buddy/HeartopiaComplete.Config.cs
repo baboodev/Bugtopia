@@ -64,6 +64,7 @@ namespace HeartopiaMod
                 if (string.IsNullOrWhiteSpace(data.Language)) data.Language = "en";
                 if (data.CustomTeleports == null) data.CustomTeleports = new List<CustomTeleportEntry>();
                 if (data.FishingRouteSpots == null) data.FishingRouteSpots = new List<CustomTeleportEntry>();
+                if (data.LocationCategories == null) data.LocationCategories = new List<LocationCategoryEntry>();
                 if (data.GameKeyOverrides == null) data.GameKeyOverrides = new List<GameKeyOverrideEntry>();
                 return data;
             }
@@ -418,7 +419,7 @@ namespace HeartopiaMod
             data.autoFishTeleportDelay = -1f;
             // While a fishing route is active the live range/toggles are the route's forced
             // values (200m, both on); persist the user's pre-route snapshot instead.
-            data.autoFishFishShadowDetectRange = FishingRouteFeature.Active ? FishingRouteFeature.SnapshotDetectRange : AutoFishingFarm.GetDetectRange();
+            data.autoFishFishShadowDetectRange = AutoFishingFarm.GetDetectRange();
             data.autoFishInstantCatchSendHz = -1f; // send rate is not persisted; always 0 at init
             data.autoFishInstantCatch = AutoFishingFarm.GetInstantCatchEnabled();
             data.autoFishAutoBaitEnabled = false;  // auto-bait toggle is not persisted; always off at start
@@ -431,7 +432,9 @@ namespace HeartopiaMod
             data.trimBaitThrowAnimation = this.trimBaitThrowAnimation;
             data.autoFishKeepCameraAndHud = this.GetFishingCameraHudKeepEnabled();
             data.autoFishServerSide = this.GetServerSideFishingEnabled();
-            data.fishingRouteCustomOnly = FishingRouteFeature.GetCustomSpotsOnly();
+            data.locationsEmptyWaitSeconds = GatherLocationsFeature.EmptyWaitSeconds;
+            data.locationsStartNearest = GatherLocationsFeature.StartNearest;
+            data.fishingRouteCustomOnly = false;
             data.autoFishReelMaxDuration = -1f;
             data.autoFishReelHoldDuration = -1f;
             data.autoFishReelPauseDuration = -1f;
@@ -483,7 +486,7 @@ namespace HeartopiaMod
             data.autoEatFoodType = this.autoEatFoodType;
             data.autoEatCustomFoodName = this.autoEatCustomFoodName ?? "";
             data.repairTeleportBackEnabled = this.repairTeleportBackEnabled;
-            data.autoRepairOnToastEnabled = FishingRouteFeature.Active ? FishingRouteFeature.SnapshotAutoRepair : this.autoRepairOnToastEnabled;
+            data.autoRepairOnToastEnabled = this.autoRepairOnToastEnabled;
             data.autoRepairNoAnimationEnabled = this.autoRepairNoAnimationEnabled;
             data.autoRepairThrowAtFeetEnabled = this.autoRepairThrowAtFeetEnabled;
             data.autoRepairThrowOffsetX = this.autoRepairThrowOffsetX;
@@ -492,7 +495,7 @@ namespace HeartopiaMod
             data.trimRepairThrowAnimation = this.trimRepairThrowAnimation;
             data.repairThrowPathTrimMigrated = true;
             data.autoEatOnToastEnabled = this.autoEatOnToastEnabled;
-            data.autoEatAutoTriggerEnabled = FishingRouteFeature.Active ? FishingRouteFeature.SnapshotAutoEatPanel : this.autoEatAutoTriggerEnabled;
+            data.autoEatAutoTriggerEnabled = this.autoEatAutoTriggerEnabled;
             data.autoEatNoAnimationEnabled = this.autoEatNoAnimationEnabled;
             data.autoEatSkipLastPortionEnabled = this.autoEatSkipLastPortionEnabled;
             data.autoRepairTriggerPercent = this.autoRepairTriggerPercent;
@@ -642,8 +645,8 @@ namespace HeartopiaMod
                 ? 50f
                 : Mathf.Clamp(data.farmWalkVehicleMinDistance,
                     FarmWalkVehicleMinDistanceFloor, FarmWalkVehicleMinDistanceCeiling);
-            // Same reasoning: an absent entry is 0, which is not a value the slider can produce.
-            this.farmWalkVehicleDismountDistance = data.farmWalkVehicleDismountDistance <= 0f
+            // 0 is legal (never get out for proximity). Absent = the field's -1 initializer.
+            this.farmWalkVehicleDismountDistance = data.farmWalkVehicleDismountDistance < 0f
                 ? 10f
                 : Mathf.Clamp(data.farmWalkVehicleDismountDistance,
                     FarmWalkVehicleDismountFloor, FarmWalkVehicleDismountCeiling);
@@ -939,7 +942,8 @@ namespace HeartopiaMod
             this.trimBaitThrowAnimation = data.trimBaitThrowAnimation;
             this.SetFishingCameraHudKeepEnabled(data.autoFishKeepCameraAndHud);
             this.SetServerSideFishingEnabled(data.autoFishServerSide);
-            FishingRouteFeature.SetCustomSpotsOnly(data.fishingRouteCustomOnly);
+            GatherLocationsFeature.SetEmptyWaitSeconds(data.locationsEmptyWaitSeconds > 0f ? data.locationsEmptyWaitSeconds : 10f);
+            GatherLocationsFeature.SetStartNearest(data.locationsStartNearest);
             if (data.insectBatchSize > 0)
             {
                 InsectNetFarm.SetBatchSize(data.insectBatchSize);
@@ -1091,7 +1095,9 @@ namespace HeartopiaMod
                 });
             }
 
-            data.FishingRouteSpots = FishingRouteFeature.ExportCustomSpots();
+            data.LocationCategories = GatherLocationsFeature.ExportCategories();
+            data.locationsLegacyMigrated = GatherLocationsFeature.LegacyMigrated;
+            data.FishingRouteSpots = new List<CustomTeleportEntry>();
             data.GameKeyOverrides = this.ExportGameKeyOverrides();
         }
 
@@ -1458,7 +1464,7 @@ namespace HeartopiaMod
         // Shared implementation for BOTH rendering surfaces of the Keybinds reset — the IMGUI
         // RESET TO DEFAULTS button above and the UGUI Settings→Keybinds twin
         // (HeartopiaComplete.UguiKeybindsContent.cs) — extracted verbatim from the inline
-        // DrawSettingsTab block (the FishingRouteFeature.RemoveCustomSpotAt precedent). NOTE:
+        // DrawSettingsTab block. NOTE:
         // this resets more than keybinds — it also restores several Settings→Main fields
         // (notifications, ID display, FPS bypass, LOD override, status overlay), exactly as the
         // inline block always did.

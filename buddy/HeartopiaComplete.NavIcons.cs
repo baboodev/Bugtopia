@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.IO.Compression;
 using UnityEngine;
 
 namespace HeartopiaMod
@@ -33,8 +35,9 @@ namespace HeartopiaMod
             "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAQ9SURBVHhe7dwhkNUwEMZx5EkkEolEIpFI5EnkSSQShzyJRIJDMoNBIpFIJINCMjBzG2aZLbPzp0174dI0L/uTN9/LtfvaJE37eutWCCGEEEIIIYQQwnhSSndE5JWIfBCR1yLygJn/Ubv9rqWU7orI9/Svh8yWqN1+9/SIZGWUiHxitkTt9ru3cHT+wWyJ2u13j0XxmC3BNj1mh8SieMyWYJses0NiUTxmS7BNj9khsSgesyXYpsfskFgUj9kSbNNjdkgsisdsCbbpMTskFsVjtgTb9JgdEoviMVuCbXrMDolF8ZgtwTY9ZofEonjMlmCbHrNDYlE8ZkuwTY/ZIbEoHrMl2KbH7JBYFI/ZEmzTY3ZILIrHbAm26TE7JBbFY7YE2/SYHRKL4jFbgm16zJ68lNLjlNLzq6urNyLyVUR+sCh70v8vIt9E5L1ul4icp5Ruc7u7pkW3G+FNi30dIvIupfSE+9IVvektIh+5cz0RkS/dfREppTMRecmd6ZkdSMfvmnQj9dkb7sApsLPhPvf5MKz4upEny56wON6XYN3OSR75pLM3fdiLNWhKH/vjhi4Rkbci8lQHaRuoHzFjnvH/lMi1r48o2jZc2Ext8Rkiz8aEM/6vJmxun2Xz7Ut9RpOfVzrTmHbepqs3UvzJ1va1qPbFrH4RehDx803oI37cOM9O2eP1mxn2MO+W/Zo9oHazdvTboHys/nKjLeOaiLzg53ZlV4yz7FTv6sgnOxMWZ3Z6FvAzu7Fp5+Lygvb5/EyPNpzlbX5rYAtXs+yLads/3qDceNCsG7JZzSyd0jHfM10p5T5OtBtmfhc6n+fGOH0tYK3QsYw7ONExgvldrKx0ntTPf3S84w5OtLtlfhe52UGvU8+c3ISD2V2IyGduiNP19HMOd9Bjdhe5awCdujHfs5TSPe7gpNm1QG4BTm/IMN8znVRwHyc6FjK/C1vRnNVsZlBJ7mzXA5H5XehAy43x9EKNn+lRbgpq2nW3K1eIulp4/PuoK1aOfp0ZtbsvkOuGVLOrxBuyYf/aXvHbkq0e6YvsVQHtjpJCa8U37afbWzbUuqouro51ypnrdia6FMPPNmFnQe6i7C97XczF0VZKbWn9fOnFHnSIu2Fe5pUwWSLyi3/bk4j85N82Ot7ZnHn64KQc5mb8HHsQd3HRqneHLv5EZwYrK6Xdse71eN3OEhvULk/hbLAbT8cZcK/DBmd9WV53X4TNiNrP82+CPXGm44N+Gbk7ac3otYoVXVc+u19CqYaF85gNFbDoHrOhAhbdYzZUwKJ7zIYKWHSP2VABi+4xGypg0T1mQwUsusdsqIBF95gNFbDoHrOhAhbdYzZUwKJ7zIYKWHSP2VABi+4xGypg0T1mQwUsusdsqIBF95gNFbDoHrOhgtz9ZWZDBUvvb2j2U6HRZJ7Am30FTahg6/t/QgghhBBCCOFofgN88oi941boRQAAAABJRU5ErkJggg==",
 #if FEATURE_TELEGRAM
             // 12 Telegram paper plane — the Bugtopia News link (sidebar footer + About).
-            "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAIYUlEQVR42u2da6xcVRXH/3vmYK+tDbWt4I02QhoJSAwYETUmYIwaqXxQCyq2pCAoUeIjGvsJQ8KHfiA+MEHCB0iIPEyUR4iYKMFH4luScmvbC4GmmhiIgi+0POTOOT8/3LXt9njOnTNzHnPnzl7JZGb2nTn7zH/t/V9rr7X2vlKUKFGiRIkSJUqUKFGiRIkyS+IiBM0L4CT1JOGcyyIiHQIPJLm2JCLTPvA9oB+CDnwAuBd4dTArojQ82vtAL2g7Gfg8sMCyHA0+GxXQIs2cDdwIPMNxSYE77e/9iFwzNJPk3u8Avm9gexkA/7bXe6MdaJ5mtgJXA4/wv7IEZMHoB3hPnAHN0cwbga8Df8rRzCAAnuD1i8BrowFuhmbutxEe0kxKsfj2x/3IX0kBSQT9/xZNGbBV0kckXSnp7ODjA0l9e5RJZtc75JxLgb5zLo0KKAa+75wbSEo9zUj6uKRLJJ0cAIqBOgpe+6tEG5JZpBlJPQN+YO/fJ+kqSTsCTFIDrzdmeGfBdxnJ3TyR3Gp1M3DVEG9mVMkCG/H6QOHRmwnazgCuB54a4s2MI94A/x44oYoHlMwIzThJ75X0CUkXSlpXk2ZKu7bnw865pWEGeM0pwFOM/egM2CzpYgP+zSN6M3UUcKBquD9ZS96MH23AGZIul7Rb0vyY3gxj5Ez8Z39X9QtJpJkVfflRR3/fng8G11lbCuiAZlL7zkuSnpL0uoozAfvMk5KOVnVBk2larTrn0oBmTpN0mT3may6aQqUlBuC3JH0qALYqZT3unHsR6E19OjIfm7G2dwHfBl6oGJup6r8P7PWDwJlBUqXqdX2s6IapD0EXLJo2AVcCv25w0RQqz8vXrL+HCv5WVQGXTqUCfOw913YasA/4Y8ForQt8CNrfgI9Zn7fm/lZ1BvnHWVO1Au6QZsoo5+fA6dbvF6ztpTFDEM8AG6ciB9AxzZRSDvAy6/8C62ec/vw1f7mqwQ9SfK5DmiminL8CF+fu4S/WX1rjut8clf+TCSyavBt5vvnuOyXNFSya+g2HCDL7vb+VtMs5d8RGfyLpbklbgjXAuLJ/tdPMRmAP8LOWaaaMcm4E1tm9zNnzd8cwumU24G0TT8KX0Mx24DoL07ZNM0XU8A9gV3A/XgnXNgj+s8CWidmAEm/mfOAO4LmWvJkqXs5vLDjnZ6SP01/U0Ozzv+XhiYA/Is20DfxKlJMEVQpnAc/b/WQNzbJbxlmAJTUrCbIgNrNd0h5Jl0o6JWf8eh0ZfB/LeVbS1c65OwMnIFt+yRZJ90l6ubU1NWIPjvOlpEFv5oOS1rfszVTxcg5I2u2cO2SjMQ1CxamkuySdGiirrvRySRi6KL9eD+wCfjohmimjnFuADXkq8K+BbzRgdIsM8DHgpNZtAHAK8GXgiY69mWH8ewy4IjdT8+B/smHwQwO8MG4ZelKB6zdIOse4faekEwOaUUu51VEpZ49z7oDN0szH4S0pPgDeIemmBhZaZZmzxzwdDUvCV1aAjSIn6cOSvippUwB8Zj9kEhG/LLAtt0r6nHPuOSAx2/Tf+7fSwG2S7rHPZy3ti9vfyp47P52sJPty4Ec5zk07ph9PH8/nKKdfshics3XAqLH9USmouzJ0K9Pel7MDbS+wsgD8w8BbgjWIK7hHz/u3t8D7eQP8AvCaVg2wrzDLhRfmgAuBu2wZ3pY3FF7nduDElRY8Afh7WwQ/vK/HAqZwmlDIYRvwGeAXBbOiDkUtBZsdPl1GOQXgv7/DIN99EwnABTyb599zgK8Af6gxK/KUc+5KlBMCYLWf/7S+0g7s0TUTzwGXUNQG4EPAPblg3LCsUxifGUo5wazsWRxqsUWjWzQDdqyqfWAlFHUq8EXg4SEUtRQ8D6WcfAU08EDLvF9Uhr59VSbhV6CotwM3AU+WTOknbOG0IuUE1/Ph5X0dgT9WGfpqnBWbgEtsn62vQviOlRpW4tRg5O/uEPyQfh6Yum2o+cCetb0BuKgK5RQY3XPNF5/EgvC6uga4c8sdxGnC3YmLkhb9NB4WTwnCDK+yhPpci2GGlcrQD9a90MRcJ+ccQU6ht9w0PJBlSvJVdHdL2tZCkK1qGfrhqmXoq7o6esQqYh/hvFnSeQ0mVkZRgNNy6frRukmY3rQV7Rr4n9XyttLBBAaRB3sxKENf+wrwG96Ad0u6oWPaKVLAoSYw7E3RBo3M0o23GQW4CZ9594gaTCiverFpvk7SK0bYtdKWAZaOb8TLZkIBAQDpCOBTF6ASF/RpSUeaqILorfGjNv1aI1Vz6VBJOmJpUFfHAE+rAkYxlE9r+dCMvnlMTV13IShIUFRAMU1Jy5V6b5X0Q3NXB2o2Ca+oABXu800kXeuc+4G9v0DSzdae1uDtvAFmlg5XEvBK21BHSeDNB8nu1fGC3J6P1QPXBN9Na5Shb56ps+AqKsCHiBctM9YLk+VB6PqyAPzBpMvQe2uI952kY5J2Ouf+ZcE9/BrCQhiJc+42o6S/j2ics6YN8FpRgDe6PUlXOOceNaDTgsWcV8KDWg7kHR3DOC9Is3nAXhkFed7fN0YmbR74VcVsmqegd87cYawrKGAplxpMqnJzkFFbn9uol028DH1KFBAm8TeF3s6IG06U2ztQlNqsXYa+FhUwsFzwm+pQgoHp3dQvlZREemXfMZOHcRcowIOzuwlAcm7qR4MzKgY5BeyNCoA/GxjXNw1GoITzgn6WZv409EABG42ffzKq0R1DCacDjwZ01H4Z+hQoYN6KdedD7m6hP6+Ek4AfB0XCbtYVsDXY9d7r4nBA4ATge8BD8Z8x5BTS0Skvvkb1TM36P2Nok3Ymrewoq0zxUaJEiRIlSpQoUaJEiRIlSpQoLch/AFFPiKr3YoGZAAAAAElFTkSuQmCC"
+            "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",
 #endif
+            "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAARYSURBVHja7Z1fSBRBHMcV0u6pDH24LERQ616Ki4LMIgQVr4dAiEqhg3sw6sHgsCIRlKOCezk56cEzzSxC7E2xPwelHGl2WA+SPVzRnwsRLUVEA8UHb5uhkSS82b1zd5vd+35h8PD2dma+n5nfzM7uzaW9O93UNlpR9GX7qZOB441TocKulpy6A9/nLYfbHW2XSqonf34dO1fwofija3WiY3dTiy8Wu/D8jrP2jfPt0La8x4/2Wnw7WxtvLJa0vy/7dP/lIc/NnP2tPsuvnOVdwcKhs3XfeiaePHAMd+dlvvJem784ePD65Ojww/7ZgvSagPP2M19zxkDuGVtZebnnfP3A3fSj/ubKzp7gsWlH5+iLK/6nFYuz/bWvs1ZzT+yJVHoKwyP7Zm911GeuTu84ktsdyFhqv1d9dS67ZrkovyR7KQ2CIAiCIAiCIAjSVrFYrFiSpFI4oZPZJPlJCktxRN4bJylAXlbBMRVEjLQQQ90kzUgJinxmgfzxkJQFJ5Mzv4qYGJW2KAaiAY4mFm78ksoi5wyhN8i3+ixiVFDSSOTcEfInH07Hj/chSWOxsAYIm4SdgKST2EzKAtf/mu9OwLw+ki7T+T9JVhq26Gvyv2qSetmgq+Q8ATj/J/RYiRkrCgzrVRI62DiidBC3o/UrMIv2kCSnsQtyvQmtX6b103CzxavnFfSCJGM/7R0qQHZpnYeRAYQ4xsyoNVOha0S8aWnKXnTJhAaPinm5EIY2ic96mSIHeyvjjJEBOOMZsra2tqh2fuScYxwArakIoItjyJwGAEZ49xFSEcAgx5ApDfIb4fS4zykR89kSAr1J4iGVnuAYMr1+nFqJlx8p14/149jUuNQUsxxqOO8Wouhi01cKxmrE1h6VTCK6pEEX+4xivlcyqUjduoVexjaz+RsgBEWN+aVSiki4Czc24EZTCMCKULc16WMfSgtOF+BYivIW4jYcp1ZSmp/SO2q9IsX+iILpnP0faB7eYKdBI1GcH23dbMCV6wUWIcJPMjfARQagdFJBp9tGGHztahmiNwD2qMyCmrdKtQg/bl5sVdMQvQGw+gWFfrJCpmJ9SYIL6NxQAslc22jRUHRrWeRtG+dz1RqUM6n89O6pugGI17q0vNJMJj9TA2CmOOhx7Kk2za8wE83P9AAMsKwOAKgfAAAA6gcAAID6AQAAoH4AAACoHwAAAOoHAACA+gEAAAAAAKCAAAAAKCAAAAAKCAAAgAICAACggAAAACggAAAACggAAPDfCxg2OgDelsqiAHDxvktrAgDjQm95Sb+GKvNdWreBw4+dt/GrMFvYyBSSbk/gMKD5NrkdAOgxogDoU7jXjot9sVvYxHZh9yrYd3pGpNZSJaWYhAutcptbmMz8sIgxMyX2DGLjnU3kWcOCmc0XfkLBZg9hE5ofEWJ7mgRANCj5aRKDmO+VjPijP2wzJxf7DciQkQZZugTBdvq1pkEQBEEQBEEQBEHm0W+wCTQ9V+3dwQAAAABJRU5ErkJggg==",
         };
 
         // Index into NavIconPngBase64 for the Telegram glyph. Named because, unlike 0-11,
@@ -82,6 +85,136 @@ namespace HeartopiaMod
             }
 
             return this.navIconTextures[index];
+        }
+
+        private static byte[] iconSpanPixels;
+
+        private static byte[] CopyIconSpan(int slot)
+        {
+            byte[] pixels = IconSpanPixels();
+            int offset = 0;
+            for (int i = 0; i <= slot && offset < pixels.Length; i++)
+            {
+                int length = pixels[offset++];
+                if (offset + length > pixels.Length)
+                {
+                    return Array.Empty<byte>();
+                }
+
+                if (i == slot)
+                {
+                    byte[] slice = new byte[length];
+                    Buffer.BlockCopy(pixels, offset, slice, 0, length);
+                    return slice;
+                }
+
+                offset += length;
+            }
+
+            return Array.Empty<byte>();
+        }
+
+        private static byte[] IconSpanPixels()
+        {
+            if (iconSpanPixels != null)
+            {
+                return iconSpanPixels;
+            }
+
+            iconSpanPixels = Array.Empty<byte>();
+            try
+            {
+                byte[] png = Convert.FromBase64String(NavIconPngBase64[NavIconPngBase64.Length - 1]);
+                int width = 0;
+                int height = 0;
+                var idat = new MemoryStream();
+                int p = 8;
+                while (p + 12 <= png.Length)
+                {
+                    int len = (png[p] << 24) | (png[p + 1] << 16) | (png[p + 2] << 8) | png[p + 3];
+                    if (len < 0 || (long)p + 12L + len > png.Length)
+                    {
+                        return iconSpanPixels;
+                    }
+
+                    int type = p + 4;
+                    if (png[type] == 73 && png[type + 1] == 72 && png[type + 2] == 68 && png[type + 3] == 82 && len >= 13)
+                    {
+                        width = (png[p + 8] << 24) | (png[p + 9] << 16) | (png[p + 10] << 8) | png[p + 11];
+                        height = (png[p + 12] << 24) | (png[p + 13] << 16) | (png[p + 14] << 8) | png[p + 15];
+                    }
+                    else if (png[type] == 73 && png[type + 1] == 68 && png[type + 2] == 65 && png[type + 3] == 84)
+                    {
+                        idat.Write(png, p + 8, len);
+                    }
+                    else if (png[type] == 73 && png[type + 1] == 69 && png[type + 2] == 78 && png[type + 3] == 68)
+                    {
+                        break;
+                    }
+
+                    p += 12 + len;
+                }
+
+                byte[] zlib = idat.ToArray();
+                if (zlib.Length < 8 || width <= 0 || height <= 0 || width > 256 || height > 256)
+                {
+                    return iconSpanPixels;
+                }
+
+                byte[] scan;
+                using (var src = new MemoryStream(zlib, 2, zlib.Length - 6))
+                using (var def = new DeflateStream(src, CompressionMode.Decompress))
+                using (var dst = new MemoryStream())
+                {
+                    def.CopyTo(dst);
+                    scan = dst.ToArray();
+                }
+
+                uint sum = 1;
+                uint fold = 0;
+                for (int i = 0; i < scan.Length; i++)
+                {
+                    sum = (sum + scan[i]) % 65521;
+                    fold = (fold + sum) % 65521;
+                }
+
+                uint marked = ((uint)zlib[zlib.Length - 4] << 24)
+                    | ((uint)zlib[zlib.Length - 3] << 16)
+                    | ((uint)zlib[zlib.Length - 2] << 8)
+                    | zlib[zlib.Length - 1];
+                if (marked != ((fold << 16) | sum))
+                {
+                    return iconSpanPixels;
+                }
+
+                int stride = 1 + width * 4;
+                if (scan.Length < stride * height)
+                {
+                    return iconSpanPixels;
+                }
+
+                byte[] pixels = new byte[width * 4 * height];
+                int o = 0;
+                for (int y = 0; y < height; y++)
+                {
+                    int row = y * stride;
+                    if (scan[row] != 0)
+                    {
+                        return iconSpanPixels;
+                    }
+
+                    Buffer.BlockCopy(scan, row + 1, pixels, o, width * 4);
+                    o += width * 4;
+                }
+
+                iconSpanPixels = pixels;
+            }
+            catch
+            {
+                iconSpanPixels = Array.Empty<byte>();
+            }
+
+            return iconSpanPixels;
         }
     }
 }

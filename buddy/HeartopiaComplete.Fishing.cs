@@ -3909,7 +3909,7 @@ namespace HeartopiaMod
             return false;
         }
 
-        // ---- Fishing Locations on foot / by vehicle (FishingRouteFeature.cs) ----------------
+        // ---- Fishing Locations on foot / by vehicle (route features) ----------------
         //
         // The route is a static class and the walker is private to this partial, so these are
         // the whole surface it gets. One writer on the walker: Aura Farm is stopped through its
@@ -3956,10 +3956,14 @@ namespace HeartopiaMod
 
         internal void FishingRouteAbortWalk()
         {
-            this.AbortFarmWalk();
+            // Get Out At = never (0): stop the walk axis but keep the seat. Arrival used to always
+            // dump the player on foot via AbortFarmWalk(keepVehicle:false). Stuck / no-route still
+            // call TryFarmWalkDismount directly.
+            bool keepVehicle = this.farmWalkVehicleDismountDistance <= 0f;
+            this.AbortFarmWalk(keepVehicle: keepVehicle);
             // The steering fix is per ride; give the table its values back unless another walker
-            // driver is still running (their own stop restores in that case).
-            if (!this.autoFarmActive && !this.questWalkFollowing)
+            // driver is still running, or we stayed seated (next hop still needs the fix).
+            if (!keepVehicle && !this.autoFarmActive && !this.questWalkFollowing)
             {
                 this.RestoreFarmWalkVehicleMovementFix("fishing route walk ended");
             }
@@ -4012,7 +4016,7 @@ namespace HeartopiaMod
         {
             // Route first: its Stop restores the user's pre-route settings (range/toggles)
             // before the engine itself is force-stopped below.
-            FishingRouteFeature.ForceStop(this);
+            GatherLocationsFeature.ForceStop(this);
             AutoFishingFarm.ForceStop(this);
             this.showFishShadowRadar = false;
         }

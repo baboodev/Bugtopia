@@ -142,6 +142,8 @@ namespace HeartopiaMod
                 lastMovementSamplePos = Vector3.zero;
                 multiCatchBurstRemaining = 0;
                 multiCatchBurstTarget = 0;
+                LastScanAt = -999f;
+                LastInRangeCount = 0;
             }
             TraceCrashBreadcrumb("Toggle changed: " + (enabled ? "enabled" : "disabled") + $" perfectPhoto={perfectPhotoEnabled} cooldown={catchCooldown:F1} range={scanRange:F0} multiCatch={multiCatchLimit}");
 
@@ -230,6 +232,8 @@ namespace HeartopiaMod
         public static string GetLastToolStatus() => GetDisplayToolStatus(lastToolStatus);
         public static int GetSessionCatchCount() => sessionCatchCount;
         public static int GetSessionScaredCount() => sessionScaredCount;
+        public static float LastScanAt { get; private set; } = -999f;
+        public static int LastInRangeCount { get; private set; }
 
         // ── UGUI Birds content interop (HeartopiaComplete.UguiBirdsContent.cs) ────────────────────────
         // Read/write exposure for the UGUI twin of DrawSection. Each setter reproduces its IMGUI
@@ -252,8 +256,7 @@ namespace HeartopiaMod
         public static int GetCaptureMode() => captureMode;
         // DrawSection's FULL Capture Mode change cascade, extracted verbatim so both rendering
         // surfaces share ONE implementation (the private pending-confirm/burst state cleared here
-        // is otherwise unreachable from outside this class — same reasoning as
-        // FishingRouteFeature.RemoveCustomSpotAt in the Fishing round). The clamp is a defensive
+        // is otherwise unreachable from outside this class). The clamp is a defensive
         // addition: both callers already deliver a valid index, so it never changes a real value.
         public static void SetCaptureModeFromUi(int value, HeartopiaComplete host)
         {
@@ -427,6 +430,31 @@ namespace HeartopiaMod
         {
             return !string.IsNullOrWhiteSpace(status)
                 && status.StartsWith("Skipping unresolved action/perch bird", StringComparison.Ordinal);
+        }
+
+        private static bool IsExhaustedOrCooldownBirdStatus(string status)
+        {
+            if (string.IsNullOrWhiteSpace(status))
+            {
+                return false;
+            }
+
+            if (status.StartsWith("Waiting for bird capture cooldown", StringComparison.Ordinal)
+                || status.StartsWith("Skipping daily-limit bird", StringComparison.Ordinal)
+                || status.IndexOf("OnlyTakeOnceDaily", StringComparison.OrdinalIgnoreCase) >= 0
+                || status.IndexOf("once per day", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            // Aura PhotoMode path: "… filtered=N … accepted=0" — bird(s) seen but none capturable.
+            if (status.StartsWith("Aura PhotoMode no target", StringComparison.Ordinal)
+                && status.IndexOf("accepted=0", StringComparison.Ordinal) >= 0)
+            {
+                return true;
+            }
+
+            return false;
         }
 
         // ── Persistent config helpers (called by HeartopiaComplete for XML save/load) ──
@@ -810,6 +838,18 @@ namespace HeartopiaMod
                 int effectiveCatchLimit = Mathf.Clamp(multiCatchBurstRemaining, 1, MaxMultiCatchLimit);
                 Log($"Tick start: range={scanRange:F0} cooldown={catchCooldown:F1} multiCatch={multiCatchLimit} burst={multiCatchBurstRemaining}/{multiCatchBurstTarget} effectiveMultiCatch={effectiveCatchLimit}");
 
+                float scanNow = Time.unscaledTime;
+                if (host.TryScanBirdObjectsNearby(scanRange, out int birdInRangeCount, out _, out _, out _))
+                {
+                    LastScanAt = scanNow;
+                    LastInRangeCount = birdInRangeCount;
+                }
+                else
+                {
+                    LastScanAt = scanNow;
+                    LastInRangeCount = 0;
+                }
+
                 int totalDetected = 0, totalResolved = 0, totalSent = 0;
                 string tickStatus = "Idle";
                 bool anySuccess = false;
@@ -868,6 +908,13 @@ namespace HeartopiaMod
                 int resolvedCount = Mathf.Max(totalResolved, sentCount);
                 int detectedCount = Mathf.Max(totalDetected, resolvedCount);
                 string status = sentCount > 0 ? $"Sent request {sentCount}/{resolvedCount}" : tickStatus;
+
+                // Prefab presence still sees house-perch / MaxPhoto-exhausted birds. Gather Locations and
+                // Combined Farm need capturable targets — if this tick resolved nothing, the spot is empty.
+                if (sentCount == 0 && totalResolved == 0)
+                {
+                    LastInRangeCount = 0;
+                }
 
                 lastAttemptAt = Time.unscaledTime;
                 lastStatus = status;
@@ -955,6 +1002,18 @@ namespace HeartopiaMod
                     multiCatchBurstTarget = 0;
                     nextRetryAt = Time.unscaledTime + UnresolvedBirdBackoffSeconds;
                 }
+                else if (IsExhaustedOrCooldownBirdStatus(status))
+                {
+                    // Prefab presence still sees the house-perch bird; for Gather Locations / Combined
+                    // it is not actionable until the daily limit resets.
+                    LastInRangeCount = 0;
+                    consecutiveNoTargetTicks++;
+                    consecutiveServerRejectTicks = 0;
+                    multiCatchBurstRemaining = 0;
+                    multiCatchBurstTarget = 0;
+                    nextRetryAt = Time.unscaledTime + 1f;
+                    lastStatus = "No capturable birds (daily/exhausted)";
+                }
                 else
                 {
                     consecutiveNoTargetTicks = 0;
@@ -994,6 +1053,12 @@ namespace HeartopiaMod
             multiCatchBurstTarget = 0;
             consecutiveServerRejectTicks = 0;
             nextRetryAt = Time.unscaledTime + (success ? 1.5f : 2.5f);
+            // Scare may fail for local/perch netIds; the bird still counts as exhausted for hop.
+            if (LastInRangeCount > 0)
+            {
+                LastInRangeCount = Mathf.Max(0, LastInRangeCount - 1);
+            }
+
             if (success)
             {
                 sessionScaredCount++;
@@ -1006,6 +1071,29 @@ namespace HeartopiaMod
 
             Log($"MaxPhoto auto-scare netId={netId} success={success} status={status}");
             return sessionScaredCount;
+        }
+
+        // House-perch OnlyTakeOnceDaily: bird stays, but it is not a farm target until exhaustion TTL.
+        public static void NotifyBirdPhotoExhausted(uint netId, string reason)
+        {
+            if (netId != 0U)
+            {
+                _pendingConfirmNetIds.Remove(netId);
+                _pendingTimeoutStrikes.Remove(netId);
+            }
+
+            multiCatchBurstRemaining = 0;
+            multiCatchBurstTarget = 0;
+            consecutiveServerRejectTicks = 0;
+            consecutiveNoTargetTicks = 0;
+            nextRetryAt = Time.unscaledTime + 0.5f;
+            if (LastInRangeCount > 0)
+            {
+                LastInRangeCount = Mathf.Max(0, LastInRangeCount - 1);
+            }
+
+            lastStatus = "Skipping daily-limit bird";
+            Log($"Photo exhausted netId={netId} reason={reason} lastInRange={LastInRangeCount}");
         }
 
         private static void EnsureBirdScannerEquipped(HeartopiaComplete host)
@@ -1060,6 +1148,8 @@ namespace HeartopiaMod
             lastMovementSamplePos = Vector3.zero;
             multiCatchBurstRemaining = 0;
             multiCatchBurstTarget = 0;
+            LastScanAt = -999f;
+            LastInRangeCount = 0;
             TraceCrashBreadcrumb("ForceStop invoked");
             if (host != null)
             {
