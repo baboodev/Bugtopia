@@ -1407,7 +1407,7 @@ longer exposes start/stop, category lists, or custom-spot save controls — only
 - Optional **patrol teleport** through ~50 predefined world coordinates when no targets nearby.
 - Pause teleport during auto-repair / auto-eat (configurable).
 - Cooldown between catch attempts (default 1.5 s).
-- **Spawn Near Player** (default off) — Mono `NativeDetour` on `InsectProtocolManager` spawn/move publishers rewrites the client-chosen `Vector3` to a point 3 m in front of the player, at body height (same placement as Bird Vacuum), and clears the habitat point id. The insect view otherwise ignores that vector and snaps onto the level object (`InsectComponent.GetTargetPos`). A non-empty radar insect filter rewrites only those species (`InsectStaticId`); an empty filter rewrites every insect. Fish shadows are unaffected. `BirdFly` (no position) is not hooked.
+- **Spawn Near Player** (default off) — Mono `NativeDetour` on `InsectProtocolManager` spawn/move publishers rewrites the client-chosen `Vector3` to a point 3 m in front of the player, at body height (same placement as Bird Vacuum), and clears the habitat point id. The insect view otherwise ignores that vector and snaps onto the level object (`InsectComponent.GetTargetPos`). A non-empty radar insect filter rewrites only those species (`InsectStaticId`); an empty filter rewrites every insect. The same loaded-insect scan the farm uses (`GetComponents<InsectComponent>`) calls `InsectFly` once for each allowed insect farther than Scan Range, with the habitat point cleared. Fish shadows are unaffected. `BirdFly` (no position) is not hooked.
 
 ### Birds (`BirdNetFarm`)
 

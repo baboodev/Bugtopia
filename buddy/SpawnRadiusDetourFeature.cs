@@ -42,6 +42,11 @@ namespace HeartopiaMod
         private static readonly uint[] spawnRadiusPendingScratch = new uint[SpawnRadiusPendingCap];
         private static int spawnRadiusPendingInsectCount;
         private static int spawnRadiusPendingBirdCount;
+        // One InsectFly per netId, fired from the loaded-insect scan, never from the detour.
+        private const float SpawnRadiusInsectPullInterval = 1f;
+        private const int SpawnRadiusInsectPullsPerScan = 8;
+        private static float spawnRadiusInsectPullAt;
+        private static readonly HashSet<uint> spawnRadiusInsectPulled = new HashSet<uint>();
 
         private static readonly string InsectProtocolType =
             "XDTDataAndProtocol.ProtocolService.Insect.InsectProtocolManager";
@@ -104,6 +109,7 @@ namespace HeartopiaMod
         private static SpawnRadiusSpawnHookDelegate spawnRadiusSpawnInsectTrampoline;
         private static SpawnRadiusInsectFlyHookDelegate spawnRadiusInsectFlyKeepAlive;
         private static SpawnRadiusInsectFlyHookDelegate spawnRadiusInsectFlyTrampoline;
+        private static IntPtr spawnRadiusInsectFlyMethod;
         private static SpawnRadiusInsectMoveHookDelegate spawnRadiusInsectMoveKeepAlive;
         private static SpawnRadiusInsectMoveHookDelegate spawnRadiusInsectMoveTrampoline;
         private static SpawnRadiusInsectMoveHookDelegate spawnRadiusInsectJumpKeepAlive;
@@ -256,6 +262,7 @@ namespace HeartopiaMod
                         }
                         break;
                     case 1:
+                        spawnRadiusInsectFlyMethod = method;
                         spawnRadiusInsectFlyKeepAlive = SpawnRadiusInsectFlyHook;
                         state.Detour = new NativeDetour(nativePtr, spawnRadiusInsectFlyKeepAlive);
                         spawnRadiusInsectFlyTrampoline =
@@ -429,6 +436,94 @@ namespace HeartopiaMod
             spawnRadiusPlaceY = place.y;
             spawnRadiusPlaceZ = place.z;
             spawnRadiusAnchorValid = true;
+            if (insectOn)
+            {
+                this.PullFarInsectsOnce(anchor);
+            }
+        }
+
+        // Same census the insect farm uses (Entities.GetComponents<InsectComponent>, then the radar
+        // species filter). Catch radius is InsectNetFarm scan range. Anything farther gets one
+        // InsectFly to the cached point with a zero habitat id, so GetTargetPos keeps the vector.
+        private void PullFarInsectsOnce(Vector3 anchor)
+        {
+            float now = Time.unscaledTime;
+            if (now < spawnRadiusInsectPullAt || !this.IsWorldReady)
+            {
+                return;
+            }
+
+            spawnRadiusInsectPullAt = now + SpawnRadiusInsectPullInterval;
+            if (spawnRadiusInsectFlyMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null || !this.AttachAuraMonoThread())
+            {
+                return;
+            }
+
+            List<uint> ids;
+            List<Vector3> positions;
+            if (!this.TryGetLoadedInsectTargets(out int _, out ids, out positions, out string _)
+                || ids == null
+                || positions == null)
+            {
+                return;
+            }
+
+            float range = InsectNetFarm.GetScanRange();
+            float rangeSqr = range * range;
+            int count = ids.Count < positions.Count ? ids.Count : positions.Count;
+            int sent = 0;
+            for (int i = 0; i < count && sent < SpawnRadiusInsectPullsPerScan; i++)
+            {
+                uint netId = ids[i];
+                if (netId == 0U || spawnRadiusInsectPulled.Contains(netId))
+                {
+                    continue;
+                }
+
+                Vector3 pos = positions[i];
+                float dx = pos.x - anchor.x;
+                float dy = pos.y - anchor.y;
+                float dz = pos.z - anchor.z;
+                if (dx * dx + dy * dy + dz * dz <= rangeSqr)
+                {
+                    continue;
+                }
+
+                if (!this.TryPullInsectToPlace(netId))
+                {
+                    continue;
+                }
+
+                spawnRadiusInsectPulled.Add(netId);
+                sent++;
+            }
+        }
+
+        private unsafe bool TryPullInsectToPlace(uint netId)
+        {
+            if (spawnRadiusInsectFlyMethod == IntPtr.Zero || auraMonoRuntimeInvoke == null || !spawnRadiusAnchorValid)
+            {
+                return false;
+            }
+
+            // Runtime invoke, not the detour trampoline. A raw trampoline call from OnUpdate enters
+            // the Mono JIT with no runtime frame and kills the process before a dump is written.
+            // args[1] points at a real 12-byte Vector3; a pointer-sized slot is the stack-smash case.
+            uint id = netId;
+            Vector3 place = new Vector3(spawnRadiusPlaceX, spawnRadiusPlaceY, spawnRadiusPlaceZ);
+            ulong pointId = 0UL;
+            float flyTime = 1.2f;
+            int moveState = 1; // InsectMoveState.FlyTo
+            IntPtr exc = IntPtr.Zero;
+            IntPtr* args = stackalloc IntPtr[5];
+            args[0] = (IntPtr)(&id);
+            args[1] = (IntPtr)(&place);
+            args[2] = (IntPtr)(&pointId);
+            args[3] = (IntPtr)(&flyTime);
+            args[4] = (IntPtr)(&moveState);
+            Breadcrumbs.Drop("SpawnRadius.pull", "net=" + id);
+            auraMonoRuntimeInvoke(spawnRadiusInsectFlyMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+            return exc == IntPtr.Zero;
         }
 
         private void NoteSpawnRadiusSpeciesFilter()
@@ -440,6 +535,7 @@ namespace HeartopiaMod
                 spawnRadiusSpeciesCount = 0;
                 spawnRadiusPendingInsectCount = 0;
                 spawnRadiusPendingBirdCount = 0;
+                spawnRadiusInsectPulled.Clear();
             }
 
             CopySpawnRadiusFilter(this.radarInsectSpeciesFilter, ref spawnRadiusInsectFilterIds, ref spawnRadiusInsectFilterCount);
