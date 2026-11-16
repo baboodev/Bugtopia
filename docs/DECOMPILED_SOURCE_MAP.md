@@ -553,7 +553,7 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 - **Dump:** `ProtocolService/Insect/`
 - **Features:** Catch commands (via host scan + protocol)
 - **Access:** **A**, **R**
-- **Catch wire:** `CatchingInsect` → `CatchingInsectCommand`. Serialize order is `BubbleId` (packed int), `InsectNetIds` (max 10), `IsSelected`, `Positions` (max 10, parallel to the net ids), `UsePressCoolDown`, `WithNoAlertInsect`. The farm sends `BubbleId = 0`, both bools false, and the insect's own position. **Catch Position 3m Ahead** replaces every `Positions` entry with one point 3 m in front of the body. Measured 2026-11-17: the server then confirms catches at any real distance, so the check uses that vector. `ServerInsectComponent` replicates only `InsectStaticId` and `PointResUId`. `InsectFly` / `InsectMove` update local `DataCenter` and a local event; they do not `SendCommand`.
+- **Catch wire:** `CatchingInsect` → `CatchingInsectCommand`. Serialize order is `BubbleId` (packed int), `InsectNetIds` (max 10), `IsSelected`, `Positions` (max 10, parallel to the net ids), `UsePressCoolDown`, `WithNoAlertInsect`. The farm sends `BubbleId = 0`, both bools false, and the insect's own position. **Extend catch range** replaces every `Positions` entry with one point 3 m in front of the body. Measured 2026-11-17: the server then confirms catches at any real distance, so the check uses that vector. `ServerInsectComponent` replicates only `InsectStaticId` and `PointResUId`. `InsectFly` / `InsectMove` update local `DataCenter` and a local event; they do not `SendCommand`.
 
 #### `LevelInscetManager` (game typo)
 - **Dump:** `XDTLevelAndEntity/GameplaySystem/Insect/`
@@ -1124,7 +1124,7 @@ Status flows **server → ECS `CookingStatusComponent` → `CookingSyncSystem.On
 | Aura farm | ResourceProtocolManager, InteractSystem, Entities, EntityHelper, HandholdCylinderChecker, CollectableMeteorite*, MeteoriteLogic, gather components | AuraFarm.cs | R + A |
 | Auto fishing | HandHoldFishingRod, FishingSubState, ToolSystem, fish shadow GOs, FishingProtocolManager, UpdateRodBuoyPositionNetworkCommand (Instant Catch) | AutoFishingFarm.cs, HC | R + A + G |
 | Insect farm | LevelInscetManager, InsectProtocolManager, ServerInsectComponent | InsectNetFarm.cs, HC | R + A + G |
-| Spawn near player (insect/bird) | `InsectProtocolManager.SpawnInsect`, `InsectFly`, `InsectMove`, `InsectJump` (point id cleared so `InsectComponent.GetTargetPos` uses the vector); `BirdProtocolManager.SpawnBird`, `BirdMove`, `ReportBirdPosToServer` (not `BirdFly`) — 3 m in front at body height, radar species filter | SpawnRadiusDetourFeature.cs | A + NativeDetour |
+| Insect magnet / Bird magnet | `InsectProtocolManager.SpawnInsect`, `InsectFly`, `InsectMove`, `InsectJump` (point id cleared so `InsectComponent.GetTargetPos` uses the vector); `BirdProtocolManager.SpawnBird`, `BirdMove`, `ReportBirdPosToServer` (not `BirdFly`) — 3 m in front at body height, radar species filter | SpawnRadiusDetourFeature.cs | A + NativeDetour |
 | Bird farm | BirdScannableComponent, TakingBirdPhotoCommand, BirdProtocolManager, ScannerStatusPanel | BirdNetFarm.cs, HC | R + A + S |
 | Bubble | WebRequestUtility, Create*Bubble*Command, ActivityEvent/Bubble protocol | BubbleFeature.cs | H + S + A |
 | Radar / ESP | Entities, resource components, BubbleComponent | HC, HeartopiaResourceVisualEsp.cs | R + G |

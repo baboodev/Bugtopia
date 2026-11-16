@@ -239,7 +239,7 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.PerfectPhotoToggle.gameObject, 16f, 111f, 280f, 25f);
 
             handle.SpawnNearPlayerToggle = this.CreateUguiCheckbox(scrollContent, "SpawnNearPlayerToggle",
-                this.L("Spawn Near Player"), BirdNetFarm.GetSpawnNearPlayerEnabled(),
+                this.L("Bird magnet"), BirdNetFarm.GetSpawnNearPlayerEnabled(),
                 new System.Action<bool>(this.OnUguiBirdsSpawnNearPlayerToggled));
             PlaceUguiTopLeft(handle.SpawnNearPlayerToggle.gameObject, 16f, 141f, 280f, 25f);
 

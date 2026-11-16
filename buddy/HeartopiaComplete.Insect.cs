@@ -1097,7 +1097,7 @@ namespace HeartopiaMod
             }
         }
 
-        // Same placement as Spawn Near Player: 3 m along facing, height locked to the body.
+        // Same placement as Insect magnet: 3 m along facing, height locked to the body.
         private bool TryGetCatchPositionAhead(out Vector3 place)
         {
             place = Vector3.zero;

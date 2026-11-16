@@ -268,12 +268,12 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.PauseTriggersToggle.gameObject, 16f, 210f, 280f, 25f);
 
             handle.SpawnNearPlayerToggle = this.CreateUguiCheckbox(scrollContent, "SpawnNearPlayerToggle",
-                this.L("Spawn Near Player"), InsectNetFarm.GetSpawnNearPlayerEnabled(),
+                this.L("Insect magnet"), InsectNetFarm.GetSpawnNearPlayerEnabled(),
                 new System.Action<bool>(this.OnUguiInsectsSpawnNearPlayerToggled));
             PlaceUguiTopLeft(handle.SpawnNearPlayerToggle.gameObject, 16f, 240f, 280f, 25f);
 
             handle.CatchPositionAheadToggle = this.CreateUguiCheckbox(scrollContent, "CatchPositionAheadToggle",
-                this.L("Catch Position 3m Ahead"), InsectNetFarm.GetCatchPositionAheadEnabled(),
+                this.L("Extend catch range"), InsectNetFarm.GetCatchPositionAheadEnabled(),
                 new System.Action<bool>(this.OnUguiInsectsCatchPositionAheadToggled));
             PlaceUguiTopLeft(handle.CatchPositionAheadToggle.gameObject, 16f, 270f, 320f, 25f);
 
