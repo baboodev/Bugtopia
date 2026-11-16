@@ -81,6 +81,7 @@ namespace HeartopiaMod
             public GameObject TeleportRiskMark;   // shown while Teleport is on
             public Toggle PauseTriggersToggle;
             public Toggle SpawnNearPlayerToggle;
+            public Toggle CatchPositionAheadToggle;
 
             // Slider block — parallel lists in binding order (Game-UI round idiom).
             public UguiInsectsSliderBinding[] SliderBindings;
@@ -271,13 +272,18 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiInsectsSpawnNearPlayerToggled));
             PlaceUguiTopLeft(handle.SpawnNearPlayerToggle.gameObject, 16f, 240f, 280f, 25f);
 
+            handle.CatchPositionAheadToggle = this.CreateUguiCheckbox(scrollContent, "CatchPositionAheadToggle",
+                this.L("Catch Position 3m Ahead"), InsectNetFarm.GetCatchPositionAheadEnabled(),
+                new System.Action<bool>(this.OnUguiInsectsCatchPositionAheadToggled));
+            PlaceUguiTopLeft(handle.CatchPositionAheadToggle.gameObject, 16f, 270f, 320f, 25f);
+
             // InsectNetFarm.cs:282-340 — the five slider blocks, one loop over the binding array.
             // The change closure captures the array element directly (not the handle, which is
             // still null until assigned below): the delegates target static InsectNetFarm state,
             // so a stale closure after a shell rebuild behaves identically anyway.
             UguiInsectsSliderBinding[] bindings = BuildUguiInsectsSliderBindings();
             handle.SliderBindings = bindings;
-            float yCur = 270f;
+            float yCur = 300f;
             for (int i = 0; i < bindings.Length; i++)
             {
                 int indexCopy = i; // capture a copy for the change closure
@@ -328,6 +334,7 @@ namespace HeartopiaMod
                 SyncUguiRiskMark(handle.TeleportRiskMark, null, 0f, 0f, InsectNetFarm.GetTeleportEnabled());
                 this.SyncUguiToggleFromField(handle.PauseTriggersToggle, InsectNetFarm.GetPauseTeleportOnTriggersEnabled());
                 this.SyncUguiToggleFromField(handle.SpawnNearPlayerToggle, InsectNetFarm.GetSpawnNearPlayerEnabled());
+                this.SyncUguiToggleFromField(handle.CatchPositionAheadToggle, InsectNetFarm.GetCatchPositionAheadEnabled());
 
                 // Status readouts — every gated frame like the IMGUI drawer (background farm
                 // activity moves them, not just user edits); cached diffs limit SetText churn.
@@ -423,6 +430,16 @@ namespace HeartopiaMod
                 return;
             }
             InsectNetFarm.SetSpawnNearPlayerEnabled(value);
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiInsectsCatchPositionAheadToggled(bool value)
+        {
+            if (value == InsectNetFarm.GetCatchPositionAheadEnabled())
+            {
+                return;
+            }
+            InsectNetFarm.SetCatchPositionAheadEnabled(value);
             try { this.SaveKeybinds(false); } catch { }
         }
 

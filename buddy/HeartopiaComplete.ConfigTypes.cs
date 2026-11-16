@@ -467,6 +467,7 @@ namespace HeartopiaMod
             public int insectBatchSize = 3;
             public bool insectTeleportEnabled = true;
             public bool insectSpawnNearPlayerEnabled;
+            public bool insectCatchPositionAheadEnabled;
             public bool insectPauseTeleportOnTriggersEnabled;
             public bool insectPauseTeleportOnRepairEnabled;
             public bool insectPauseTeleportOnEatEnabled;

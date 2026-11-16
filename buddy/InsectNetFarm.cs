@@ -22,6 +22,7 @@ namespace HeartopiaMod
         private static int batchSize = 3;
         private static bool teleportEnabled = true;
         private static bool spawnNearPlayerEnabled;
+        private static bool catchPositionAheadEnabled;
         private static bool pauseTeleportOnRepairEnabled = false;
         private static bool pauseTeleportOnEatEnabled = false;
         
@@ -232,6 +233,8 @@ namespace HeartopiaMod
         {
             spawnNearPlayerEnabled = v;
         }
+        public static bool GetCatchPositionAheadEnabled() => catchPositionAheadEnabled;
+        public static void SetCatchPositionAheadEnabled(bool v) { catchPositionAheadEnabled = v; }
         public static bool GetPauseTeleportOnTriggersEnabled() => pauseTeleportOnRepairEnabled || pauseTeleportOnEatEnabled;
         public static void SetPauseTeleportOnTriggersEnabled(bool v)
         {

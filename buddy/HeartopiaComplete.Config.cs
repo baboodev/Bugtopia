@@ -443,6 +443,7 @@ namespace HeartopiaMod
             data.insectBatchSize = InsectNetFarm.GetBatchSize();
             data.insectTeleportEnabled = InsectNetFarm.GetTeleportEnabled();
             data.insectSpawnNearPlayerEnabled = InsectNetFarm.GetSpawnNearPlayerEnabled();
+            data.insectCatchPositionAheadEnabled = InsectNetFarm.GetCatchPositionAheadEnabled();
             data.insectPauseTeleportOnTriggersEnabled = InsectNetFarm.GetPauseTeleportOnTriggersEnabled();
             data.insectPauseTeleportOnRepairEnabled = InsectNetFarm.GetPauseTeleportOnRepairEnabled();
             data.insectPauseTeleportOnEatEnabled = InsectNetFarm.GetPauseTeleportOnEatEnabled();
@@ -951,6 +952,7 @@ namespace HeartopiaMod
             }
             InsectNetFarm.SetTeleportEnabled(data.insectTeleportEnabled);
             InsectNetFarm.SetSpawnNearPlayerEnabled(data.insectSpawnNearPlayerEnabled);
+            InsectNetFarm.SetCatchPositionAheadEnabled(data.insectCatchPositionAheadEnabled);
             InsectNetFarm.SetPauseTeleportOnTriggersEnabled(
                 data.insectPauseTeleportOnTriggersEnabled ||
                 data.insectPauseTeleportOnRepairEnabled ||
@@ -1310,6 +1312,7 @@ namespace HeartopiaMod
                         else if (line.Contains("insectBatchSize")) InsectNetFarm.SetBatchSize(GetJsonInt(line, "\"insectBatchSize\":"));
                         else if (line.Contains("insectTeleportEnabled")) InsectNetFarm.SetTeleportEnabled(GetJsonInt(line, "\"insectTeleportEnabled\":") != 0);
                         else if (line.Contains("insectSpawnNearPlayerEnabled")) InsectNetFarm.SetSpawnNearPlayerEnabled(GetJsonInt(line, "\"insectSpawnNearPlayerEnabled\":") != 0);
+                        else if (line.Contains("insectCatchPositionAheadEnabled")) InsectNetFarm.SetCatchPositionAheadEnabled(GetJsonInt(line, "\"insectCatchPositionAheadEnabled\":") != 0);
                         else if (line.Contains("insectPauseTeleportOnTriggersEnabled")) InsectNetFarm.SetPauseTeleportOnTriggersEnabled(GetJsonInt(line, "\"insectPauseTeleportOnTriggersEnabled\":") != 0);
                         else if (line.Contains("insectPauseTeleportOnRepairEnabled")) InsectNetFarm.SetPauseTeleportOnRepairEnabled(GetJsonInt(line, "\"insectPauseTeleportOnRepairEnabled\":") != 0);
                         else if (line.Contains("insectPauseTeleportOnEatEnabled")) InsectNetFarm.SetPauseTeleportOnEatEnabled(GetJsonInt(line, "\"insectPauseTeleportOnEatEnabled\":") != 0);

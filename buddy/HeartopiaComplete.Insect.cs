@@ -1097,6 +1097,46 @@ namespace HeartopiaMod
             }
         }
 
+        // Same placement as Spawn Near Player: 3 m along facing, height locked to the body.
+        private bool TryGetCatchPositionAhead(out Vector3 place)
+        {
+            place = Vector3.zero;
+            Vector3 anchor;
+            Vector3 forward;
+            if (this.TryGetNoclipSelfAnchorPose(out anchor, out Quaternion selfRot, out bool hasSelfRot, out _))
+            {
+                forward = hasSelfRot ? selfRot * Vector3.forward : Vector3.forward;
+                if (!hasSelfRot)
+                {
+                    GameObject skeleton = this.GetVerifiedLocalPlayerSkeleton();
+                    if (skeleton != null)
+                    {
+                        forward = skeleton.transform.forward;
+                    }
+                }
+            }
+            else
+            {
+                GameObject skeleton = this.GetVerifiedLocalPlayerSkeleton();
+                if (skeleton == null)
+                {
+                    return false;
+                }
+
+                anchor = skeleton.transform.position;
+                forward = skeleton.transform.forward;
+            }
+
+            if (anchor == Vector3.zero || float.IsNaN(anchor.x) || float.IsNaN(anchor.y) || float.IsNaN(anchor.z))
+            {
+                return false;
+            }
+
+            place = anchor + forward * 3f;
+            place.y = anchor.y;
+            return true;
+        }
+
         private bool TryInvokeInsectCatchProtocol(List<uint> ids, List<Vector3> positions, out int sentCount, out string status)
         {
             sentCount = 0;
@@ -1137,6 +1177,16 @@ namespace HeartopiaMod
                     return false;
                 }
 
+                List<Vector3> reportPositions = positions;
+                if (InsectNetFarm.GetCatchPositionAheadEnabled() && this.TryGetCatchPositionAhead(out Vector3 ahead))
+                {
+                    reportPositions = new List<Vector3>(positions.Count);
+                    for (int i = 0; i < positions.Count; i++)
+                    {
+                        reportPositions.Add(ahead);
+                    }
+                }
+
                 var idList = new Il2CppSystem.Collections.Generic.List<uint>();
                 foreach (uint id in ids)
                 {
@@ -1144,7 +1194,7 @@ namespace HeartopiaMod
                 }
 
                 var posList = new Il2CppSystem.Collections.Generic.List<Vector3>();
-                foreach (Vector3 pos in positions)
+                foreach (Vector3 pos in reportPositions)
                 {
                     posList.Add(pos);
                 }
@@ -1200,7 +1250,7 @@ namespace HeartopiaMod
                 this.lastInsectFarmSentNetIds.Clear();
                 this.lastInsectFarmSentNetIds.AddRange(ids);
                 this.lastInsectFarmSentPositions.Clear();
-                this.lastInsectFarmSentPositions.AddRange(positions);
+                this.lastInsectFarmSentPositions.AddRange(reportPositions);
                 sentCount = ids.Count;
                 status = "Protocol sent";
                 return true;

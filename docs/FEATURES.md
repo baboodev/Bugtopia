@@ -1404,6 +1404,7 @@ longer exposes start/stop, category lists, or custom-spot save controls — only
 - Auto equips the insect net while enabled. Stopping leaves the net in hand. Player-tool restore is only `FarmToolBroker.Release` when the combined-farm coordinator stops and no farm is still enabled.
 - Scans catchable insects in range (slider 1–200 m, default 12). The catch list is loaded insects inside that radius, not the net highlight sphere.
 - Batch catch (default 3 per tick).
+- **Catch Position 3m Ahead** (default off) — `CatchingInsectCommand.Positions` is the point 3 m in front of the body, at body height, for every insect in the batch. Target selection still uses the real positions and the scan-range slider. Measured 2026-11-17: with the toggle on, the server confirms the catch (`NetCaughtInsectEvent`) at any real distance of the insect. The distance check follows that client vector. `ServerInsectComponent` still only replicates species id and stay-point id; `InsectFly` / `InsectMove` do not publish a position.
 - Optional **patrol teleport** through ~50 predefined world coordinates when no targets nearby.
 - Pause teleport during auto-repair / auto-eat (configurable).
 - Cooldown between catch attempts (default 1.5 s).

@@ -553,6 +553,7 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 - **Dump:** `ProtocolService/Insect/`
 - **Features:** Catch commands (via host scan + protocol)
 - **Access:** **A**, **R**
+- **Catch wire:** `CatchingInsect` → `CatchingInsectCommand`. Serialize order is `BubbleId` (packed int), `InsectNetIds` (max 10), `IsSelected`, `Positions` (max 10, parallel to the net ids), `UsePressCoolDown`, `WithNoAlertInsect`. The farm sends `BubbleId = 0`, both bools false, and the insect's own position. **Catch Position 3m Ahead** replaces every `Positions` entry with one point 3 m in front of the body. Measured 2026-11-17: the server then confirms catches at any real distance, so the check uses that vector. `ServerInsectComponent` replicates only `InsectStaticId` and `PointResUId`. `InsectFly` / `InsectMove` update local `DataCenter` and a local event; they do not `SendCommand`.
 
 #### `LevelInscetManager` (game typo)
 - **Dump:** `XDTLevelAndEntity/GameplaySystem/Insect/`
