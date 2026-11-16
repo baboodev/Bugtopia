@@ -499,6 +499,7 @@
     <Compile Include="AutoIceSkatingFeature.cs" />
     <Compile Include="SnowSculptureFeature.cs" />
     <Compile Include="SandSculptureFeature.cs" />
+    <Compile Include="SandModelTie.cs" />
     <Compile Include="PumpkinCarvingFeature.cs" />
     <Compile Include="FurnitureAutoRepairFeature.cs" />
     <Compile Include="FurnitureLightRadiusFeature.cs" />

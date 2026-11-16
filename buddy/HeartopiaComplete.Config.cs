@@ -137,6 +137,7 @@ namespace HeartopiaMod
             data.keyBirdVacuum = (int)this.keyBirdVacuum;
             data.keyAutoSnow = (int)this.autoSnowHotkey;
             data.keyAutoSand = (int)this.autoSandHotkey;
+            data.sandModelTieCursor = this.sandModelTieCursor ?? string.Empty;
             data.keyAutoPumpkin = (int)this.autoPumpkinHotkey;
             data.keyAutoFurnitureRepair = (int)this.autoFurnitureRepairHotkey;
             data.autoFurnitureRepairEnabled = this.autoFurnitureRepairEnabled;
@@ -547,6 +548,7 @@ namespace HeartopiaMod
             this.keyBirdVacuum = (KeyCode)data.keyBirdVacuum;
             this.autoSnowHotkey = (KeyCode)data.keyAutoSnow;
             this.autoSandHotkey = (KeyCode)data.keyAutoSand;
+            this.sandModelTieCursor = data.sandModelTieCursor ?? string.Empty;
             this.autoPumpkinHotkey = (KeyCode)data.keyAutoPumpkin;
             this.autoFurnitureRepairHotkey = (KeyCode)data.keyAutoFurnitureRepair;
             this.autoFurnitureRepairEnabled = data.autoFurnitureRepairEnabled;

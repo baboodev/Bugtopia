@@ -120,6 +120,7 @@ namespace HeartopiaMod
         // When a rough offers 2+ valid models, prefer the one whose Pictorial 5★ (or current
         // hobby-level star cap) is still missing, tie-broken by rarity. Off = smallest valid id.
         private bool sandPreferRareUncollected = true;
+        private string sandModelTieCursor = string.Empty;
         private readonly Dictionary<uint, int> sandBaseFailCounts = new Dictionary<uint, int>();
         private readonly HashSet<uint> sandBaseBlacklist = new HashSet<uint>();
 
@@ -632,7 +633,7 @@ namespace HeartopiaMod
                 }
                 else
                 {
-                    int optionIndex = this.SandPickModelOptionIndex(options);
+                    int optionIndex = this.SandPickModelOptionIndex(options, out string tieKey, out bool advanceTie);
                     int productId = options[optionIndex];
                     this.SandLog("rough " + roughNetId + " options=[" + string.Join(",", options) + "] pick index=" + optionIndex
                                  + " productId=" + productId);
@@ -661,6 +662,11 @@ namespace HeartopiaMod
                     }
                     if (this.TryInvokeSandChoose(roughNetId, productId, out string chooseStatus))
                     {
+                        if (advanceTie)
+                        {
+                            this.sandModelTieCursor = SandModelTie.Remember(this.sandModelTieCursor, tieKey, productId);
+                            this.SaveAllSettings();
+                        }
                         this.TryClearSelfSandRoughData(out string clearStatus);
                         this.SandLog("clear SandRoughData: " + clearStatus);
                         this.sandSculpturesDone++;
@@ -732,9 +738,12 @@ namespace HeartopiaMod
         // option list carries one OR MORE valid ids (≤14) + decoy fillers (confirmed live). When
         // exactly one is valid there is no choice; when 2–3 are valid the mod prefers the one that
         // best advances the Pictorial collection (a model whose 5★ / current-cap record is still
-        // missing), tie-broken by rarity, then smallest id — see .research-record/sand-5star-priority.md.
-        private int SandPickModelOptionIndex(int[] options)
+        // missing), tie-broken by rarity. Ids that share that top (collectValue, rarity) cycle in
+        // ascending id order across successful chooses (SandModelTie).
+        private int SandPickModelOptionIndex(int[] options, out string tieKey, out bool advanceTie)
         {
+            tieKey = null;
+            advanceTie = false;
             if (options == null || options.Length == 0)
             {
                 return 0;
@@ -777,11 +786,9 @@ namespace HeartopiaMod
                 return bestValid;
             }
 
-            // 2+ valid ids: rank by (collection value DESC, rarity DESC, id ASC). Fail-closed — any
-            // Pictorial/hobby resolve failure just leaves collectValue at 0 so rarity+id decide.
             int starCap = this.SandCurrentStarCap();
-            int chosen = bestValid;
-            long bestKey = long.MinValue;
+            int[] collectById = new int[SandModelTie.Count + 1];
+            bool[] readOk = new bool[SandModelTie.Count + 1];
             bool anyPictorial = false;
             for (int i = 0; i < options.Length; i++)
             {
@@ -790,27 +797,24 @@ namespace HeartopiaMod
                 {
                     continue;
                 }
-
-                int modelStaticId = SandItemToModelStaticId[id];
-                int rarity = SandItemRarity[id];
-                int collectValue = 0;
-                if (this.TryGetSandModelCollectValue(modelStaticId, starCap, out int cv))
+                if (this.TryGetSandModelCollectValue(SandItemToModelStaticId[id], starCap, out int cv))
                 {
-                    collectValue = cv;
+                    collectById[id] = cv;
+                    readOk[id] = true;
                     anyPictorial = true;
-                }
-
-                // Lexicographic key: collectValue (0..2) then rarity (1..5) then smaller id wins.
-                long key = ((long)collectValue << 40) | ((long)rarity << 32) | (uint)(int.MaxValue - id);
-                if (key > bestKey)
-                {
-                    bestKey = key;
-                    chosen = i;
                 }
             }
 
+            int chosen = SandModelTie.Pick(
+                options, collectById, readOk, SandItemRarity, this.sandModelTieCursor, true,
+                out tieKey, out advanceTie);
+            int chosenId = options[chosen];
+            string modelText = (chosenId >= 1 && chosenId <= SandValidModelMaxId)
+                ? SandItemToModelStaticId[chosenId].ToString()
+                : "decoy";
             this.SandLog("model-pick: validCount=" + validCount + " options=[" + string.Join(",", options) + "] cap=" + starCap
-                         + " pictorial=" + anyPictorial + " -> id=" + options[chosen] + " (model " + SandItemToModelStaticId[options[chosen]] + ")");
+                         + " pictorial=" + anyPictorial + " tie=" + (tieKey ?? "-") + " advance=" + advanceTie
+                         + " -> id=" + chosenId + " (model " + modelText + ")");
             return chosen;
         }
 

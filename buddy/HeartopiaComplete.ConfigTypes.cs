@@ -76,6 +76,7 @@ namespace HeartopiaMod
             public int keyBirdVacuum;
             public int keyAutoSnow;
             public int keyAutoSand;
+            public string sandModelTieCursor = string.Empty;
             public int keyAutoPumpkin;
             public int keyAutoFurnitureRepair;
             // Auto Furniture Repair enable flag (FurnitureAutoRepairFeature.cs). Off by default.
