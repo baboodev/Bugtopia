@@ -14,12 +14,11 @@ namespace HeartopiaMod
 
         private static bool enabled = false;
         private static float catchCooldown = 1.5f;
-        // Scan-range bounds. The ceiling dropped 100 -> 12 m on 2026-08-23; public so the UGUI
-        // slider (HeartopiaComplete.UguiInsectsContent.cs) and the config migration
-        // (HeartopiaComplete.Config.cs) read the same numbers the setter clamps to.
+        // Slider bounds. Default stays 12 m; the ceiling is only the knob's maximum.
         public const float ScanRangeMin = 1f;
-        public const float ScanRangeMax = 12f;
-        private static float scanRange = ScanRangeMax;
+        public const float ScanRangeMax = 200f;
+        private const float ScanRangeDefault = 12f;
+        private static float scanRange = ScanRangeDefault;
         private static int batchSize = 3;
         private static bool teleportEnabled = true;
         private static bool spawnNearPlayerEnabled;

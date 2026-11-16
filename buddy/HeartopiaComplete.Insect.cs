@@ -44,11 +44,22 @@ namespace HeartopiaMod
             {
                 GameObject player = this.GetPlayerObject();
                 Vector3 playerPos = player != null ? player.transform.position : (Camera.main != null ? Camera.main.transform.position : Vector3.zero);
+                if (this.TryGetNoclipSelfAnchorPose(out Vector3 selfAnchor, out Quaternion _, out bool _, out _))
+                {
+                    playerPos = selfAnchor;
+                }
 
                 List<uint> ids = new List<uint>();
                 List<Vector3> positions = new List<Vector3>();
                 string managerStatus = "Manager path not attempted";
-                if (this.TryCollectCatchTargetsViaSweepNetManager(player, playerPos, scanRange, batchSize, ids, positions, out managerStatus))
+                // FindInRangeBugs only returns the net highlight sphere (~10 m). The slider is the
+                // limit, so the catch list is every loaded insect inside that radius.
+                if (this.TryCollectCatchTargetsFromLoadedScan(playerPos, scanRange, batchSize, ids, positions, out managerStatus))
+                {
+                    detectedCount = ids.Count;
+                    this.InsectFarmNetLog($"Loaded scan produced {detectedCount} target(s) within {scanRange:F0}m.");
+                }
+                else if (this.TryCollectCatchTargetsViaSweepNetManager(player, playerPos, scanRange, batchSize, ids, positions, out managerStatus))
                 {
                     detectedCount = ids.Count;
                     this.InsectFarmNetLog($"Manager path produced {detectedCount} target(s) without radar dependency.");
@@ -83,6 +94,57 @@ namespace HeartopiaMod
                 this.InsectFarmNetLog("TryNetCatchNearbyInsects exception: " + ex);
                 return false;
             }
+        }
+
+        private bool TryCollectCatchTargetsFromLoadedScan(Vector3 playerPos, float scanRange, int batchSize, List<uint> ids, List<Vector3> positions, out string status)
+        {
+            ids.Clear();
+            positions.Clear();
+            status = "Loaded insect scan unavailable";
+            if (!this.TryGetLoadedInsectTargets(out int _, out List<uint> loadedIds, out List<Vector3> loadedPositions, out status)
+                || loadedIds == null
+                || loadedPositions == null)
+            {
+                return false;
+            }
+
+            float range = scanRange > 0f ? scanRange : InsectNetFarm.ScanRangeMax;
+            List<(uint id, Vector3 pos, float dist)> collected = new List<(uint, Vector3, float)>();
+            int count = loadedIds.Count < loadedPositions.Count ? loadedIds.Count : loadedPositions.Count;
+            for (int i = 0; i < count; i++)
+            {
+                uint netId = loadedIds[i];
+                if (netId == 0U)
+                {
+                    continue;
+                }
+
+                Vector3 pos = loadedPositions[i];
+                float dist = Vector3.Distance(playerPos, pos);
+                if (dist > range)
+                {
+                    continue;
+                }
+
+                collected.Add((netId, pos, dist));
+            }
+
+            if (collected.Count == 0)
+            {
+                status = "No insects nearby";
+                return false;
+            }
+
+            collected.Sort((a, b) => a.dist.CompareTo(b.dist));
+            int limit = batchSize > 0 ? batchSize : collected.Count;
+            for (int i = 0; i < collected.Count && ids.Count < limit; i++)
+            {
+                ids.Add(collected[i].id);
+                positions.Add(collected[i].pos);
+            }
+
+            status = "Loaded insect targets in scan range";
+            return ids.Count > 0;
         }
 
         public bool TryGetLoadedInsectTargets(out int detectedCount, out List<uint> ids, out List<Vector3> positions, out string status)
@@ -843,7 +905,7 @@ namespace HeartopiaMod
 
             ids.Clear();
             positions.Clear();
-            float effectiveCatchRange = scanRange > 0f ? Mathf.Min(scanRange, 20f) : 20f;
+            float effectiveCatchRange = scanRange > 0f ? scanRange : InsectNetFarm.ScanRangeMax;
 
             IntPtr listClass = auraMonoObjectGetClass(listObj);
             IntPtr getCountMethod = this.FindAuraMonoMethodOnHierarchy(listClass, "get_Count", 0);
@@ -965,7 +1027,7 @@ namespace HeartopiaMod
 
             try
             {
-                float effectiveCatchRange = scanRange > 0f ? Mathf.Min(scanRange, 20f) : 20f;
+                float effectiveCatchRange = scanRange > 0f ? scanRange : InsectNetFarm.ScanRangeMax;
                 var listType = listObj.GetIl2CppType();
                 var countProp = listType.GetProperty("Count");
                 var itemMethod = listType.GetMethod("get_Item");

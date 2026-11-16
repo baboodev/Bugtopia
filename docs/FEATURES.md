@@ -1402,7 +1402,7 @@ longer exposes start/stop, category lists, or custom-spot save controls — only
 ### Insects (`InsectNetFarm`)
 
 - Auto equips the insect net while enabled. Stopping leaves the net in hand. Player-tool restore is only `FarmToolBroker.Release` when the combined-farm coordinator stops and no farm is still enabled.
-- Scans catchable insects in range (default 50 m).
+- Scans catchable insects in range (slider 1–200 m, default 12). The catch list is loaded insects inside that radius, not the net highlight sphere.
 - Batch catch (default 3 per tick).
 - Optional **patrol teleport** through ~50 predefined world coordinates when no targets nearby.
 - Pause teleport during auto-repair / auto-eat (configurable).
