@@ -151,9 +151,12 @@ namespace HeartopiaMod
             // fix was gated on autoFarmActive alone and silently skipped it.
             // ⚠️ The Fishing Locations route drives the walker too (2026-09-25) and its rides went
             // out without the fix: three summons in one session, not one "movement fix applied".
-            // Any walker driver qualifies — the same set FarmWalkRunActive names.
+            // farmWalkActive covers Gather Locations / GoOnce when the player is ALREADY seated —
+            // GatherLocationsFeature.Walking alone is too late (and ObserveFarmWalkVehicleSeat only
+            // applies on a mount transition, so a pre-seated ride never got the write).
             if (!this.farmWalkVehicleFixEnabled
-                || (!this.autoFarmActive && !this.questWalkFollowing && !GatherLocationsFeature.Walking))
+                || (!this.autoFarmActive && !this.questWalkFollowing && !this.farmWalkActive
+                    && !this.CleanupBossDrivingWalker && !GatherLocationsFeature.Walking))
             {
                 return;
             }

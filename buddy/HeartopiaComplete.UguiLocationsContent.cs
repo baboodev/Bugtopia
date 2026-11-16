@@ -374,9 +374,15 @@ namespace HeartopiaMod
                     }
                     string catId = selected.id;
                     int index = i;
+                    UguiListRowButtonSpec goBtn = new UguiListRowButtonSpec
+                    {
+                        Label = this.L("Go"), Tier = UguiListRowTierSecondary, Width = 44f, Enabled = true,
+                        OnClick = new System.Action(() => this.OnUguiLocationsGoSpotClicked(catId, index))
+                    };
                     UguiListRowButtonSpec[] spotButtons = showReorder
                         ? new UguiListRowButtonSpec[]
                         {
+                            goBtn,
                             new UguiListRowButtonSpec
                             {
                                 Label = "^", Tier = UguiListRowTierSecondary, Width = 34f, Enabled = true,
@@ -395,6 +401,7 @@ namespace HeartopiaMod
                         }
                         : new UguiListRowButtonSpec[]
                         {
+                            goBtn,
                             new UguiListRowButtonSpec
                             {
                                 Label = "X", Tier = UguiListRowTierDanger, Width = 34f, Enabled = true,
@@ -715,6 +722,14 @@ namespace HeartopiaMod
             {
                 try { this.SaveKeybinds(false); } catch { }
                 this.RefreshUguiLocationsNow();
+            }
+        }
+
+        private void OnUguiLocationsGoSpotClicked(string categoryId, int index)
+        {
+            if (GatherLocationsFeature.TryGoToSpot(this, categoryId, index))
+            {
+                this.AddMenuNotification(this.L("Going to spot"), new Color(0.45f, 1f, 0.55f));
             }
         }
 

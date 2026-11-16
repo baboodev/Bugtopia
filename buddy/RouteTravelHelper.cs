@@ -23,6 +23,7 @@ namespace HeartopiaMod
 
         private static bool travelling;
         private static bool travelWalking;          // the walker is driving right now
+        private static bool travelOneShot;          // GoOnce: on failure, stop — do not cycle
         private static bool travelPausedForSession;
         private static bool travelPausedForRepair;
         private static float travelRepairHoldSince = -1f;
@@ -89,18 +90,30 @@ namespace HeartopiaMod
 
             travelling = false;
             travelWalking = false;
+            travelOneShot = false;
             travelPausedForSession = false;
             travelPausedForRepair = false;
             travelRepairHoldSince = -1f;
             ModLogger.Msg("[RouteTravel] travel ended: " + why);
         }
 
+        // One-off walk/teleport to a single point. On walk failure the helper stops instead of
+        // cycling to the next route index (there is no "next").
+        public static void GoOnce(HeartopiaComplete host, ICallbacks cb, Vector3 pos)
+        {
+            ClearTravelState(host, cb, "go once");
+            travelOneShot = true;
+            GoTo(host, cb, 0, pos);
+        }
+
         // A hop to the spot at index: walk when possible, teleport otherwise. pos is the position
         // of index; later indices tried after a refusal are read through cb.SpotPos.
         public static void GoTo(HeartopiaComplete host, ICallbacks cb, int index, Vector3 pos)
         {
-            // A new hop supersedes any leg still in flight.
+            // A new hop supersedes any leg still in flight. Preserve GoOnce across ClearTravelState.
+            bool keepOneShot = travelOneShot;
             ClearTravelState(host, cb, "new hop");
+            travelOneShot = keepOneShot;
             if (!cb.WalkAvailable(host))
             {
                 TeleportToSpot(host, cb, index, pos);
@@ -333,12 +346,19 @@ namespace HeartopiaMod
         private static void SkipToNextSpot(HeartopiaComplete host, ICallbacks cb, string why)
         {
             int failed = travelIndex;
+            bool oneShot = travelOneShot;
             End(host, cb, why);
+            cb.OnSkipToNext(failed, why);
+            if (oneShot)
+            {
+                ModLogger.Msg("[RouteTravel] go-once gave up on '" + cb.SpotName(failed) + "' (" + why + ").");
+                return;
+            }
+
             int total = cb.TotalSpotCount();
             int next = (failed + 1) % total;
             ModLogger.Msg("[RouteTravel] giving up on '" + cb.SpotName(failed) + "' (" + why + ") — next spot "
                 + (next + 1) + "/" + total + " '" + cb.SpotName(next) + "'.");
-            cb.OnSkipToNext(failed, why);
             GoTo(host, cb, next, cb.SpotPos(next));
         }
 
@@ -367,6 +387,7 @@ namespace HeartopiaMod
             float took = Time.unscaledTime - travelStartedAt;
             travelling = false;
             travelWalking = false;
+            travelOneShot = false;
             travelPausedForSession = false;
             travelPausedForRepair = false;
             lastStatus = "Arriving at spot";

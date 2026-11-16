@@ -91,6 +91,7 @@ namespace HeartopiaMod
         private static readonly List<HeartopiaComplete.LocationCategoryEntry> categories = new List<HeartopiaComplete.LocationCategoryEntry>();
         private static readonly List<FlatSpot> flattened = new List<FlatSpot>();
         private static readonly TravelCb travelCb = new TravelCb();
+        private static readonly OneShotTravelCb oneShotCb = new OneShotTravelCb();
 
         private static bool active;
         private static int routeIndex;
@@ -104,6 +105,10 @@ namespace HeartopiaMod
         private static bool retargetAfterWorld;
         private static bool pendingRetarget;
         private static string lastStatus = "Idle";
+        // One-off Go button: walk/teleport to a listed spot without starting the route cycle.
+        private static bool oneShotActive;
+        private static Vector3 oneShotPos;
+        private static string oneShotName = "";
         // Per farm: the scan cursor (a scan counts once) and whether the latest scan since arrival was empty.
         private static readonly float[] lastHandledScanAt = { -999f, -999f, -999f };
         private static readonly bool[] scannedSinceArrival = new bool[FarmCount];
@@ -111,7 +116,10 @@ namespace HeartopiaMod
 
         public static bool Active => active;
         public static bool Walking => RouteTravelHelper.Walking;
-        public static string LastStatus => active && RouteTravelHelper.Travelling ? RouteTravelHelper.LastStatus : lastStatus;
+        public static string LastStatus =>
+            (oneShotActive || (active && RouteTravelHelper.Travelling))
+                ? RouteTravelHelper.LastStatus
+                : lastStatus;
         public static int RouteIndex => routeIndex;
         public static int RouteCount => flattened.Count;
         public static int CategoryCount => categories.Count;
@@ -761,6 +769,7 @@ namespace HeartopiaMod
                 return;
             }
 
+            CancelOneShot(host, "route start");
             RebuildFlattened();
             if (flattened.Count == 0)
             {
@@ -789,6 +798,7 @@ namespace HeartopiaMod
 
         public static void Stop(HeartopiaComplete host)
         {
+            CancelOneShot(host, "route stopped");
             if (!active)
             {
                 return;
@@ -807,17 +817,98 @@ namespace HeartopiaMod
         // Used by disable-all / stop-all paths.
         public static void ForceStop(HeartopiaComplete host)
         {
+            CancelOneShot(host, "force stop");
             Stop(host);
+        }
+
+        // UI "Go": one walk/teleport to that spot. Does not start or stop the route cycle.
+        public static bool TryGoToSpot(HeartopiaComplete host, string categoryId, int spotIndex)
+        {
+            if (host == null)
+            {
+                return false;
+            }
+
+            HeartopiaComplete.LocationCategoryEntry category = FindCategory(categoryId);
+            if (category == null || category.spots == null || spotIndex < 0 || spotIndex >= category.spots.Count)
+            {
+                return false;
+            }
+
+            HeartopiaComplete.LocationSpotEntry spot = category.spots[spotIndex];
+            if (spot == null)
+            {
+                return false;
+            }
+
+            if (!host.IsFishingAutomationWorldReady())
+            {
+                Notify(host, "Gather Locations: world not ready", new Color(1f, 0.65f, 0.45f));
+                return false;
+            }
+
+            // Interrupt whatever travel is in flight (route hop or a previous Go).
+            if (RouteTravelHelper.Travelling)
+            {
+                try { RouteTravelHelper.End(host, oneShotActive ? (RouteTravelHelper.ICallbacks)oneShotCb : travelCb, "go to spot"); }
+                catch (Exception ex) { ModLogger.Msg("[GatherLocations] travel end threw: " + ex.Message); }
+            }
+
+            oneShotActive = true;
+            oneShotPos = new Vector3(spot.x, spot.y, spot.z);
+            oneShotName = string.IsNullOrEmpty(spot.name) ? ("Spot " + (spotIndex + 1)) : spot.name;
+            lastStatus = "Going to " + oneShotName;
+            RouteTravelHelper.GoOnce(host, oneShotCb, oneShotPos);
+            FeatureLog.Life("GatherLocations", "go once to '" + oneShotName + "'");
+            return true;
+        }
+
+        private static void CancelOneShot(HeartopiaComplete host, string why)
+        {
+            if (!oneShotActive)
+            {
+                return;
+            }
+
+            oneShotActive = false;
+            try { RouteTravelHelper.End(host, oneShotCb, why); } catch { }
+        }
+
+        private static void FinishOneShot(string status)
+        {
+            oneShotActive = false;
+            lastStatus = status;
         }
 
         public static void Update(HeartopiaComplete host)
         {
-            if (!active || host == null)
+            if (host == null)
             {
                 return;
             }
 
             float now = Time.unscaledTime;
+
+            if (oneShotActive)
+            {
+                if (RouteTravelHelper.Travelling)
+                {
+                    RouteTravelHelper.Tick(host, oneShotCb, now);
+                }
+                else
+                {
+                    // Arrived / ended without the callback (defensive).
+                    oneShotActive = false;
+                }
+
+                // Route cycle waits while a manual Go is in flight.
+                return;
+            }
+
+            if (!active)
+            {
+                return;
+            }
 
             if (!host.IsFishingAutomationWorldReady())
             {
@@ -1249,6 +1340,48 @@ namespace HeartopiaMod
                 index >= 0 && index < flattened.Count ? flattened[index].pos : Vector3.zero;
 
             public int TotalSpotCount() => flattened.Count;
+
+            public bool WalkAvailable(HeartopiaComplete host) => host.FishingRouteWalkAvailable;
+
+            public bool PrepareWalk(HeartopiaComplete host, out string why) => host.FishingRoutePrepareWalk(out why);
+
+            public bool BeginWalk(HeartopiaComplete host, Vector3 target, string name) => host.FishingRouteBeginWalk(target, name);
+
+            public void AbortWalk(HeartopiaComplete host) => host.FishingRouteAbortWalk();
+
+            public bool TickWalk(HeartopiaComplete host) => host.FishingRouteTickWalk();
+
+            public float DistanceTo(HeartopiaComplete host, Vector3 to) => host.FishingRouteDistanceTo(to);
+
+            public void TeleportTo(HeartopiaComplete host, Vector3 pos) => host.TeleportToLocationWithOffset(pos, 0f);
+
+            public bool IsRepairBusy(HeartopiaComplete host) => host.IsAutoRepairBusy();
+        }
+
+        // Single-spot Go button: no session/hop freezes, no route index updates.
+        private sealed class OneShotTravelCb : RouteTravelHelper.ICallbacks
+        {
+            public bool IsSessionBusy() => false;
+
+            public bool AllowsHop() => true;
+
+            public void OnArrived(int index, string status)
+            {
+                FinishOneShot(status);
+                ModLogger.Msg("[GatherLocations] arrived at '" + oneShotName + "' (go once).");
+            }
+
+            public void OnSkipToNext(int failedIndex, string why)
+            {
+                FinishOneShot("Go failed: " + why);
+                ModLogger.Msg("[GatherLocations] go once failed for '" + oneShotName + "': " + why);
+            }
+
+            public string SpotName(int index) => oneShotName;
+
+            public Vector3 SpotPos(int index) => oneShotPos;
+
+            public int TotalSpotCount() => 1;
 
             public bool WalkAvailable(HeartopiaComplete host) => host.FishingRouteWalkAvailable;
 

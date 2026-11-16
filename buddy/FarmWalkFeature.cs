@@ -1176,6 +1176,12 @@ namespace HeartopiaMod
                 }
             }
 
+            // Already riding when the walk starts: ObserveFarmWalkVehicleSeat only writes the fix
+            // on a mount transition, so a pre-seated haul (Gather Locations Go / hop with Use
+            // Vehicle) would keep the vanilla turn rates. Apply is a no-op when not riding / already
+            // fixed; the mount path still applies via "mounted".
+            this.ApplyFarmWalkVehicleMovementFix("walk began");
+
             // Generous deadline: straight-line metres at the configured speed, tripled for detours,
             // plus a fixed allowance. Walking is meant to be slow; this only catches a wedge.
             float straight = HorizontalDistance(selfPos, target);

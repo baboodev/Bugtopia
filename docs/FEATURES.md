@@ -1380,6 +1380,8 @@ longer exposes start/stop, category lists, or custom-spot save controls — only
   enabled Fish/Insect/Bird slice owns the tool. Unreachable spots are skipped; teleport is fallback
   when walking is unavailable.
 - Status line shows category/spot index, empty-range timer, and travel state (`RouteTravelHelper`).
+- Each spot row has a **Go** button: one walk/teleport to that spot (`RouteTravelHelper.GoOnce`)
+  without starting the route cycle. An active route pauses its hop loop until Go finishes.
 
 **Default data / migration**
 
