@@ -1379,7 +1379,9 @@ namespace HeartopiaMod
                 // Bird/Insect: resolve the species ITEM id (cached per marker) so the map sync can
                 // swap the generic category pin for the species picture.
                 int speciesItemId = 0;
-                if (string.Equals(label, "Bird", StringComparison.Ordinal) || string.Equals(label, "Insect", StringComparison.Ordinal))
+                if (string.Equals(label, "Bird", StringComparison.Ordinal)
+                    || string.Equals(label, "Insect", StringComparison.Ordinal)
+                    || string.Equals(label, "Repair Kit", StringComparison.Ordinal))
                 {
                     speciesItemId = this.GetMapSpeciesItemIdForMarker(child.gameObject, metadata, label);
                 }
