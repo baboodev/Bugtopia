@@ -17,6 +17,11 @@ namespace HeartopiaMod
         private const string RepairKitTrackedMarkerPrefix = "RepairKitMarker_";
         private const float RepairKitAuraRadiusMeters = 5f;
         private const int RepairKitAuraRingSegments = 48;
+        private const float RepairKitAuraRingWidth = 0.08f;
+        // RunRadar destroys radarContainer children whose names fail IsRepairKitTrackedMarkerName.
+        // The ring is not a marker; the shared prefix is what keeps the sweep from deleting it.
+        private const string RepairKitAuraRingPrefix = "RepairKitMarker_Ring_";
+        private static readonly Color RepairKitAuraRingColor = new Color(0.15f, 0.9f, 0.75f, 0.9f);
         private const string ToolRestorerEventName = "ScriptsRefactory.DataAndProtocol.Events.ToolRestorerEvent";
         private const string ToolRestoreDestroyEventName = "ScriptsRefactory.DataAndProtocol.Events.ToolRestoreDestroyEvent";
         private const int ToolRestorerEventBytes = 8;
@@ -37,8 +42,8 @@ namespace HeartopiaMod
         private readonly Dictionary<uint, GameObject> repairKitAuraRings =
             new Dictionary<uint, GameObject>();
         private readonly HashSet<uint> repairKitSeenScratch = new HashSet<uint>();
-        // In-range marker ids for one sync. Not repairKitSeenScratch: that set is the scan's
-        // world snapshot, and a world-epoch change prunes entries missing from it.
+        // In-range net ids for one marker or aura pass. Not repairKitSeenScratch: that set is the
+        // scan's world snapshot, and a world-epoch change prunes entries missing from it.
         private readonly HashSet<uint> repairKitInRangeScratch = new HashSet<uint>();
         private readonly List<uint> repairKitScratchIds = new List<uint>();
         private readonly List<uint> repairKitRemoveDrainIds = new List<uint>();
@@ -310,8 +315,8 @@ namespace HeartopiaMod
             }
         }
 
-        // Called from RunRadar while Repair Kits and/or Repair Kit Aura is on. Aura-only still
-        // drains the snapshot, then drops markers and returns so a later aura pass can draw rings.
+        // Called from RunRadar while Repair Kits and/or Repair Kit Aura is on.
+        // The scan always drains. Rings read that snapshot; markers stay on their own toggle.
         private void SyncRepairKitRadarMarkers(Vector3 scanOrigin, Material xRay, Material bg)
         {
             this.DrainRepairKitRemoveQueue();
@@ -320,6 +325,8 @@ namespace HeartopiaMod
             {
                 this.repairKitNeedsScan = false;
             }
+
+            this.SyncRepairKitAuraRings(scanOrigin);
 
             if (!this.showRepairKitRadar)
             {
@@ -373,6 +380,105 @@ namespace HeartopiaMod
             for (int i = 0; i < this.repairKitScratchIds.Count; i++)
             {
                 this.RemoveRepairKitTrackedMarker(this.repairKitScratchIds[i]);
+            }
+        }
+
+        // In-range snapshot entries only, same radarMaxDistance gate as markers.
+        // Toggle off drops every ring. Positions are rewritten from the entry each sync.
+        private void SyncRepairKitAuraRings(Vector3 scanOrigin)
+        {
+            if (!this.showRepairKitAuraRadius)
+            {
+                if (this.repairKitAuraRings.Count > 0)
+                {
+                    this.ClearRepairKitAuraRings();
+                }
+
+                return;
+            }
+
+            this.EnsureRadarMaterials();
+            Material lineMaterial = this.radarLineMaterial;
+            if (lineMaterial == null)
+            {
+                return;
+            }
+
+            FeatureLog.Once(RepairKitRadarTag, "aura-first-sync", "repair kit aura rings syncing — Repair Kit Aura is on");
+
+            float maxRangeSqr = this.radarMaxDistance * this.radarMaxDistance;
+            this.repairKitInRangeScratch.Clear();
+            foreach (RepairKitEntry entry in this.repairKitEntries.Values)
+            {
+                if ((scanOrigin - entry.Position).sqrMagnitude > maxRangeSqr)
+                {
+                    continue;
+                }
+
+                this.repairKitInRangeScratch.Add(entry.NetId);
+                this.UpsertRepairKitAuraRing(entry, lineMaterial);
+            }
+
+            this.repairKitScratchIds.Clear();
+            foreach (KeyValuePair<uint, GameObject> pair in this.repairKitAuraRings)
+            {
+                if (pair.Value == null || !this.repairKitInRangeScratch.Contains(pair.Key))
+                {
+                    this.repairKitScratchIds.Add(pair.Key);
+                }
+            }
+
+            for (int i = 0; i < this.repairKitScratchIds.Count; i++)
+            {
+                this.DestroyRepairKitVisual(this.repairKitAuraRings, this.repairKitScratchIds[i]);
+            }
+        }
+
+        private void UpsertRepairKitAuraRing(RepairKitEntry entry, Material lineMaterial)
+        {
+            if (!this.repairKitAuraRings.TryGetValue(entry.NetId, out GameObject ring) || ring == null)
+            {
+                ring = new GameObject(RepairKitAuraRingPrefix + entry.NetId.ToString());
+                LineRenderer created = ring.AddComponent<LineRenderer>();
+                created.useWorldSpace = true;
+                created.loop = true;
+                created.positionCount = RepairKitAuraRingSegments + 1;
+                created.startWidth = RepairKitAuraRingWidth;
+                created.endWidth = RepairKitAuraRingWidth;
+                created.startColor = RepairKitAuraRingColor;
+                created.endColor = RepairKitAuraRingColor;
+                created.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                created.receiveShadows = false;
+                created.sharedMaterial = lineMaterial;
+                this.repairKitAuraRings[entry.NetId] = ring;
+            }
+
+            if (this.radarContainer != null && ring.transform.parent != this.radarContainer.transform)
+            {
+                ring.transform.SetParent(this.radarContainer.transform, true);
+            }
+
+            ring.transform.position = entry.Position;
+            LineRenderer circle = ring.GetComponent<LineRenderer>();
+            if (circle == null)
+            {
+                return;
+            }
+
+            if (circle.sharedMaterial != lineMaterial)
+            {
+                circle.sharedMaterial = lineMaterial;
+            }
+
+            Vector3 center = entry.Position;
+            center.y += 0.02f;
+            for (int segment = 0; segment <= RepairKitAuraRingSegments; segment++)
+            {
+                float angle = (float)segment / RepairKitAuraRingSegments * Mathf.PI * 2f;
+                circle.SetPosition(segment, center + new Vector3(
+                    Mathf.Cos(angle) * RepairKitAuraRadiusMeters,
+                    0f,
+                    Mathf.Sin(angle) * RepairKitAuraRadiusMeters));
             }
         }
 
