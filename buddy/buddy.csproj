@@ -519,6 +519,7 @@
     <Compile Include="BubbleSpawnRewriteFeature.cs" />
     <Compile Include="AutoBubbleCollectFeature.cs" />
     <Compile Include="PetPoopFeature.cs" />
+    <Compile Include="RepairKitRadarFeature.cs" />
     <Compile Include="NetCookSlotPrefsFeature.cs" />
     <Compile Include="MelonLoaderPlugin.cs" />
     <Compile Include="MelonSceneHookCleanup.cs" />

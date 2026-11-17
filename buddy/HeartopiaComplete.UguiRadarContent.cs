@@ -651,6 +651,8 @@ namespace HeartopiaMod
             if (this.showInsectRadar) selected.Add("Insects");
             if (this.showFishShadowRadar) selected.Add("Fish Shadows");
             if (this.showMeteorRadar) selected.Add("Meteors");
+            if (this.showRepairKitRadar) selected.Add("Repair Kits");
+            if (this.showRepairKitAuraRadius) selected.Add("Repair Aura");
             if (this.showPetPoopRadar) selected.Add("Dog Poop");
             if (this.showOtherPlayersRadar) selected.Add("Players");
             return this.GetRadarSelectionSummary(selected);
@@ -888,6 +890,51 @@ namespace HeartopiaMod
                                 {
                                     this.RemoveTrackedMarkersByNameContains("p_rock_meteorite");
                                     this.RemoveTrackedMarkersByNameContains("meteorite");
+                                }
+                            }
+                        },
+                        // RepairKitRadarFeature.cs — ToolRestorer component scan, not the GO scan.
+                        new UguiRadarOptionBinding
+                        {
+                            Label = "Repair Kits",
+                            Get = () => this.showRepairKitRadar,
+                            Set = v =>
+                            {
+                                this.showRepairKitRadar = v;
+                                if (v)
+                                {
+                                    this.EnsureRepairKitRadarHooks();
+                                    this.RequestRepairKitRescan();
+                                }
+                                else if (!this.showRepairKitAuraRadius)
+                                {
+                                    this.ClearRepairKitRadarState();
+                                }
+                                else
+                                {
+                                    this.ClearRepairKitTrackedMarkers();
+                                }
+                            }
+                        },
+                        new UguiRadarOptionBinding
+                        {
+                            Label = "Repair Kit Aura",
+                            Get = () => this.showRepairKitAuraRadius,
+                            Set = v =>
+                            {
+                                this.showRepairKitAuraRadius = v;
+                                if (v)
+                                {
+                                    this.EnsureRepairKitRadarHooks();
+                                    this.RequestRepairKitRescan();
+                                }
+                                else
+                                {
+                                    this.ClearRepairKitAuraRings();
+                                    if (!this.showRepairKitRadar)
+                                    {
+                                        this.ClearRepairKitRadarState();
+                                    }
                                 }
                             }
                         },
@@ -1282,6 +1329,10 @@ namespace HeartopiaMod
             this.showInsectRadar = true;
             this.showFishShadowRadar = true;
             this.showMeteorRadar = true;
+            this.showRepairKitRadar = true;
+            this.showRepairKitAuraRadius = true;
+            this.EnsureRepairKitRadarHooks();
+            this.RequestRepairKitRescan();
             this.showPetPoopRadar = true;
             this.showOtherPlayersRadar = true;
             this.CheckRadarAutoToggle();
@@ -1330,6 +1381,9 @@ namespace HeartopiaMod
             this.showInsectRadar = false;
             this.showFishShadowRadar = false;
             this.showMeteorRadar = false;
+            this.showRepairKitRadar = false;
+            this.showRepairKitAuraRadius = false;
+            this.ClearRepairKitRadarState();
             this.showPetPoopRadar = false;
             this.showOtherPlayersRadar = false;
             this.CheckRadarAutoToggle();

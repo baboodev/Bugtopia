@@ -1937,6 +1937,7 @@ namespace HeartopiaMod
                 || this.showTreeRadar || this.showRareTreeRadar || this.showAppleTreeRadar || this.showOrangeTreeRadar
                 || this.showOakOakRadar || this.showFluoriteRadar
                 || this.showBubbleRadar || this.showBirdRadar || this.showInsectRadar || this.showFishShadowRadar || this.showMeteorRadar
+                || this.showRepairKitRadar || this.showRepairKitAuraRadius
                 || this.showOtherPlayersRadar || this.showPetPoopRadar || this.showWildGiftAnimalRadar;
         }
 

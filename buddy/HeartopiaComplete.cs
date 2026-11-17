@@ -5058,6 +5058,8 @@ namespace HeartopiaMod
         // Token: 0x0400002F RID: 47
         public bool showFishShadowRadar = false;
         private bool showMeteorRadar = false;
+        private bool showRepairKitRadar = false;
+        private bool showRepairKitAuraRadius = false;
         // Draw radar objects as a GUI overlay (like meteors) regardless of world distance
         
         // Token: 0x04000030 RID: 48
