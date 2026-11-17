@@ -131,6 +131,9 @@ namespace HeartopiaMod
 
         // Pinned GetComponents<ToolRestorerComponent>. No owner filter — every standing kit.
         // infrastructureOk with an empty result is a real snapshot of zero kits.
+        // A component that fails the data/netId/position read is not proof it is gone: successful
+        // rows are still upserted, but absent ids are pruned only on a clean enumeration. A dirty
+        // scan returns false so the caller keeps repairKitNeedsScan and retries.
         private bool TryScanRepairKitsIntoEntries()
         {
             if (this.repairKitScanEpoch != this.WorldReadyEpoch)
@@ -178,18 +181,21 @@ namespace HeartopiaMod
                 }
 
                 this.repairKitSeenScratch.Clear();
+                int readFailures = 0;
                 for (int i = 0; i < components.Count; i++)
                 {
                     IntPtr comp = components[i];
                     if (comp == IntPtr.Zero
                         || !this.TryReadToolRestorerKitData(comp, out uint ownerNetId, out int staticId))
                     {
+                        readFailures++;
                         continue;
                     }
 
                     if ((!this.TryGetMonoObjectMember(comp, "entity", out IntPtr entityObj) || entityObj == IntPtr.Zero)
                         && (!this.TryGetMonoObjectMember(comp, "Entity", out entityObj) || entityObj == IntPtr.Zero))
                     {
+                        readFailures++;
                         continue;
                     }
 
@@ -200,6 +206,7 @@ namespace HeartopiaMod
                         {
                             if (!this.TryGetAuraMonoEntityNetId(entityObj, out netId) || netId == 0u)
                             {
+                                readFailures++;
                                 continue;
                             }
                         }
@@ -207,6 +214,7 @@ namespace HeartopiaMod
                         if (!this.TryGetMonoVector3Member(entityObj, "position", out Vector3 position)
                             && !this.TryGetAuraMonoEntityPosition(entityObj, out position))
                         {
+                            readFailures++;
                             continue;
                         }
 
@@ -227,8 +235,15 @@ namespace HeartopiaMod
                     }
                 }
 
-                this.RemoveRepairKitsMissingFromSeen();
-                return true;
+                if (readFailures == 0)
+                {
+                    this.RemoveRepairKitsMissingFromSeen();
+                    return true;
+                }
+
+                FeatureLog.Fail(RepairKitRadarTag, readFailures + " of " + components.Count
+                    + " repair kit component(s) unreadable — snapshot kept, rescan pending");
+                return false;
             }
             catch (Exception ex)
             {
