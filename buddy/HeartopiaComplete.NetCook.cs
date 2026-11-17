@@ -4541,13 +4541,16 @@ namespace HeartopiaMod
                                 }
                             }
 
-                            if (!this.TryGetAuraMonoEntityObjectByNetId(ownerCookBuildNetId, out IntPtr ownerEntityObj) || ownerEntityObj == IntPtr.Zero)
+                            // Distinct local names from the broad-refresh loop below so the W1
+                            // heuristic does not treat same-name decls in a later scope as a
+                            // cross-yield hold of these pointers.
+                            if (!this.TryGetAuraMonoEntityObjectByNetId(ownerCookBuildNetId, out IntPtr windowOwnerEntityObj) || windowOwnerEntityObj == IntPtr.Zero)
                             {
                                 continue;
                             }
                             ownerCandidatesWithEntity++;
 
-                            if (!this.TryResolveNetCookBuildComponentAuraMono(ownerEntityObj, out IntPtr cookBuildComponentObj, out _))
+                            if (!this.TryResolveNetCookBuildComponentAuraMono(windowOwnerEntityObj, out IntPtr windowCookBuildComponentObj, out _))
                             {
                                 continue;
                             }
@@ -4555,19 +4558,19 @@ namespace HeartopiaMod
 
                             Vector3 ownerPosition;
                             bool hasOwnerPosition = true;
-                            if (!this.TryGetAuraMonoEntityPosition(ownerEntityObj, out ownerPosition)
-                                && !this.TryExtractHomePositionMonoObject(ownerEntityObj, out ownerPosition)
-                                && !this.TryExtractHomePositionMonoObject(cookBuildComponentObj, out ownerPosition))
+                            if (!this.TryGetAuraMonoEntityPosition(windowOwnerEntityObj, out ownerPosition)
+                                && !this.TryExtractHomePositionMonoObject(windowOwnerEntityObj, out ownerPosition)
+                                && !this.TryExtractHomePositionMonoObject(windowCookBuildComponentObj, out ownerPosition))
                             {
                                 hasOwnerPosition = false;
                                 ownerPosition = scanOrigin;
                             }
 
                             int cookerStaticId = 0;
-                            this.TryGetMonoInt32Member(cookBuildComponentObj, "_cookerStaticId", out cookerStaticId);
+                            this.TryGetMonoInt32Member(windowCookBuildComponentObj, "_cookerStaticId", out cookerStaticId);
                             if (cookerStaticId <= 0)
                             {
-                                this.TryGetMonoInt32Member(cookBuildComponentObj, "cookerStaticId", out cookerStaticId);
+                                this.TryGetMonoInt32Member(windowCookBuildComponentObj, "cookerStaticId", out cookerStaticId);
                             }
 
                             int cookerType = 0;
@@ -4597,8 +4600,8 @@ namespace HeartopiaMod
 
                             int addedForOwner = this.TryAddCookBuildBurnerMapTargetsAuraMono(
                                 ownerCookBuildNetId,
-                                ownerEntityObj,
-                                cookBuildComponentObj,
+                                windowOwnerEntityObj,
+                                windowCookBuildComponentObj,
                                 this.netCookTargets,
                                 seenTargets,
                                 seenCookerNetIds,

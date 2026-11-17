@@ -1298,10 +1298,12 @@ namespace HeartopiaMod
             }
 
             object baselineFaceManaged = null;
-            IntPtr baselineFaceAura = IntPtr.Zero;
+            // Pin only — never keep a raw MonoObject* across yields (W1 / moving GC).
+            uint baselineFaceAuraPin = 0U;
             if (runtime.UseAura)
             {
-                if (!this.TryInvokeFaceShopAuraGetCurrent(in runtime, out baselineFaceAura, out prepError))
+                if (!this.TryInvokeFaceShopAuraGetCurrent(in runtime, out IntPtr baselineFaceAura, out prepError)
+                    || baselineFaceAura == IntPtr.Zero)
                 {
                     this.shopBuyAllStatus = prepError ?? "Face shop baseline unavailable.";
                     this.AddMenuNotification(this.shopBuyAllStatus, new Color(1f, 0.55f, 0.45f));
@@ -1309,6 +1311,8 @@ namespace HeartopiaMod
                     this.shopBuyAllCoroutine = null;
                     yield break;
                 }
+
+                baselineFaceAuraPin = AuraMonoPinNew(baselineFaceAura);
             }
             else if (!this.TryInvokeAvatarFaceGetCurrent(runtime.ManagedFaceSystem, runtime.ManagedFaceSystemType, out baselineFaceManaged, out prepError))
             {
@@ -1319,9 +1323,6 @@ namespace HeartopiaMod
                 yield break;
             }
 
-            // The baseline face object lives across the whole multi-frame buy loop; root it so
-            // the GC cannot collect it between yields (it may be referenced only by this routine).
-            uint baselineFaceAuraPin = AuraMonoPinNew(baselineFaceAura);
             try
             {
 
@@ -1365,7 +1366,9 @@ namespace HeartopiaMod
                         bool purchaseOk = false;
                         if (runtime.UseAura)
                         {
-                            purchaseOk = this.TryApplyFaceShopCandidateAura(baselineFaceAura, in runtime, in candidate, out IntPtr purchaseFaceAura, out _)
+                            IntPtr pinnedBaseline = AuraMonoPinTarget(baselineFaceAuraPin);
+                            purchaseOk = pinnedBaseline != IntPtr.Zero
+                                && this.TryApplyFaceShopCandidateAura(pinnedBaseline, in runtime, in candidate, out IntPtr purchaseFaceAura, out _)
                                 && this.TryInvokeFaceShopAuraSaveData(in runtime, purchaseFaceAura, true, out _);
                         }
                         else
@@ -1409,7 +1412,11 @@ namespace HeartopiaMod
             {
                 if (runtime.UseAura)
                 {
-                    this.TryInvokeFaceShopAuraSaveData(in runtime, baselineFaceAura, false, out _);
+                    IntPtr restoreBaseline = AuraMonoPinTarget(baselineFaceAuraPin);
+                    if (restoreBaseline != IntPtr.Zero)
+                    {
+                        this.TryInvokeFaceShopAuraSaveData(in runtime, restoreBaseline, false, out _);
+                    }
                 }
                 else
                 {

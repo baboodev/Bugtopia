@@ -3654,10 +3654,7 @@ namespace HeartopiaMod
         {
             detail = string.Empty;
             if (this.puzzleCollectOptionTypeField == IntPtr.Zero
-                || this.sandCollectCharacterProtocolClass == IntPtr.Zero
-                || auraMonoClassVtable == null
                 || auraMonoFieldStaticGetValue == null
-                || this.auraMonoRootDomain == IntPtr.Zero
                 || !AuraMonoStaticFieldReadsAllowed())
             {
                 detail = "no _optionType static access";
@@ -3666,8 +3663,9 @@ namespace HeartopiaMod
 
             try
             {
-                IntPtr vtable = auraMonoClassVtable(this.auraMonoRootDomain, this.sandCollectCharacterProtocolClass);
-                if (vtable == IntPtr.Zero)
+                // Vtable of the field's DECLARING class (never the searched child class).
+                if (!this.TryGetAuraMonoStaticFieldVtable(this.puzzleCollectOptionTypeField, out IntPtr vtable)
+                    || vtable == IntPtr.Zero)
                 {
                     detail = "no vtable";
                     return false;
