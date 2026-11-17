@@ -387,8 +387,8 @@ namespace HeartopiaMod
         private void NoteSpawnRadiusPlayerAnchor()
         {
             this.NoteSpawnRadiusSpeciesFilter();
-            bool insectOn = InsectNetFarm.GetSpawnNearPlayerEnabled();
-            bool birdOn = BirdNetFarm.GetSpawnNearPlayerEnabled();
+            bool insectOn = InsectNetFarm.GetSpawnNearPlayerEnabled() && InsectNetFarm.IsEnabled;
+            bool birdOn = BirdNetFarm.GetSpawnNearPlayerEnabled() && BirdNetFarm.IsEnabled;
             spawnRadiusInsectArmed = insectOn;
             spawnRadiusBirdArmed = birdOn;
             if (!insectOn && !birdOn)

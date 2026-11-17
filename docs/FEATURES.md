@@ -1408,7 +1408,7 @@ longer exposes start/stop, category lists, or custom-spot save controls — only
 - Optional **patrol teleport** through ~50 predefined world coordinates when no targets nearby.
 - Pause teleport during auto-repair / auto-eat (configurable).
 - Cooldown between catch attempts (default 1.5 s).
-- **Insect magnet** (default off) — Mono `NativeDetour` on `InsectProtocolManager` spawn/move publishers rewrites the client-chosen `Vector3` to a point 3 m in front of the player, at body height (same placement as Bird Vacuum), and clears the habitat point id. The insect view otherwise ignores that vector and snaps onto the level object (`InsectComponent.GetTargetPos`). A non-empty radar insect filter rewrites only those species (`InsectStaticId`); an empty filter rewrites every insect. The same loaded-insect scan the farm uses (`GetComponents<InsectComponent>`) calls `InsectFly` once for each allowed insect farther than Scan Range, with the habitat point cleared. Fish shadows are unaffected. `BirdFly` (no position) is not hooked.
+- **Insect magnet** (default off) — active only while Auto Insect Farm is on. Mono `NativeDetour` on `InsectProtocolManager` spawn/move publishers rewrites the client-chosen `Vector3` to a point 3 m in front of the player, at body height (same placement as Bird Vacuum), and clears the habitat point id. The insect view otherwise ignores that vector and snaps onto the level object (`InsectComponent.GetTargetPos`). A non-empty radar insect filter rewrites only those species (`InsectStaticId`); an empty filter rewrites every insect. The same loaded-insect scan the farm uses (`GetComponents<InsectComponent>`) calls `InsectFly` once for each allowed insect farther than Scan Range, with the habitat point cleared. Fish shadows are unaffected. `BirdFly` (no position) is not hooked.
 
 ### Birds (`BirdNetFarm`)
 
@@ -1420,7 +1420,7 @@ longer exposes start/stop, category lists, or custom-spot save controls — only
 - Pending server ACK tracking for burst catches.
 - Client-local birds (pendant long-tailed tit and any other netId `>= 4000000000`) are photographed with command `BirdNetId = 0` and the real static id. The farm still tracks the entity netId for cooldown and the capture count. A stand netId still forces command `BirdNetId = 0`, matching manual `SavePhotoData`.
 - Optional crash trace logging to file when verbose flags enabled in source.
-- **Bird magnet** (default off) — same 3 m in-front placement as insects. Hooks `BirdProtocolManager.SpawnBird`, `BirdMove`, and `ReportBirdPosToServer` only (`BirdFly` has no `Vector3`). A non-empty radar bird filter rewrites only those species (`BirdId`); an empty filter rewrites every bird.
+- **Bird magnet** (default off) — active only while Auto Bird Farm is on. Same 3 m in-front placement as insects. Hooks `BirdProtocolManager.SpawnBird`, `BirdMove`, and `ReportBirdPosToServer` only (`BirdFly` has no `Vector3`). A non-empty radar bird filter rewrites only those species (`BirdId`); an empty filter rewrites every bird.
 - **Bird Vacuum (Client Side)** — pulls `p_bird` objects to 3 m in front of the player at body height. When the radar bird species filter is non-empty, only prefabs whose item id is in that set are moved (same rule as the radar: an empty filter moves every bird). Flag only (no save). Hotkey still toggles it. DISABLE ALL on Features → Main clears it.
 
 ---
