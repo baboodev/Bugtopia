@@ -185,6 +185,52 @@ namespace HeartopiaMod
             return true;
         }
 
+        // Same membership as FilterRadarSpeciesToSpawnWindow, without allocating a HashSet.
+        // Quick chrome is "selected" iff current equals what a quick click would write.
+        private bool RadarSpeciesFilterEqualsQuick(HashSet<int> current, HashSet<int> quick)
+        {
+            if (current == null)
+            {
+                return false;
+            }
+
+            if (quick == null || quick.Count == 0)
+            {
+                return current.Count == 1 && current.Contains(RadarSpeciesFilterNoneId);
+            }
+
+            if (current.Contains(RadarSpeciesFilterNoneId))
+            {
+                return false;
+            }
+
+            this.RefreshRadarSpawnGateSnapshot();
+            int keptCount = 0;
+            foreach (int id in quick)
+            {
+                RadarSpeciesFilterEntry entry = this.GetRadarSpeciesFilterEntry(id);
+                if (!(current.Contains(id) || entry == null || this.RadarSpeciesInSpawnWindow(entry)))
+                {
+                    continue;
+                }
+
+                if (!current.Contains(id))
+                {
+                    return false;
+                }
+
+                keptCount++;
+            }
+
+            // Empty kept set is not "All species" (Count 0): Apply would write NoneId.
+            if (keptCount == 0)
+            {
+                return false;
+            }
+
+            return keptCount == current.Count;
+        }
+
         private void ApplyRadarSpeciesFilter(bool insects, HashSet<int> ids)
         {
             HashSet<int> set = insects ? this.radarInsectSpeciesFilter : this.radarBirdSpeciesFilter;

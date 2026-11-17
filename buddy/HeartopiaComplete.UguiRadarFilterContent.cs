@@ -972,11 +972,11 @@ namespace HeartopiaMod
             HashSet<int> below5 = handle.ShowingInsects ? this.radarInsectQuickBelow5 : this.radarBirdQuickBelow5;
             HashSet<int> notMaster = handle.ShowingInsects ? this.radarInsectQuickNotMaster : this.radarBirdQuickNotMaster;
             this.ApplyUguiRadarFilterQuickButton(handle.QuickUnopenedButton,
-                ref handle.QuickUnopenedShown, this.radarCollectionFilterReady && RadarSpeciesFilterEquals(currentSet, unopened));
+                ref handle.QuickUnopenedShown, this.radarCollectionFilterReady && this.RadarSpeciesFilterEqualsQuick(currentSet, unopened));
             this.ApplyUguiRadarFilterQuickButton(handle.QuickBelow5Button,
-                ref handle.QuickBelow5Shown, this.radarCollectionFilterReady && RadarSpeciesFilterEquals(currentSet, below5));
+                ref handle.QuickBelow5Shown, this.radarCollectionFilterReady && this.RadarSpeciesFilterEqualsQuick(currentSet, below5));
             this.ApplyUguiRadarFilterQuickButton(handle.QuickNotMasterButton,
-                ref handle.QuickNotMasterShown, this.radarCollectionFilterReady && RadarSpeciesFilterEquals(currentSet, notMaster));
+                ref handle.QuickNotMasterShown, this.radarCollectionFilterReady && this.RadarSpeciesFilterEqualsQuick(currentSet, notMaster));
             bool empty = handle.Visible.Count == 0;
             SetUguiGoActive(handle.EmptyLabel, empty);
             SetUguiGoActive(handle.Grid != null ? handle.Grid.Root : null, !empty);
