@@ -2043,7 +2043,8 @@ namespace HeartopiaMod
 
                         bool flag4 = gameObject.name.StartsWith("TrackedMarker_") || this.TryParseBubbleTrackedMarkerId(gameObject.name, out _)
                             || IsPetPoopTrackedMarkerName(gameObject.name)
-                            || IsWildGiftAnimalTrackedMarkerName(gameObject.name);
+                            || IsWildGiftAnimalTrackedMarkerName(gameObject.name)
+                            || IsRepairKitTrackedMarkerName(gameObject.name);
                         bool flag5 = !flag4;
                         if (flag5)
                         {
@@ -2119,6 +2120,18 @@ namespace HeartopiaMod
             else if (this.trackedPetPoopMarkers.Count > 0)
             {
                 this.ClearPetPoopTrackedMarkers();
+            }
+
+            // Repair kits (RepairKitRadarFeature.cs): ToolRestorer snapshot, markers keyed by netId.
+            // Aura-only still syncs so the scan drains; marker sync clears markers and returns.
+            if (this.showRepairKitRadar || this.showRepairKitAuraRadius)
+            {
+                this.SyncRepairKitRadarMarkers(position, material, material2);
+            }
+            else if (this.trackedRepairKitMarkers.Count > 0 || this.repairKitEntries.Count > 0
+                     || this.repairKitAuraRings.Count > 0)
+            {
+                this.ClearRepairKitRadarState();
             }
 
             // Visiting wild animals carrying a gift (WildAnimalVisitGiftFeature.cs): view-component
@@ -3189,6 +3202,13 @@ namespace HeartopiaMod
                 icon = "?";
                 endColor = new Color(0.72f, 0.52f, 0.3f); // brown
                 bgColor = new Color(0.3f, 0.18f, 0.08f, 0.88f);
+            }
+            if (meshName == "repairkit")
+            {
+                text2 = "Repair Kit";
+                icon = "?";
+                endColor = new Color(0.45f, 0.85f, 0.95f);
+                bgColor = new Color(0.08f, 0.28f, 0.36f, 0.88f);
             }
             // Visiting wild animal with a gift (WildAnimalVisitGiftFeature.cs).
             if (meshName == "giftanimal")

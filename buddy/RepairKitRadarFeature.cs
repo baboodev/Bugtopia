@@ -37,6 +37,9 @@ namespace HeartopiaMod
         private readonly Dictionary<uint, GameObject> repairKitAuraRings =
             new Dictionary<uint, GameObject>();
         private readonly HashSet<uint> repairKitSeenScratch = new HashSet<uint>();
+        // In-range marker ids for one sync. Not repairKitSeenScratch: that set is the scan's
+        // world snapshot, and a world-epoch change prunes entries missing from it.
+        private readonly HashSet<uint> repairKitInRangeScratch = new HashSet<uint>();
         private readonly List<uint> repairKitScratchIds = new List<uint>();
 
         private bool repairKitHooksRegistered;
@@ -55,6 +58,8 @@ namespace HeartopiaMod
             {
                 if (pair.Value != null)
                 {
+                    this.RemoveMarkerMetadata(pair.Value);
+                    this.RemoveTrackedMarkerMapping(pair.Value);
                     UnityEngine.Object.Destroy(pair.Value);
                 }
             }
@@ -121,12 +126,87 @@ namespace HeartopiaMod
             return true;
         }
 
-        private void SyncRepairKitRadarMarkers(Vector3 scanOrigin, Material mat, Material mat2)
+        // Called from RunRadar while Repair Kits and/or Repair Kit Aura is on. Aura-only still
+        // drains the snapshot, then drops markers and returns so a later aura pass can draw rings.
+        private void SyncRepairKitRadarMarkers(Vector3 scanOrigin, Material xRay, Material bg)
         {
+            this.EnsureRepairKitRadarHooks();
             if (this.repairKitNeedsScan && this.TryScanRepairKitsIntoEntries())
             {
                 this.repairKitNeedsScan = false;
             }
+
+            if (!this.showRepairKitRadar)
+            {
+                this.ClearRepairKitTrackedMarkers();
+                return;
+            }
+
+            FeatureLog.Once(RepairKitRadarTag, "radar-first-sync", "repair kit markers syncing — the Repair Kits radar category is on");
+
+            float maxRangeSqr = this.radarMaxDistance * this.radarMaxDistance;
+            this.repairKitInRangeScratch.Clear();
+            foreach (RepairKitEntry entry in this.repairKitEntries.Values)
+            {
+                if ((scanOrigin - entry.Position).sqrMagnitude > maxRangeSqr)
+                {
+                    continue;
+                }
+
+                this.repairKitInRangeScratch.Add(entry.NetId);
+                if (this.trackedRepairKitMarkers.TryGetValue(entry.NetId, out GameObject existing) && existing != null)
+                {
+                    existing.transform.position = entry.Position;
+                    continue;
+                }
+
+                GameObject marker = this.CreateMarker(entry.Position, "repairkit", xRay, bg, null);
+                if (marker == null)
+                {
+                    continue;
+                }
+
+                marker.name = RepairKitTrackedMarkerPrefix + entry.NetId.ToString();
+                this.trackedRepairKitMarkers[entry.NetId] = marker;
+                RadarMarkerMetadata metadata = this.GetMarkerMetadata(marker);
+                if (metadata != null)
+                {
+                    metadata.MapSpeciesItemId = entry.StaticId;
+                    this.SetMarkerMetadata(marker, metadata);
+                }
+            }
+
+            this.repairKitScratchIds.Clear();
+            foreach (KeyValuePair<uint, GameObject> tracked in this.trackedRepairKitMarkers)
+            {
+                if (tracked.Value == null || !this.repairKitInRangeScratch.Contains(tracked.Key))
+                {
+                    this.repairKitScratchIds.Add(tracked.Key);
+                }
+            }
+
+            for (int i = 0; i < this.repairKitScratchIds.Count; i++)
+            {
+                this.RemoveRepairKitTrackedMarker(this.repairKitScratchIds[i]);
+            }
+        }
+
+        private static bool IsRepairKitTrackedMarkerName(string markerName)
+        {
+            return !string.IsNullOrEmpty(markerName)
+                && markerName.StartsWith(RepairKitTrackedMarkerPrefix, StringComparison.Ordinal);
+        }
+
+        private void RemoveRepairKitTrackedMarker(uint netId)
+        {
+            if (this.trackedRepairKitMarkers.TryGetValue(netId, out GameObject marker) && marker != null)
+            {
+                this.RemoveMarkerMetadata(marker);
+                this.RemoveTrackedMarkerMapping(marker);
+                UnityEngine.Object.Destroy(marker);
+            }
+
+            this.trackedRepairKitMarkers.Remove(netId);
         }
 
         // Pinned GetComponents<ToolRestorerComponent>. No owner filter — every standing kit.

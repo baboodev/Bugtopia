@@ -479,6 +479,9 @@ namespace HeartopiaMod
                 case "Flawless Fluorite":
                 // Pet poop (PetPoopFeature.cs) - radar category "Dog Poop".
                 case "Dog Poop":
+                // Placed repair kits (RepairKitRadarFeature.cs). Same whitelist as Dog Poop:
+                // missing here, CreateMarker builds the anchor and both ESP surfaces drop it.
+                case "Repair Kit":
                 // Visiting wild animal with a gift (WildAnimalVisitGiftFeature.cs).
                 case "Gift Animal":
                     return true;
@@ -549,6 +552,7 @@ namespace HeartopiaMod
                 case "Fish Shadow": return "FS";
                 case "Oak-Oak": return "OO";
                 case "Dog Poop": return "DP";
+                case "Repair Kit": return "RK";
                 case "Gift Animal": return "GA";
                 case "Flawless Fluorite": return "FL";
                 default: return "RS";
@@ -592,6 +596,8 @@ namespace HeartopiaMod
                 case "Fish Shadow": return new Color(0.42f, 0.78f, 1f);
                 case "Oak-Oak": return new Color(0.92f, 0.76f, 0.35f);
                 case "Dog Poop": return new Color(0.72f, 0.52f, 0.3f);
+                // Same cyan CreateMarker gives the wire marker.
+                case "Repair Kit": return new Color(0.45f, 0.85f, 0.95f);
                 case "Gift Animal": return new Color(1f, 0.6f, 0.78f);
                 case "Flawless Fluorite": return new Color(0.74f, 0.56f, 1f);
                 default: return new Color(0.82f, 0.9f, 1f);
