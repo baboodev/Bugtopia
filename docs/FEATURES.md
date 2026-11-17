@@ -1944,6 +1944,21 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
   keyed by netId, named `PetPoopMarker_<netId>` so the radar's per-scan child sweep keeps them.
   ESP label "Dog Poop" (code DP, brown), icon `ui_item_normal_p_dogpoop_dogpoop001`; on the game
   map it is a pinned NormalItem (Furniture-route) marker with the same icon, big map included.
+- **Misc → Repair Kits** (`showRepairKitRadar`) — all streamed **ToolRestorer** view entities
+  (Entity **1750** / **1751** / **1752**). Not a prefab scan: one pinned
+  `GetComponents<ToolRestorerComponent>` pass when the toggle turns on, then rescan on
+  `ToolRestorerEvent` and `ToolRestoreDestroyEvent`; a **`CmdRemoveRestorer`** Mono
+  `NativeDetour` drops the marker as soon as the server removes the entity (no extra
+  EventCenter hook for despawn). Markers are keyed by netId (`RepairKitMarker_<netId>`).
+  ESP label **Repair Kit** (code RK, cyan); on the game map each kit is a **Furniture**-route
+  track with that kit's **staticId** (NormalItem icon). **Session-only** toggle (like other
+  Misc categories — not saved to `RadarConfigData`). **Stream-limited** — only kits loaded
+  around the player appear. Source: `RepairKitRadarFeature.cs`.
+- **Misc → Repair Kit Aura** (`showRepairKitAuraRadius`) — world **`LineRenderer`** ground ring
+  at **r = 5 m** (matches in-game **Tool Restore** buff range, ids **701–706** /
+  `BuffConfig.range`). Independent of radar **Markers** and of the resource-farm **Ground
+  Ring**; can stay on without **Repair Kits** (the snapshot scan still runs while either
+  toggle is on). Session-only. Source: `RepairKitRadarFeature.cs`.
 - **Daily** group — **Oak-Oak** and **Flawless Fluorite**, the two daily-roaming advanced
   collectables (their own group: single objects that move every game day at 06:00, not a resource
   family). The server picks the spot and the client has no data that predicts it, so they are found
