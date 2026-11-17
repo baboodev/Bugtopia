@@ -41,13 +41,30 @@ namespace HeartopiaMod
         // world snapshot, and a world-epoch change prunes entries missing from it.
         private readonly HashSet<uint> repairKitInRangeScratch = new HashSet<uint>();
         private readonly List<uint> repairKitScratchIds = new List<uint>();
+        private readonly List<uint> repairKitRemoveDrainIds = new List<uint>();
 
         private bool repairKitHooksRegistered;
         private bool repairKitNeedsScan;
         private bool repairKitRemoveDetourTried;
         private int repairKitScanEpoch = -1;
         private NativeDetour repairKitRemoveDetour;
-        private IntPtr repairKitRemoveTrampoline;
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void RepairKitRemoveRestorerHookDelegate(uint netId);
+
+        private delegate IntPtr RepairKitCompileMethodDelegate(IntPtr method);
+
+        private static RepairKitCompileMethodDelegate repairKitCompileMethod;
+        private static RepairKitRemoveRestorerHookDelegate repairKitRemoveHookKeepAlive;
+        private static RepairKitRemoveRestorerHookDelegate repairKitRemoveTrampoline;
+
+        // Hook writes scalars only. Sync drains this on the main thread. Capacity is a power of two.
+        private const int RepairKitRemoveQueueCapacity = 64;
+        private static readonly uint[] repairKitRemoveQueue = new uint[RepairKitRemoveQueueCapacity];
+        private static readonly object repairKitRemoveQueueLock = new object();
+        private static int repairKitRemoveQueueWrite;
+        private static int repairKitRemoveQueueRead;
+        private static bool repairKitRemoveQueueOverflow;
 
         private bool IsRepairKitRadarWorkWanted =>
             this.showRepairKitRadar || this.showRepairKitAuraRadius;
@@ -119,17 +136,185 @@ namespace HeartopiaMod
             }
         }
 
-        // The CmdRemoveRestorer detour lands later. Returning true marks this world done
-        // so the gate does not retry the stub.
+        // Hard failures set repairKitRemoveDetourTried and return true so the world-ready gate
+        // stops. A later toggle does not retry: the flag stays for the session. ToolRestoreDestroyEvent
+        // rescan remains the fallback. AuraMono or the class not being loaded yet returns false.
         private bool TryInstallRepairKitRemoveDetour()
         {
+            if (this.repairKitRemoveDetourTried || this.repairKitRemoveDetour != null)
+            {
+                return true;
+            }
+
+            try
+            {
+                if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+                {
+                    return false;
+                }
+
+                IntPtr cls = this.FindAuraMonoClassByFullName(
+                    "XDTDataAndProtocol.ProtocolService.ItemDisplay.ToolRestorerProtocolManager");
+                if (cls == IntPtr.Zero)
+                {
+                    cls = this.FindAuraMonoClassAcrossLoadedAssemblies(
+                        "XDTDataAndProtocol.ProtocolService.ItemDisplay",
+                        "ToolRestorerProtocolManager");
+                }
+
+                if (cls == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr method = this.FindAuraMonoMethodOnHierarchy(cls, "CmdRemoveRestorer", 1);
+                if (method == IntPtr.Zero)
+                {
+                    return this.StopRepairKitRemoveDetour(
+                        "CmdRemoveRestorer(1) not found — rescan on ToolRestoreDestroyEvent remains the fallback");
+                }
+
+                IntPtr nativePtr = this.CompileRepairKitDetourTarget(method);
+                if (nativePtr == IntPtr.Zero)
+                {
+                    return this.StopRepairKitRemoveDetour(
+                        "mono_compile_method unavailable for CmdRemoveRestorer — rescan remains the fallback");
+                }
+
+                repairKitRemoveHookKeepAlive = RepairKitRemoveRestorerHook;
+                this.repairKitRemoveDetour = new NativeDetour(nativePtr, repairKitRemoveHookKeepAlive);
+                repairKitRemoveTrampoline = this.repairKitRemoveDetour.GenerateTrampoline<RepairKitRemoveRestorerHookDelegate>();
+                if (repairKitRemoveTrampoline == null)
+                {
+                    this.UndoRepairKitRemoveDetour();
+                    return this.StopRepairKitRemoveDetour(
+                        "CmdRemoveRestorer trampoline unavailable — detour reverted; rescan remains the fallback");
+                }
+
+                this.repairKitRemoveDetourTried = true;
+                FeatureLog.Life(RepairKitRadarTag, "CmdRemoveRestorer detour installed @0x"
+                    + nativePtr.ToInt64().ToString("X"));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                this.UndoRepairKitRemoveDetour();
+                return this.StopRepairKitRemoveDetour(
+                    "CmdRemoveRestorer detour install failed: " + ex.Message);
+            }
+        }
+
+        private bool StopRepairKitRemoveDetour(string reason)
+        {
+            this.repairKitRemoveDetourTried = true;
+            FeatureLog.Fail(RepairKitRadarTag, reason);
             return true;
+        }
+
+        private void UndoRepairKitRemoveDetour()
+        {
+            NativeDetour detour = this.repairKitRemoveDetour;
+            this.repairKitRemoveDetour = null;
+            if (detour != null)
+            {
+                try
+                {
+                    detour.Undo();
+                }
+                catch
+                {
+                }
+            }
+
+            repairKitRemoveTrampoline = null;
+            repairKitRemoveHookKeepAlive = null;
+        }
+
+        private IntPtr CompileRepairKitDetourTarget(IntPtr method)
+        {
+            if (method == IntPtr.Zero)
+            {
+                return IntPtr.Zero;
+            }
+
+            if (repairKitCompileMethod == null)
+            {
+                IntPtr monoModule = this.GetAuraMonoModuleHandle();
+                if (monoModule != IntPtr.Zero)
+                {
+                    repairKitCompileMethod = this.GetAuraMonoExport<RepairKitCompileMethodDelegate>(
+                        monoModule, "mono_compile_method");
+                }
+            }
+
+            return repairKitCompileMethod != null ? repairKitCompileMethod(method) : IntPtr.Zero;
+        }
+
+        // Native boundary: enqueue the netId, then always call the original. No Unity, no dictionaries.
+        private static void RepairKitRemoveRestorerHook(uint netId)
+        {
+            try
+            {
+                lock (repairKitRemoveQueueLock)
+                {
+                    int pending = repairKitRemoveQueueWrite - repairKitRemoveQueueRead;
+                    if (pending < RepairKitRemoveQueueCapacity)
+                    {
+                        repairKitRemoveQueue[repairKitRemoveQueueWrite & (RepairKitRemoveQueueCapacity - 1)] = netId;
+                        repairKitRemoveQueueWrite++;
+                    }
+                    else
+                    {
+                        repairKitRemoveQueueOverflow = true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            RepairKitRemoveRestorerHookDelegate orig = repairKitRemoveTrampoline;
+            if (orig != null)
+            {
+                orig(netId);
+            }
+        }
+
+        private void DrainRepairKitRemoveQueue()
+        {
+            bool overflow;
+            this.repairKitRemoveDrainIds.Clear();
+            lock (repairKitRemoveQueueLock)
+            {
+                while (repairKitRemoveQueueRead != repairKitRemoveQueueWrite)
+                {
+                    uint netId = repairKitRemoveQueue[repairKitRemoveQueueRead & (RepairKitRemoveQueueCapacity - 1)];
+                    repairKitRemoveQueueRead++;
+                    this.repairKitRemoveDrainIds.Add(netId);
+                }
+
+                overflow = repairKitRemoveQueueOverflow;
+                repairKitRemoveQueueOverflow = false;
+            }
+
+            for (int i = 0; i < this.repairKitRemoveDrainIds.Count; i++)
+            {
+                uint netId = this.repairKitRemoveDrainIds[i];
+                this.RemoveRepairKitVisuals(netId);
+                this.repairKitEntries.Remove(netId);
+            }
+
+            if (overflow)
+            {
+                this.repairKitNeedsScan = true;
+            }
         }
 
         // Called from RunRadar while Repair Kits and/or Repair Kit Aura is on. Aura-only still
         // drains the snapshot, then drops markers and returns so a later aura pass can draw rings.
         private void SyncRepairKitRadarMarkers(Vector3 scanOrigin, Material xRay, Material bg)
         {
+            this.DrainRepairKitRemoveQueue();
             this.EnsureRepairKitRadarHooks();
             if (this.repairKitNeedsScan && this.TryScanRepairKitsIntoEntries())
             {
