@@ -53,8 +53,8 @@ namespace HeartopiaMod
     //    (DrawRadarStyleSegmentButton, Radar.cs:1123) — same normal/active box pair, bold 12
     //    centered label that gains a "  [ON]" suffix when selected (text (.98,.99,1) selected /
     //    uiText @ .92 otherwise). Reused by every segmented control on the Settings sub-tab:
-    //    the 2-way display mode, the 3-way visual style, and the two on/off rows (Big Map Spots
-    //    / Player Avatars) that the source styles as one full-row segment with live On/Off text.
+    //    the 2-way display mode, the 3-way visual style, and the Big Map Spots On/Off segment
+    //    inside the Game Map card.
     //
     // The 8 groups are DATA-DRIVEN (one spec array, BuildUguiRadarGroupSpecs) rather than eight
     // hand-built blocks: 30 rows share identical build/position/sync code, and every real
@@ -76,8 +76,8 @@ namespace HeartopiaMod
     // CloseAllRadarDropdowns quirk means MULTIPLE groups can legitimately be open at once, which
     // the walk handles naturally). The Settings sub-tab adapts the source's 520px cards to the
     // cell width (Foraging precedent: cards at x=8, right-anchored sliders keep the source's
-    // 16px right inset) and relayouts on radarDisplayMode (the 3 Game-Map-only rows +
-    // everything below them, Radar.cs:1011-1039).
+    // 16px right inset) and relayout toggles mutually exclusive Game Map / Visual ESP cards
+    // under the mode picker on radarDisplayMode.
     //
     // Cross-surface sync cadence (established split):
     //  - Every gated frame (shell visible + Radar tab + own sub display index): the primary
@@ -1426,16 +1426,14 @@ namespace HeartopiaMod
             public UguiRadarSegmentHandle ModeEspSegment;
             public UguiRadarSegmentHandle ModeMapSegment;
 
-            // Game-Map-only conditional rows (fixed positions; relayout flips visibility)
+            // Mode cards (mutually exclusive; Relayout flips visibility)
+            public GameObject GameMapCard;
             public GameObject TrackLimitLabel;
             public string TrackLimitShown;
             public Slider TrackLimitSlider;
             public GameObject BigMapCaption;
             public UguiRadarSegmentHandle BigMapSegment;
-            // The "Player Avatars (all)" segment used to sit here at y=324. It moved to Features -> Main
-            // (and was split into separate avatar/name checkboxes there), so this group is two rows again.
 
-            // Visual ESP card (repositioned by the relayout)
             public GameObject VisualCard;
             public UguiRadarSegmentHandle StyleBeaconSegment;
             public UguiRadarSegmentHandle StyleCardSegment;
@@ -1460,16 +1458,12 @@ namespace HeartopiaMod
 
         private UguiShellRadarSettingsHandle uguiShellRadarSettings;
 
-        // Vertical cursor replays DrawRadarSettingsTab exactly (base y=8): 8 header +52 → 60
-        // Range card(112) +128 → 188 Resource Display +64 → 252 [Game-Map rows +36 ×3 → 360]
-        // Visual card(332) +348. The source's 520px panel adapts to the cell (cards at x=8,
-        // width = content-16, 16px insets — Foraging's width-adaptation precedent). The source's
-        // slider-row split (sliders at x=190 under 220-240px labels) is deliberately NOT kept:
-        // it overlapped label and slider (2026-07-29 fix) — label+slider rows now use the
-        // Self-tab column shape (label ends 8px before the slider; slider keeps its right
-        // inset). All controls including the conditional rows are built ONCE;
-        // RelayoutUguiShellRadarSettings owns visibility + the Visual card position + content
-        // height. Handle assigned LAST (Research idiom).
+        // Vertical cursor (base y=8): header → Range card @60 (112) → Resource Display
+        // caption/segments @194/214 → mode card top @252. Mode body is ONE of:
+        //   GameMapCard (~140) or VisualCard (332). RelayoutUguiShellRadarSettings owns
+        //   mutual exclusivity + scroll height. Cards at x=8, width = content-16.
+        // Slider-row split uses the Self-tab column shape (label ends 8px before the slider).
+        // Handle assigned LAST (Research idiom).
         private GameObject BuildUguiShellRadarSettingsContent(Transform parent, float x, float y, float w, float h)
         {
             this.uguiShellRadarSettings = null;
@@ -1558,32 +1552,50 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.ModeMapSegment.Root, 24f + modeSegWidth + 10f, 214f, modeSegWidth, 30f);
             this.ApplyUguiRadarSegmentState(handle.ModeMapSegment, this.L("Game Map"), this.radarDisplayMode == 1);
 
-            // ---- Game-Map-only rows (Radar.cs:1011-1039) — fixed positions at 252/288/324;
-            // relayout flips their visibility only (Foraging aura-row idiom).
-            // 2026-07-29: was label 240 wide at x=24 with the slider at x=198 — a 66px overlap
-            // the es/pt strings actually reached. Label now ends 8px before the slider; the
-            // slider keeps its old RIGHT edge (cardW-8, this row's inset) and absorbs the shrink
-            // (146px at the 960px shell).
+            const float modeCardTopY = 252f;
+            const float gameMapCardHeight = 140f;
+            const float visualCardHeight = 332f;
+
+            // ---- Game Map card (visible when radarDisplayMode == 1)
+            GameObject gameMapCard = this.CreateUguiGo("GameMapCard", scrollContent);
+            PlaceUguiTopLeft(gameMapCard, 8f, modeCardTopY, cardW, gameMapCardHeight);
+            this.AddUguiImage(gameMapCard, this.UguiKitPanelBg(), true, 1f);
+            this.AddUguiRingOverlay(gameMapCard, new Color(1f, 1f, 1f,
+                Mathf.Clamp(0.05f + (this.uiPanelAlpha * 0.05f), 0.05f, 0.10f)), 1f);
+            handle.GameMapCard = gameMapCard;
+
+            GameObject gameMapTitle = this.CreateUguiLabel(gameMapCard.transform, "CardTitle",
+                this.L("Game Map"), 13f, textColor, false);
+            this.TrySetUguiLabelBold(gameMapTitle);
+            PlaceUguiTopLeft(gameMapTitle, 16f, 12f, 220f, 20f);
+            GameObject gameMapSub = this.CreateUguiLabel(gameMapCard.transform, "CardSub",
+                this.L("Native map tracks for selected radar resources."), 11f, subColor, false);
+            PlaceUguiTopLeft(gameMapSub, 16f, 32f, cardW - 32f, 18f);
+
             handle.TrackLimitShown = this.LF("Map Markers (nearest): {0}", this.radarGameTrackLimit.ToString());
-            handle.TrackLimitLabel = this.CreateUguiLabel(scrollContent, "TrackLimitLabel",
+            handle.TrackLimitLabel = this.CreateUguiLabel(gameMapCard.transform, "TrackLimitLabel",
                 handle.TrackLimitShown, 11f, subColor, false);
-            PlaceUguiTopLeft(handle.TrackLimitLabel, 24f, 252f, 260f, 20f);
-            handle.TrackLimitSlider = this.CreateUguiSlider(scrollContent, "TrackLimitSlider",
+            const float mapLabelW = 280f;
+            const float mapSliderX = 16f + mapLabelW + 8f;
+            float mapSliderW = cardW - 16f - mapSliderX;
+            PlaceUguiTopLeft(handle.TrackLimitLabel, 16f, 62f, mapLabelW, 20f);
+            handle.TrackLimitSlider = this.CreateUguiSlider(gameMapCard.transform, "TrackLimitSlider",
                 1f, 30f, this.radarGameTrackLimit, true,
                 new System.Action<float>(this.OnUguiRadarTrackLimitChanged));
-            PlaceUguiTopLeft(handle.TrackLimitSlider.gameObject, 292f, 253f, cardW - 300f, 20f);
+            PlaceUguiTopLeft(handle.TrackLimitSlider.gameObject, mapSliderX, 63f, mapSliderW, 20f);
 
-            handle.BigMapCaption = this.CreateUguiLabel(scrollContent, "BigMapCaption",
+            handle.BigMapCaption = this.CreateUguiLabel(gameMapCard.transform, "BigMapCaption",
                 this.L("Show on big map"), 11f, subColor, false);
-            PlaceUguiTopLeft(handle.BigMapCaption, 24f, 294f, 170f, 20f);
-            handle.BigMapSegment = this.CreateUguiRadarSegmentButton(scrollContent, "BigMapSegment",
+            PlaceUguiTopLeft(handle.BigMapCaption, 16f, 100f, 170f, 20f);
+            handle.BigMapSegment = this.CreateUguiRadarSegmentButton(gameMapCard.transform, "BigMapSegment",
                 new System.Action(this.OnUguiRadarBigMapSpotsSegmentClicked));
-            PlaceUguiTopLeft(handle.BigMapSegment.Root, 198f, 288f, cardW - 206f, 30f);
+            PlaceUguiTopLeft(handle.BigMapSegment.Root, 198f, 94f, cardW - 214f, 30f);
             this.ApplyUguiRadarSegmentState(handle.BigMapSegment,
                 this.radarBigMapSpots ? this.L("On") : this.L("Off"), this.radarBigMapSpots);
 
-            // ---- Visual ESP card (Radar.cs:1041-1117) — y owned by the relayout.
+            // ---- Visual ESP card (visible when radarDisplayMode == 0)
             GameObject visualCard = this.CreateUguiGo("VisualCard", scrollContent);
+            PlaceUguiTopLeft(visualCard, 8f, modeCardTopY, cardW, visualCardHeight);
             this.AddUguiImage(visualCard, this.UguiKitPanelBg(), true, 1f);
             this.AddUguiRingOverlay(visualCard, new Color(1f, 1f, 1f,
                 Mathf.Clamp(0.05f + (this.uiPanelAlpha * 0.05f), 0.05f, 0.10f)), 1f);
@@ -1678,29 +1690,27 @@ namespace HeartopiaMod
             return block;
         }
 
-        // The conditional block's IMGUI cursor (Radar.cs:1011-1041): mode == 1 inserts 3 rows of
-        // 36 between the mode picker (ends 252) and the Visual card (252 or 360); the card is 332
-        // high and the source advances 348 past its top for the tab height.
+        // Mutually exclusive Game Map / Visual ESP cards share top y=252; scroll height follows
+        // the visible card (140 vs 332) plus bottom pad.
         private void RelayoutUguiShellRadarSettings(UguiShellRadarSettingsHandle handle)
         {
             if (handle == null)
             {
                 return;
             }
+
+            const float modeCardTopY = 252f;
+            const float gameMapCardHeight = 140f;
+            const float visualCardHeight = 332f;
+            const float bottomPad = 24f;
+
             bool gameMap = this.radarDisplayMode == 1;
 
-            SetUguiGoActive(handle.TrackLimitLabel, gameMap);
-            SetUguiGoActive(handle.TrackLimitSlider != null ? handle.TrackLimitSlider.gameObject : null, gameMap);
-            SetUguiGoActive(handle.BigMapCaption, gameMap);
-            SetUguiGoActive(handle.BigMapSegment != null ? handle.BigMapSegment.Root : null, gameMap);
+            SetUguiGoActive(handle.GameMapCard, gameMap);
+            SetUguiGoActive(handle.VisualCard, !gameMap);
 
-            // 324 (was 360) — the avatars row that used to occupy 324..354 moved to Features -> Main.
-            float visualY = gameMap ? 324f : 252f;
-            if (handle.VisualCard != null)
-            {
-                PlaceUguiTopLeft(handle.VisualCard, 8f, visualY, handle.CardWidth, 332f);
-            }
-            this.SetUguiScrollContentHeight(handle.ScrollContent, visualY + 348f + 8f);
+            float activeHeight = gameMap ? gameMapCardHeight : visualCardHeight;
+            this.SetUguiScrollContentHeight(handle.ScrollContent, modeCardTopY + activeHeight + bottomPad);
         }
 
         // ----------------------------------------------------------------------------------------
@@ -1775,7 +1785,7 @@ namespace HeartopiaMod
                 this.ApplyUguiRadarSegmentState(handle.BigMapSegment,
                     this.radarBigMapSpots ? this.L("On") : this.L("Off"), this.radarBigMapSpots);
 
-                // Conditional-layout signature (the 3 Game-Map rows + the Visual card position).
+                // Conditional-layout signature (mutually exclusive mode cards).
                 if (this.radarDisplayMode != handle.LayoutSignature)
                 {
                     handle.LayoutSignature = this.radarDisplayMode;

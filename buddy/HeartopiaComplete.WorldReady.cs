@@ -358,6 +358,7 @@ namespace HeartopiaMod
             // gate above (HeartopiaComplete.GameWorldProbe.cs). Self-gated on its Logging toggle and
             // feeds nothing — remove this call, and the gate behaves exactly as before.
             this.ProcessGameWorldProbeOnUpdate(now);
+            this.UpdateWorldSettleCarry(now);
         }
 
         private void UpdateWorldSettleCarry(float now)

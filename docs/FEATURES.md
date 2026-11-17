@@ -2043,6 +2043,8 @@ Native in-game markers instead of (or alongside) the ESP overlay — see [RADAR_
 | Map Markers (nearest) | Cap on how many nearest resources are tracked (1–30, default 5) |
 | Show on big map | Also place markers on the big map (default **off**; on adds the game's tracked rectangle frame) |
 
+Settings UI: under **Resource Display**, **ESP Overlay** and **Game Map** are mutually exclusive cards — Game Map mode hides the Visual ESP card and shows a Game Map card (Map Markers + Show on big map); ESP Overlay mode does the reverse.
+
 The former **Player Avatars (all)** row moved to Features → Main on 2026-07-30 and was split there into
 independent **Player Avatars (all)** and **Player Names (all)** toggles. Radar → Settings' **Reset Defaults**
 no longer touches either.
