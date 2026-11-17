@@ -10,9 +10,9 @@ namespace HeartopiaMod
     // (GatherLocationsFeature). No IMGUI ancestor.
     //
     // One flat scroll stack:
-    //   Start/Stop button, three live status lines, empty-wait slider, category list (checkbox +
-    //   "name (spots)" + Select / ^ / v), New / Export / Import row, and — for the selected
-    //   category — rename/delete, Save Current Location and the spot list (^ / v / X).
+    //   Start/Stop button, three live status lines, empty-wait + arrive-settle sliders, category
+    //   list (checkbox + "name (spots)" + Select / ^ / v), New / Export / Import row, and — for
+    //   the selected category — rename/delete, Save Current Location and the spot list (^ / v / X).
     //
     // Persistent controls are built once; the category rows and spot rows are destroyed and
     // rebuilt whenever the layout signature (category/spot structure, names, flags, selection)
@@ -45,6 +45,9 @@ namespace HeartopiaMod
             public GameObject EmptyWaitLabel;
             public string EmptyWaitShown;
             public Slider EmptyWaitSlider;
+            public GameObject SettleGraceLabel;
+            public string SettleGraceShown;
+            public Slider SettleGraceSlider;
             public Toggle StartNearestToggle;
 
             public GameObject CategoryHeader;
@@ -116,6 +119,11 @@ namespace HeartopiaMod
         private string BuildUguiLocationsEmptyWaitText()
         {
             return this.LF("Empty wait: {0:F0}s", GatherLocationsFeature.EmptyWaitSeconds);
+        }
+
+        private string BuildUguiLocationsSettleGraceText()
+        {
+            return this.LF("Arrive settle: {0:F0}s", GatherLocationsFeature.SettleGraceSeconds);
         }
 
         private static HeartopiaComplete.LocationCategoryEntry FindUguiLocationsCategory(string id)
@@ -243,14 +251,23 @@ namespace HeartopiaMod
             PlaceUguiTopLeft(handle.EmptyWaitLabel, 16f, 156f, 320f, 20f);
 
             handle.EmptyWaitSlider = this.CreateUguiSlider(scrollContent, "EmptyWaitSlider",
-                1f, 120f, Mathf.Clamp(GatherLocationsFeature.EmptyWaitSeconds, 1f, 120f), true,
+                0f, 120f, Mathf.Clamp(GatherLocationsFeature.EmptyWaitSeconds, 0f, 120f), true,
                 new System.Action<float>(this.OnUguiLocationsEmptyWaitChanged));
             PlaceUguiTopLeft(handle.EmptyWaitSlider.gameObject, 16f, 178f, 260f, 20f);
+
+            handle.SettleGraceShown = this.BuildUguiLocationsSettleGraceText();
+            handle.SettleGraceLabel = this.CreateUguiBodyLabel(scrollContent, "SettleGraceLabel", handle.SettleGraceShown, 12f);
+            PlaceUguiTopLeft(handle.SettleGraceLabel, 16f, 204f, 320f, 20f);
+
+            handle.SettleGraceSlider = this.CreateUguiSlider(scrollContent, "SettleGraceSlider",
+                0f, 10f, Mathf.Clamp(GatherLocationsFeature.SettleGraceSeconds, 0f, 10f), true,
+                new System.Action<float>(this.OnUguiLocationsSettleGraceChanged));
+            PlaceUguiTopLeft(handle.SettleGraceSlider.gameObject, 16f, 226f, 260f, 20f);
 
             handle.StartNearestToggle = this.CreateUguiCheckbox(scrollContent, "StartNearestToggle",
                 this.L("Start at nearest spot"), GatherLocationsFeature.StartNearest,
                 new System.Action<bool>(this.OnUguiLocationsStartNearestToggled));
-            PlaceUguiTopLeft(handle.StartNearestToggle.gameObject, 16f, 204f, 320f, 26f);
+            PlaceUguiTopLeft(handle.StartNearestToggle.gameObject, 16f, 252f, 320f, 26f);
 
             handle.CategoryHeader = this.CreateUguiHeaderLabel(scrollContent, "CategoryHeader",
                 this.L("Categories"), 14f);
@@ -421,7 +438,7 @@ namespace HeartopiaMod
         {
             HeartopiaComplete.LocationCategoryEntry selected = FindUguiLocationsCategory(handle.SelectedCategoryId);
 
-            float yCur = 236f;
+            float yCur = 284f;
             PlaceUguiTopLeft(handle.CategoryHeader, 16f, yCur, 320f, 22f);
             yCur += 28f;
 
@@ -547,13 +564,22 @@ namespace HeartopiaMod
                 }
 
                 float wait = GatherLocationsFeature.EmptyWaitSeconds;
-                float sliderValue = Mathf.Clamp(wait, 1f, 120f);
-                if (handle.EmptyWaitSlider != null && Mathf.Abs(handle.EmptyWaitSlider.value - sliderValue) > 0.0005f)
+                float waitSlider = Mathf.Clamp(wait, 0f, 120f);
+                if (handle.EmptyWaitSlider != null && Mathf.Abs(handle.EmptyWaitSlider.value - waitSlider) > 0.0005f)
                 {
-                    handle.EmptyWaitSlider.SetValueWithoutNotify(sliderValue);
+                    handle.EmptyWaitSlider.SetValueWithoutNotify(waitSlider);
                 }
                 this.SyncUguiSelfLabelText(handle.EmptyWaitLabel, ref handle.EmptyWaitShown,
                     this.BuildUguiLocationsEmptyWaitText());
+
+                float settle = GatherLocationsFeature.SettleGraceSeconds;
+                float settleSlider = Mathf.Clamp(settle, 0f, 10f);
+                if (handle.SettleGraceSlider != null && Mathf.Abs(handle.SettleGraceSlider.value - settleSlider) > 0.0005f)
+                {
+                    handle.SettleGraceSlider.SetValueWithoutNotify(settleSlider);
+                }
+                this.SyncUguiSelfLabelText(handle.SettleGraceLabel, ref handle.SettleGraceShown,
+                    this.BuildUguiLocationsSettleGraceText());
 
                 int signature = this.ComputeUguiLocationsLayoutSignature(handle);
                 if (signature != handle.LayoutSignature)
@@ -600,6 +626,17 @@ namespace HeartopiaMod
                 return;
             }
             GatherLocationsFeature.SetEmptyWaitSeconds(rounded);
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiLocationsSettleGraceChanged(float value)
+        {
+            float rounded = Mathf.Round(value);
+            if (Mathf.Abs(rounded - GatherLocationsFeature.SettleGraceSeconds) <= 0.0001f)
+            {
+                return;
+            }
+            GatherLocationsFeature.SetSettleGraceSeconds(rounded);
             try { this.SaveKeybinds(false); } catch { }
         }
 

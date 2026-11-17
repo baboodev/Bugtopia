@@ -456,7 +456,10 @@ namespace HeartopiaMod
             public bool autoFishKeepCameraAndHud = false;
             public bool autoFishServerSide = false;
             public bool fishingRouteCustomOnly = false;
-            public float locationsEmptyWaitSeconds = 10f;
+            // -1 = absent from older configs → feature default 10. 0 is a real value (hop immediately).
+            public float locationsEmptyWaitSeconds = -1f;
+            // -1 = absent → default 3. Post-arrive pause before empty scans count (0–10).
+            public float locationsSettleGraceSeconds = -1f;
             // Start Gather Locations at the nearest flattened spot (on) or at index 0 (off).
             public bool locationsStartNearest = true;
             public float autoFishReelMaxDuration = -1f;

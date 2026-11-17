@@ -13,11 +13,16 @@ namespace HeartopiaMod
     // RouteTravelHelper.
     public static class GatherLocationsFeature
     {
-        private const float SettleGraceSeconds = 3f;
         private const float WorldUnavailableStopSeconds = 30f;
         private const float DefaultEmptyWaitSeconds = 10f;
-        private const float MinEmptyWaitSeconds = 1f;
+        private const float MinEmptyWaitSeconds = 0f;
         private const float MaxEmptyWaitSeconds = 120f;
+        private const float DefaultSettleGraceSeconds = 3f;
+        private const float MinSettleGraceSeconds = 0f;
+        private const float MaxSettleGraceSeconds = 10f;
+        // Solo farms publish LastInRangeCount only while they are scanning. Same window
+        // CombinedFarmFeature.StepFishCensus uses before a published scan counts as current.
+        private const float SoloScanFreshSeconds = 5f;
 
         private const int FarmFish = 0;
         private const int FarmInsect = 1;
@@ -96,6 +101,7 @@ namespace HeartopiaMod
         private static bool active;
         private static int routeIndex;
         private static float emptyWaitSeconds = DefaultEmptyWaitSeconds;
+        private static float settleGraceSeconds = DefaultSettleGraceSeconds;
         private static bool startNearest = true;
         private static bool legacyMigrated;
         private static float spotArrivedAt = -999f;
@@ -124,6 +130,7 @@ namespace HeartopiaMod
         public static int RouteCount => flattened.Count;
         public static int CategoryCount => categories.Count;
         public static float EmptyWaitSeconds => emptyWaitSeconds;
+        public static float SettleGraceSeconds => settleGraceSeconds;
         // Seconds the current spot has been reported empty; -1 when inactive or not counting.
         public static float EmptyElapsedSeconds => active && emptySinceAt >= 0f ? Time.unscaledTime - emptySinceAt : -1f;
         public static bool StartNearest => startNearest;
@@ -132,6 +139,11 @@ namespace HeartopiaMod
         public static void SetEmptyWaitSeconds(float seconds)
         {
             emptyWaitSeconds = Mathf.Clamp(seconds, MinEmptyWaitSeconds, MaxEmptyWaitSeconds);
+        }
+
+        public static void SetSettleGraceSeconds(float seconds)
+        {
+            settleGraceSeconds = Mathf.Clamp(seconds, MinSettleGraceSeconds, MaxSettleGraceSeconds);
         }
 
         public static void SetStartNearest(bool value)
@@ -1107,11 +1119,73 @@ namespace HeartopiaMod
             return false;
         }
 
+        // Enabled Fish / Bird hold the route (mid-hop and at the spot). Insects do not.
+        // Gated on IsEnabled, not on who holds the tool: a suspended slice still counts when the
+        // coordinator census is fresh. A solo farm uses its own recent scan instead.
         private static bool IsSessionBusy()
         {
-            return (AutoFishingFarm.IsEnabled && AutoFishingFarm.IsInFishingSession)
-                || (BirdNetFarm.IsEnabled && BirdNetFarm.HasPendingConfirms);
-            // InsectNetFarm exposes no clean busy flag; its catches are short and sit between scans.
+            return IsFishRouteBusy() || IsBirdRouteBusy();
+        }
+
+        private static bool IsFishRouteBusy()
+        {
+            if (!AutoFishingFarm.IsEnabled)
+            {
+                return false;
+            }
+
+            return AutoFishingFarm.IsInFishingSession || HasFreshInRangeTargets(FarmFish);
+        }
+
+        private static bool IsBirdRouteBusy()
+        {
+            if (!BirdNetFarm.IsEnabled)
+            {
+                return false;
+            }
+
+            return BirdNetFarm.HasPendingConfirms || HasFreshInRangeTargets(FarmBird);
+        }
+
+        private static bool HasFreshInRangeTargets(int farm)
+        {
+            if (CombinedFarmFeature.IsCoordinating)
+            {
+                CombinedFarmFeature.TryGetGatherRoutePresence(
+                    out int fishInRange, out int birdsInRange, out bool fishFresh, out bool birdsFresh);
+                if (farm == FarmFish)
+                {
+                    return fishFresh && fishInRange > 0;
+                }
+
+                if (farm == FarmBird)
+                {
+                    return birdsFresh && birdsInRange > 0;
+                }
+
+                return false;
+            }
+
+            if (farm == FarmFish)
+            {
+                return IsSoloScanFresh(AutoFishingFarm.IsSuspended, AutoFishingFarm.LastScanAt)
+                    && AutoFishingFarm.LastInRangeCount > 0;
+            }
+
+            if (farm == FarmBird)
+            {
+                return IsSoloScanFresh(BirdNetFarm.IsSuspended, BirdNetFarm.LastScanAt)
+                    && BirdNetFarm.LastInRangeCount > 0;
+            }
+
+            return false;
+        }
+
+        private static bool IsSoloScanFresh(bool suspended, float lastScanAt)
+        {
+            return !suspended
+                && lastScanAt > 0f
+                && Time.unscaledTime - lastScanAt <= SoloScanFreshSeconds;
         }
 
         private static void ResetScanCursors()
@@ -1206,7 +1280,7 @@ namespace HeartopiaMod
             float now = Time.unscaledTime;
             routeIndex = index;
             spotArrivedAt = now;
-            graceUntil = now + SettleGraceSeconds;
+            graceUntil = now + settleGraceSeconds;
             emptySinceAt = -1f;
             ResetScanCursors();
             lastStatus = status;

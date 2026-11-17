@@ -170,7 +170,7 @@ namespace HeartopiaMod
 
                 travelPausedForSession = true;
                 travelResumeAt = now + TravelResumeGrace;
-                lastStatus = "Session on the way";
+                lastStatus = "Farming on the way";
                 return;
             }
 

@@ -1373,12 +1373,15 @@ longer exposes start/stop, category lists, or custom-spot save controls — only
 - **Start Locations** does not flip Fish / Insect / Bird on — those farms must already be enabled.
   At each stop the already-running farms work the area; when every **currently scanning** farm
   (Combined Farm skips suspended slices) has gone through an empty scan for **Empty wait** seconds
-  (slider, 1–120 s, default 10), the route hops to the next spot. Insects have no busy flag — hops
-  are only blocked by fishing sessions and bird pending confirms.
+  (slider, 0–120 s, default 10; 0 hops on the first empty tick), the route hops to the next spot.
+  **Arrive settle** (slider, 0–10 s, default 3) pauses empty counting right after arrival so farms
+  can spin up. Insects have no busy flag — a hop is held by a fishing session, pending bird
+  confirms, or fresh in-range Fish or Bird targets.
 - **Walk to Nodes** travel is unchanged from the old fishing route: hops are walked (and driven via
   Foraging vehicle settings) when the walker is available; Combined Farm allows hops on whichever
   enabled Fish/Insect/Bird slice owns the tool. Unreachable spots are skipped; teleport is fallback
-  when walking is unavailable.
+  when walking is unavailable. While walking between spots, an enabled Fish or Bird farm pauses that
+  hop in place until its in-range targets are gone.
 - Status line shows category/spot index, empty-range timer, and travel state (`RouteTravelHelper`).
 - Each spot row has a **Go** button: one walk/teleport to that spot (`RouteTravelHelper.GoOnce`)
   without starting the route cycle. An active route pauses its hop loop until Go finishes.

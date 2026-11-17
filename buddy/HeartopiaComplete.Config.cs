@@ -433,6 +433,7 @@ namespace HeartopiaMod
             data.autoFishKeepCameraAndHud = this.GetFishingCameraHudKeepEnabled();
             data.autoFishServerSide = this.GetServerSideFishingEnabled();
             data.locationsEmptyWaitSeconds = GatherLocationsFeature.EmptyWaitSeconds;
+            data.locationsSettleGraceSeconds = GatherLocationsFeature.SettleGraceSeconds;
             data.locationsStartNearest = GatherLocationsFeature.StartNearest;
             data.fishingRouteCustomOnly = false;
             data.autoFishReelMaxDuration = -1f;
@@ -944,7 +945,15 @@ namespace HeartopiaMod
             this.trimBaitThrowAnimation = data.trimBaitThrowAnimation;
             this.SetFishingCameraHudKeepEnabled(data.autoFishKeepCameraAndHud);
             this.SetServerSideFishingEnabled(data.autoFishServerSide);
-            GatherLocationsFeature.SetEmptyWaitSeconds(data.locationsEmptyWaitSeconds > 0f ? data.locationsEmptyWaitSeconds : 10f);
+            // >= 0 keeps a saved 0 (immediate hop); negative = absent → feature default.
+            if (data.locationsEmptyWaitSeconds >= 0f)
+            {
+                GatherLocationsFeature.SetEmptyWaitSeconds(data.locationsEmptyWaitSeconds);
+            }
+            if (data.locationsSettleGraceSeconds >= 0f)
+            {
+                GatherLocationsFeature.SetSettleGraceSeconds(data.locationsSettleGraceSeconds);
+            }
             GatherLocationsFeature.SetStartNearest(data.locationsStartNearest);
             if (data.insectBatchSize > 0)
             {

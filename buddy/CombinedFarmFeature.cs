@@ -479,6 +479,17 @@ namespace HeartopiaMod
         public static bool IsCoordinating => coordinating;
         public static FarmSlice ActiveSlice => activeSlice;
 
+        // Gather Locations mid-hop hold. Wraps the private census; freshness is CensusFreshSeconds
+        // via IsCensusFresh. A stale reading is neither empty nor present — the caller checks the flags.
+        public static void TryGetGatherRoutePresence(out int fishInRange, out int birdsInRange, out bool fishFresh, out bool birdsFresh)
+        {
+            float now = Time.unscaledTime;
+            fishInRange = census.fishInRange;
+            birdsInRange = census.birdsInRange;
+            fishFresh = IsCensusFresh(FarmSlice.Fish, now);
+            birdsFresh = IsCensusFresh(FarmSlice.Bird, now);
+        }
+
         public static bool TryGetToolDurability(int toolId, out int durability, out int maxDurability, out float ratio)
         {
             durability = 0;
