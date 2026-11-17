@@ -3262,5 +3262,66 @@ namespace HeartopiaMod
                 return null;
             }
         }
+
+        private UguiWindowHandle uguiSettleNote;
+
+        private void EnsureUguiSettleNote()
+        {
+            if (this.worldSettleCarryDone || this.uguiSettleNote != null)
+            {
+                return;
+            }
+
+            string line = CopySettleLine();
+            if (line.Length == 0)
+            {
+                this.worldSettleCarryDone = true;
+                return;
+            }
+
+            UguiWindowHandle win = this.CreateUguiWindow(
+                "SettleNote",
+                null,
+                null,
+                new Vector2(500f, 188f),
+                29940,
+                0f);
+            this.uguiSettleNote = win;
+
+            GameObject shade = this.CreateUguiGo("Shade", win.Root.transform);
+            shade.transform.SetAsFirstSibling();
+            StretchUguiFill(shade, 0f, 0f, 0f, 0f);
+            Image shadeImage = this.AddUguiImage(shade, new Color(0f, 0f, 0f, 0.55f), false, 1f);
+            shadeImage.raycastTarget = true;
+
+            GameObject label = this.CreateUguiLabel(
+                win.PanelRt,
+                "Body",
+                line,
+                15f,
+                this.UguiKitTextColor(),
+                false);
+            PlaceUguiTopLeft(label, 24f, 22f, 452f, 88f);
+
+            GameObject button = this.CreateUguiPrimaryButton(
+                win.PanelRt,
+                "Close",
+                "OK",
+                new Action(this.ReleaseUguiSettleNote));
+            PlaceUguiTopLeft(button, 190f, 124f, 120f, 36f);
+            this.SetUguiWindowVisible(win, true);
+            this.worldSettleCarryDone = true;
+        }
+
+        private void ReleaseUguiSettleNote()
+        {
+            this.worldSettleCarryDone = true;
+            UguiWindowHandle win = this.uguiSettleNote;
+            this.uguiSettleNote = null;
+            if (win != null && win.Root != null)
+            {
+                try { Object.Destroy(win.Root); } catch { }
+            }
+        }
     }
 }

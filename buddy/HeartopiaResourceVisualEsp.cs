@@ -484,7 +484,7 @@ namespace HeartopiaMod
                     return true;
             }
 
-            return false;
+            return this.IsActiveEventGatherLabel(label);
         }
 
         private float GetResourceVisualEspHeightOffset(string label)

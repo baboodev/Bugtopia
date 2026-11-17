@@ -1929,6 +1929,16 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
 
 - Scans world for configured resource prefabs / markers.
 - Categories: mushrooms (incl. truffle), berries, stones, ores, trees (apple, mandarin, rare), fish shadows, meteors, misc event resources.
+- **Events** discovers festival gather nodes from the live tables instead of a fixed pair of toggles.
+  A node is a candidate when `Dynamicbush` joins `AdvCollect` with `itemTypeId > 1042` (that drops the
+  permanent mushrooms `130001–130018`). It is shown while its battle-pass `unlockDateId` window contains
+  the game clock. Tasks loaded for that window also stay up when their own `DuringPeriod` is still open:
+  loot bushes (`CollectItem` joined to the gather prefab stem, puzzle `_dynamicBushType == 4` dropped)
+  and the hollow-tree shape (`treehole` / `perch` plus a task description that mentions 空心 or 翻找).
+  When the window ends the row disappears and Aura Farm stops treating it as a bush. New ids default
+  to on; each toggle is stored by static id (`eventGatherRadarEnabled`). Honey Mushroom and Hollow Tree
+  keep those English labels so foraging filters still match them. Implementation:
+  `HeartopiaComplete.EventGatherProvider.cs`.
 - **Misc → Dog Poop** — pet droppings (Entity 7100). Not a prefab scan: markers come from the
   `PickableComponent` view scan in `PetPoopFeature.cs` (see Pet Care → Dog poop pickup),
   keyed by netId, named `PetPoopMarker_<netId>` so the radar's per-scan child sweep keeps them.

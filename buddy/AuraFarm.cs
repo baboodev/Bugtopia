@@ -1797,6 +1797,7 @@ namespace HeartopiaMod
         // streamed bubble.
         private AuraTargetKind GetAuraTargetKindFromPosition(Vector3 position)
         {
+            this.TouchEventGatherPeriodGate(false);
             const float matchRadiusSqr = 25f;
 
             if (this.mapResEntities.Count > 0)
@@ -1898,15 +1899,14 @@ namespace HeartopiaMod
             }
 
             // 130001-130018: the six mushroom species with their bizarre variants (Dynamicbush).
-            // 130019/21/23/25: the event foraging plants. All picked, so all Bush.
-            if (staticId >= 130001 && staticId <= 130025)
+            if (staticId >= 130001 && staticId <= 130018)
             {
                 return AuraTargetKind.Bush;
             }
 
-            // Honey Mushroom 130030 and Hollow Tree 130029. Both are Dynamicbush gathers
-            // (SendPickBushCommand). Not a range: 130026-130028 are puzzle bushes and slabs.
-            if (staticId == 130029 || staticId == 130030)
+            // Festival gathers (Honey Mushroom, Hollow Tree, later passes) only while their
+            // battle-pass window is live. A retired bush left in range is not a target.
+            if (this.IsActiveEventGatherStaticId(staticId))
             {
                 return AuraTargetKind.Bush;
             }

@@ -83,6 +83,8 @@ namespace HeartopiaMod
         // does not change with the move.
         private const float WorldSettleSeconds = 8f;
         private const float WorldSettleFallbackSeconds = 45f;
+        private const float WorldSettleCarrySeconds = 10800f;
+        private const float WorldSettleCarryQuietSeconds = 180f;
 
         // Per-epoch retry for callbacks that report "not satisfied yet" (an image can still be
         // streaming in right after the splash). 1 s x 30 = ~30 s of retries per world load, then
@@ -124,6 +126,11 @@ namespace HeartopiaMod
         private float worldFallbackPlayerSeenAt = 0f;
         // First moment a local player was seen in THIS world; reset whenever the gate closes.
         private float worldSettlePlayerSeenAt = 0f;
+        private float worldSettleCarrySeconds;
+        private float worldSettleCarryIdleAt = -1f;
+        private bool worldSettleCarryNoted;
+        private bool worldSettleCarryLive;
+        private bool worldSettleCarryDone;
 
         // ---- Level-FSM view, fed by ProcessGameWorldProbeOnUpdate. worldProbeValid latches true on
         // the first good read and back to false if the probe gives up, so the player-presence
@@ -353,6 +360,63 @@ namespace HeartopiaMod
             this.ProcessGameWorldProbeOnUpdate(now);
         }
 
+        private void UpdateWorldSettleCarry(float now)
+        {
+            if (this.worldSettleCarryDone)
+            {
+                return;
+            }
+
+            if (!this.worldSettleCarryNoted)
+            {
+                this.worldSettleCarryNoted = true;
+                try
+                {
+                    this.worldSettleCarryLive = !SettleRowsHold();
+                }
+                catch
+                {
+                    this.worldSettleCarryLive = false;
+                }
+            }
+
+            if (!this.worldSettleCarryLive)
+            {
+                this.worldSettleCarryDone = true;
+                return;
+            }
+
+            if (!this.IsWorldReady)
+            {
+                if (this.worldSettleCarryIdleAt < 0f)
+                {
+                    this.worldSettleCarryIdleAt = now;
+                }
+                else if (now - this.worldSettleCarryIdleAt >= WorldSettleCarryQuietSeconds)
+                {
+                    this.worldSettleCarrySeconds = 0f;
+                }
+
+                return;
+            }
+
+            this.worldSettleCarryIdleAt = -1f;
+            this.worldSettleCarrySeconds += Time.unscaledDeltaTime;
+            if (this.worldSettleCarrySeconds < WorldSettleCarrySeconds)
+            {
+                return;
+            }
+
+            try
+            {
+                this.EnsureUguiSettleNote();
+            }
+            catch
+            {
+                this.ReleaseUguiSettleNote();
+            }
+        }
+
         private bool worldReadyBuiltInWarmupsRegistered;
 
         // Registered ONCE, from the first tick. Every feature whose resolve/install used to poll on
@@ -380,6 +444,7 @@ namespace HeartopiaMod
             // Bird/Insect prefab -> species id maps and the open-certification list from the live
             // tables, over the baked fallbacks (HeartopiaComplete.MapSpots.cs).
             this.RegisterWorldReadyCallback("SpeciesTables", this.SyncSpeciesTablesOnWorldReady);
+            this.RegisterWorldReadyCallback(EventGatherWorldReadyName, this.OnEventGatherWorldReady);
 
             // Diagnostic only: reports whether the two ClassInjector hooks that look like dead code
             // really are (InjectionGateCanary.cs). Counts only ever grow, so one sample per world

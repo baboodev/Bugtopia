@@ -54,6 +54,20 @@ namespace HeartopiaMod
             data.priorityOakSlab = this.priorityOakSlab;
             data.insectSpeciesFilter = new List<int>(this.radarInsectSpeciesFilterList);
             data.birdSpeciesFilter = new List<int>(this.radarBirdSpeciesFilterList);
+            data.eventGatherRadarEnabled = new List<EventGatherRadarToggle>(this.eventGatherRadarEnabled.Count);
+            foreach (KeyValuePair<int, bool> pair in this.eventGatherRadarEnabled)
+            {
+                if (pair.Key <= 0)
+                {
+                    continue;
+                }
+
+                data.eventGatherRadarEnabled.Add(new EventGatherRadarToggle
+                {
+                    StaticId = pair.Key,
+                    Enabled = pair.Value
+                });
+            }
         }
 
         private void ApplyRadarConfig(RadarConfigData data)
@@ -91,6 +105,31 @@ namespace HeartopiaMod
             this.priorityOakSlab = data.priorityOakSlab;
             this.ReplaceRadarSpeciesFilter(data.insectSpeciesFilter, this.radarInsectSpeciesFilterList, this.radarInsectSpeciesFilter);
             this.ReplaceRadarSpeciesFilter(data.birdSpeciesFilter, this.radarBirdSpeciesFilterList, this.radarBirdSpeciesFilter);
+            this.eventGatherRadarEnabled.Clear();
+            // Legacy bools were never in the shipped schema. >= 0 means some file actually wrote them.
+            if (data.showHoneyMushroomRadar >= 0)
+            {
+                this.eventGatherRadarEnabled[130030] = data.showHoneyMushroomRadar != 0;
+            }
+
+            if (data.showHollowTreeRadar >= 0)
+            {
+                this.eventGatherRadarEnabled[130029] = data.showHollowTreeRadar != 0;
+            }
+
+            if (data.eventGatherRadarEnabled != null)
+            {
+                for (int i = 0; i < data.eventGatherRadarEnabled.Count; i++)
+                {
+                    EventGatherRadarToggle entry = data.eventGatherRadarEnabled[i];
+                    if (entry == null || entry.StaticId <= 0)
+                    {
+                        continue;
+                    }
+
+                    this.eventGatherRadarEnabled[entry.StaticId] = entry.Enabled;
+                }
+            }
         }
 
         private string GetRadarSettingsPath()
@@ -601,7 +640,7 @@ namespace HeartopiaMod
                 case "Mandarin Tree":
                     return "p_fruit_citrus";
                 default:
-                    return string.Empty;
+                    return this.EventGatherMeshForLabel(canonicalLabel) ?? string.Empty;
             }
         }
 
@@ -1892,7 +1931,7 @@ namespace HeartopiaMod
         private bool AnyRadarLootToggleEnabled()
         {
             return this.IsAnyMushroomRadarEnabled()
-                || this.showHoneyMushroomRadar || this.showHollowTreeRadar
+                || this.IsAnyEventGatherRadarEnabled()
                 || this.showGlasswortRadar || this.showSeaGrapeRadar || this.showWakameRadar || this.showContaminatedRadar
                 || this.showBlueberryRadar || this.showRaspberryRadar || this.showStoneRadar || this.showOreRadar
                 || this.showTreeRadar || this.showRareTreeRadar || this.showAppleTreeRadar || this.showOrangeTreeRadar
@@ -2385,6 +2424,7 @@ namespace HeartopiaMod
         // and must stay hardcoded.
         private void ScanLandGatherables(Vector3 origin, Material line, Material fill, float maxRange)
         {
+            this.TouchEventGatherPeriodGate(false);
             if (line == null || fill == null)
             {
                 return;
@@ -2713,13 +2753,14 @@ namespace HeartopiaMod
                 // Matsutake has no dedicated toggle of its own — master switch only.
                 case 130018:
                     return self.showMushroomRadar ? "mushroom" : null;
+            }
 
-                // Honey Mushroom (蜜环菌, item 48007). One id, no bizarre variants.
-                case 130030:
-                    return self.showHoneyMushroomRadar ? "p_gather_honeyfungus_00" : null;
-                // Hollow Tree (怪奇栖木). One collect, not a timber tree.
-                case 130029:
-                    return self.showHollowTreeRadar ? "p_dynamicbush_deadtree_00_step1" : null;
+            // Festival Dynamicbush nodes (Honey Mushroom, Hollow Tree, later passes). Mesh and
+            // the English label come from EventGatherProvider; a disabled toggle stays known so
+            // the scan does not fall through to a generic mushroom marker.
+            if (self.IsActiveEventGatherStaticId(staticId))
+            {
+                return self.IsEventGatherRadarEnabled(staticId) ? self.EventGatherMeshHintFor(staticId) : null;
             }
 
             known = false;
@@ -3092,6 +3133,13 @@ namespace HeartopiaMod
                                                             icon = "[HT]";
                                                             endColor = new Color(0.72f, 0.62f, 0.48f);
                                                             bgColor = new Color(0.28f, 0.22f, 0.14f, 0.85f);
+                                                        }
+                                                        else if (this.TryMatchEventGatherMeshLabel(text, out string eventGatherLabel))
+                                                        {
+                                                            text2 = eventGatherLabel;
+                                                            icon = "[Ev]";
+                                                            endColor = new Color(1f, 0.78f, 0.25f);
+                                                            bgColor = new Color(0.45f, 0.28f, 0.05f, 0.85f);
                                                         }
                                                         else if (text.Contains("seaasparagus") || text.Contains("glasswort"))
                                                         {

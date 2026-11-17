@@ -1128,7 +1128,7 @@ namespace HeartopiaMod
 
             if (found && staticId > 0)
             {
-                return IsDynamicBushStaticId(staticId);
+                return this.IsDynamicBushStaticId(staticId);
             }
 
             return !string.IsNullOrEmpty(this.autoFarmTargetLabel) && this.ShouldShowMushroomByLabel(this.autoFarmTargetLabel);
@@ -2020,19 +2020,25 @@ namespace HeartopiaMod
                 return true;
             }
 
-            return IsDynamicBushStaticId(staticId);
+            return this.IsDynamicBushStaticId(staticId);
         }
 
-        // The dynamic-bush family: mushrooms (130001-130018), retired event bushes
-        // (130019-130028), Hollow Tree 130029 and Honey Mushroom 130030. Everything in
-        // here GROWS, which is the whole point of the range — a member with no broadcast
-        // verdict is unconfirmed, not ripe.
-        //
-        // ⚠️ The bound was 130025 and later ids fell outside it, so in-range nodes were
-        // reported collectable the instant they were gathered. Extend this whenever a new
-        // Dynamicbush id ships, not just its radar toggle.
-        internal static bool IsDynamicBushStaticId(int staticId)
+        // The dynamic-bush family grows: a member with no broadcast verdict is unconfirmed,
+        // not ripe. Membership is every Dynamicbush id the live table returned (so a new id
+        // past the old 130030 cap still counts). Before that snapshot exists, the historical
+        // 130001-130030 range keeps the same answer.
+        internal bool IsDynamicBushStaticId(int staticId)
         {
+            if (staticId <= 0)
+            {
+                return false;
+            }
+
+            if (this.eventGatherDynamicBushIds.Count > 0)
+            {
+                return this.eventGatherDynamicBushIds.Contains(staticId);
+            }
+
             return staticId >= 130001 && staticId <= 130030;
         }
 
@@ -2057,7 +2063,7 @@ namespace HeartopiaMod
                 staticId = this.liveCollectableColds[i].StaticId;
             }
 
-            if (!found || !IsDynamicBushStaticId(staticId))
+            if (!found || !this.IsDynamicBushStaticId(staticId))
             {
                 return false;
             }
@@ -2391,7 +2397,7 @@ namespace HeartopiaMod
                     if (this.liveCollectableColds[i].NetId == resourceNetId)
                     {
                         scanHoldsItReady = !this.liveCollectableColds[i].OnCooldown
-                            && !IsDynamicBushStaticId(this.liveCollectableColds[i].StaticId);
+                            && !this.IsDynamicBushStaticId(this.liveCollectableColds[i].StaticId);
                         break;
                     }
                 }
@@ -3323,8 +3329,7 @@ namespace HeartopiaMod
                                         // Equality, not Contains: a longer label can contain "Oak-Oak".
                                         || (this.showOakOakRadar && string.Equals(markerLabel, "Oak-Oak", StringComparison.Ordinal))
                                         || (this.showFluoriteRadar && markerLabel.Contains("Flawless Fluorite"))
-                                        || (this.showHoneyMushroomRadar && markerLabel.Contains("Honey Mushroom"))
-                                        || (this.showHollowTreeRadar && string.Equals(markerLabel, "Hollow Tree", StringComparison.Ordinal))
+                                        || this.IsEventGatherMarkerEnabled(markerLabel)
                                         || this.ShouldShowMushroomByLabel(markerLabel);
                                     if (flag10)
                                     {

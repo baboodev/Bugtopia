@@ -381,7 +381,8 @@ namespace HeartopiaMod
                     new System.Action<bool>(v => this.OnUguiRadarGroupOptionToggled(master, spec, v)));
             }
 
-            for (int i = 0; i < spec.Items.Length; i++)
+            int itemCount = spec.Items != null ? spec.Items.Length : 0;
+            for (int i = 0; i < itemCount; i++)
             {
                 UguiRadarOptionBinding item = spec.Items[i]; // struct copy per iteration (closure)
                 group.ItemRows.Add(this.CreateUguiRadarOptionRow(parent, name + "Item" + i,
@@ -407,6 +408,10 @@ namespace HeartopiaMod
             if (nextOpen)
             {
                 this.CloseAllRadarDropdowns();
+                if (string.Equals(spec.Title, "Events", StringComparison.Ordinal))
+                {
+                    this.TouchEventGatherPeriodGate(true);
+                }
             }
             spec.SetOpen(nextOpen);
 
@@ -496,10 +501,100 @@ namespace HeartopiaMod
 
         private string BuildUguiRadarEventsSummary()
         {
+            if (!this.TryGetActiveEventGatherNodes(out IReadOnlyList<EventGatherNode> nodes) || nodes == null || nodes.Count == 0)
+            {
+                return this.L("No active events");
+            }
+
             List<string> selected = new List<string>();
-            if (this.showHoneyMushroomRadar) selected.Add("Honey Mushroom");
-            if (this.showHollowTreeRadar) selected.Add("Hollow Tree");
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                EventGatherNode node = nodes[i];
+                if (node != null && !string.IsNullOrEmpty(node.LabelEn) && this.IsEventGatherRadarEnabled(node.StaticId))
+                {
+                    selected.Add(node.LabelEn);
+                }
+            }
+
             return this.GetRadarSelectionSummary(selected);
+        }
+
+        private UguiRadarOptionBinding[] BuildEventGatherRadarBindings()
+        {
+            if (!this.TryGetActiveEventGatherNodes(out IReadOnlyList<EventGatherNode> nodes) || nodes == null || nodes.Count == 0)
+            {
+                return new UguiRadarOptionBinding[0];
+            }
+
+            UguiRadarOptionBinding[] items = new UguiRadarOptionBinding[nodes.Count];
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                EventGatherNode node = nodes[i];
+                int id = node.StaticId;
+                items[i] = new UguiRadarOptionBinding
+                {
+                    Label = node.LabelEn ?? string.Empty,
+                    Get = () => this.IsEventGatherRadarEnabled(id),
+                    Set = v => this.SetEventGatherRadarEnabled(id, v)
+                };
+            }
+
+            return items;
+        }
+
+        private void SyncUguiRadarEventsRows(UguiShellRadarMainHandle handle)
+        {
+            if (handle == null || handle.Groups == null)
+            {
+                return;
+            }
+
+            UguiRadarGroupHandle events = null;
+            for (int i = 0; i < handle.Groups.Length; i++)
+            {
+                UguiRadarGroupHandle group = handle.Groups[i];
+                if (group != null && group.Spec != null
+                    && string.Equals(group.Spec.Title, "Events", StringComparison.Ordinal))
+                {
+                    events = group;
+                    break;
+                }
+            }
+
+            if (events == null || events.Spec == null || events.HeaderBox == null)
+            {
+                return;
+            }
+
+            Transform parent = events.HeaderBox.transform.parent;
+            if (parent == null)
+            {
+                return;
+            }
+
+            for (int r = 0; r < events.ItemRows.Count; r++)
+            {
+                UguiRadarOptionRowHandle row = events.ItemRows[r];
+                if (row != null && row.Root != null)
+                {
+                    UnityEngine.Object.Destroy(row.Root);
+                }
+            }
+
+            events.ItemRows.Clear();
+            events.Spec.Items = this.BuildEventGatherRadarBindings() ?? new UguiRadarOptionBinding[0];
+            for (int i = 0; i < events.Spec.Items.Length; i++)
+            {
+                UguiRadarOptionBinding item = events.Spec.Items[i];
+                events.ItemRows.Add(this.CreateUguiRadarOptionRow(parent, "GroupEventsItem" + i,
+                    item.Label, item.Get != null && item.Get(),
+                    new System.Action<bool>(v => this.OnUguiRadarGroupOptionToggled(item, events.Spec, v))));
+            }
+
+            this.eventGatherUiAppliedStamp = this.eventGatherUiStamp;
+            handle.LayoutSignature = this.ComputeUguiRadarMainLayoutSignature();
+            this.RelayoutUguiShellRadarMain(handle);
+            handle.NextSlowSyncAt = 0f;
         }
 
         // Radar.cs:1530-1535.
@@ -623,11 +718,7 @@ namespace HeartopiaMod
                     Summary = this.BuildUguiRadarEventsSummary,
                     GetOpen = () => this.radarEventsDropdownOpen,
                     SetOpen = v => this.radarEventsDropdownOpen = v,
-                    Items = new UguiRadarOptionBinding[]
-                    {
-                        new UguiRadarOptionBinding { Label = "Honey Mushroom", Get = () => this.showHoneyMushroomRadar, Set = v => this.showHoneyMushroomRadar = v },
-                        new UguiRadarOptionBinding { Label = "Hollow Tree", Get = () => this.showHollowTreeRadar, Set = v => this.showHollowTreeRadar = v },
-                    },
+                    Items = this.BuildEventGatherRadarBindings(),
                     AfterChanged = this.ApplyUguiRadarStandardGroupTail
                 },
                 // Underwater (Radar.cs:1528-1566) — the group CloseAllRadarDropdowns forgets.
@@ -941,6 +1032,7 @@ namespace HeartopiaMod
             this.TrySetUguiButtonLabelSize(clearAll, 12f);
 
             // The eight groups (order = DrawRadarTab's call order, Radar.cs:1253-1259, + Daily).
+            int eventGatherStampAtBuild = this.eventGatherUiStamp;
             UguiRadarGroupSpec[] specs = this.BuildUguiRadarGroupSpecs();
             handle.Groups = new UguiRadarGroupHandle[specs.Length];
             for (int i = 0; i < specs.Length; i++)
@@ -960,6 +1052,10 @@ namespace HeartopiaMod
 
             handle.LayoutSignature = this.ComputeUguiRadarMainLayoutSignature();
             this.RelayoutUguiShellRadarMain(handle);
+            if (eventGatherStampAtBuild == this.eventGatherUiStamp)
+            {
+                this.eventGatherUiAppliedStamp = eventGatherStampAtBuild;
+            }
 
             handle.Root = block;
             this.uguiShellRadarMain = handle;
@@ -1065,6 +1161,12 @@ namespace HeartopiaMod
 
             try
             {
+                this.TouchEventGatherPeriodGate(false);
+                if (this.eventGatherUiAppliedStamp != this.eventGatherUiStamp)
+                {
+                    this.SyncUguiRadarEventsRows(handle);
+                }
+
                 // Primary button label (isRadarActive also flips from hotkeys/auto-disable).
                 string toggleText = this.L(this.isRadarActive ? "DISABLE RADAR" : "ENABLE RADAR");
                 if (!string.Equals(toggleText, handle.ToggleShown, StringComparison.Ordinal))
@@ -1089,7 +1191,7 @@ namespace HeartopiaMod
                         {
                             this.SyncUguiRadarOptionRow(group.MasterRow, group.Spec.Master.Get());
                         }
-                        for (int r = 0; r < group.ItemRows.Count && r < group.Spec.Items.Length; r++)
+                        for (int r = 0; r < group.ItemRows.Count && group.Spec.Items != null && r < group.Spec.Items.Length; r++)
                         {
                             if (group.Spec.Items[r].Get != null)
                             {
@@ -1157,8 +1259,7 @@ namespace HeartopiaMod
             this.showPennyBunRadar = true;
             this.showShiitakeRadar = true;
             this.showTruffleRadar = true;
-            this.showHoneyMushroomRadar = true;
-            this.showHollowTreeRadar = true;
+            this.SetAllEventGatherRadarEnabled(true);
             this.showGlasswortRadar = true;
             this.showSeaGrapeRadar = true;
             this.showWakameRadar = true;
@@ -1206,8 +1307,7 @@ namespace HeartopiaMod
             this.showPennyBunRadar = false;
             this.showShiitakeRadar = false;
             this.showTruffleRadar = false;
-            this.showHoneyMushroomRadar = false;
-            this.showHollowTreeRadar = false;
+            this.SetAllEventGatherRadarEnabled(false);
             this.showGlasswortRadar = false;
             this.showSeaGrapeRadar = false;
             this.showWakameRadar = false;

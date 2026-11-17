@@ -5014,9 +5014,7 @@ namespace HeartopiaMod
         private bool radarTreesDropdownOpen = false;
         private bool radarDailyDropdownOpen = false;
         private bool radarMiscDropdownOpen = false;
-        // Events: Honey Mushroom (Dynamicbush 130030, item 48007) and Hollow Tree (130029).
-        private bool showHoneyMushroomRadar = false;
-        private bool showHollowTreeRadar = false;
+        // Radar → Events toggles live in eventGatherRadarEnabled (HeartopiaComplete.EventGatherProvider.cs).
 
         // Underwater gatherables (2026-07-09 SeaWorld update, Fruit table 40601-40603):
         // Glasswort = p_gather_seaasparagus_00, Sea Grape = p_gather_seagrape_00,
