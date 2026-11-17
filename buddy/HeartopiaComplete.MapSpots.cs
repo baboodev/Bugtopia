@@ -1470,8 +1470,15 @@ namespace HeartopiaMod
                     type = MapTrackTypeAnimal;
                     staticId = MapTrackSyntheticStaticId;
                 }
+                else if (string.Equals(cand.Label, "Repair Kit", StringComparison.Ordinal)
+                    && cand.SpeciesItemId > 0)
+                {
+                    type = MapTrackTypeFurniture;
+                    staticId = cand.SpeciesItemId;
+                }
                 else if (type == MapTrackTypeNavigationPoint
-                    && !string.Equals(cand.Label, "Bubble", StringComparison.Ordinal))
+                    && !string.Equals(cand.Label, "Bubble", StringComparison.Ordinal)
+                    && !string.Equals(cand.Label, "Repair Kit", StringComparison.Ordinal))
                 {
                     bool didMatch = this.TryMatchCollectable(cand.Position, out int resStaticId, out int resProduceId, out bool resOnCooldown, out float resMatchSqr);
                     if (didMatch && resOnCooldown && resMatchSqr <= MapResCooldownMatchSqr)
