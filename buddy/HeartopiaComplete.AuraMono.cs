@@ -1828,8 +1828,14 @@ namespace HeartopiaMod
             {
                 imageNames = new[] { "XDTLevelAndEntity", "XDTLevelAndEntity.dll", "XDTGameUI", "XDTGameUI.dll", "Client", "Client.dll", "Assembly-CSharp", "Assembly-CSharp.dll" };
             }
-            else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("ClientSystem", StringComparison.Ordinal))
+            else if (!string.IsNullOrEmpty(nameSpace)
+                && (nameSpace.StartsWith("ClientSystem", StringComparison.Ordinal)
+                    || nameSpace.StartsWith("EcsSystem.ClientSystem", StringComparison.Ordinal)
+                    || nameSpace.StartsWith("EcsSystem", StringComparison.Ordinal)))
             {
+                // Live types are EcsSystem.ClientSystem.Bird.* / InsectCatching.* in the EcsSystem
+                // image. The old ClientSystem-only hint missed every EcsSystem.ClientSystem.* name
+                // (namespace does not start with "ClientSystem"), which put Calm Creatures to sleep.
                 imageNames = new[] { "EcsSystem", "EcsSystem.dll", "Client", "Client.dll", "XDTDataAndProtocol", "XDTDataAndProtocol.dll" };
             }
             else if (!string.IsNullOrEmpty(nameSpace) && nameSpace.StartsWith("Sazabi", StringComparison.Ordinal))

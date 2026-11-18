@@ -39,6 +39,7 @@ namespace HeartopiaMod
                 if (config?.BirdFarm != null)
                 {
                     BirdNetFarm.ApplyBirdFarmConfig(config.BirdFarm);
+                    this.RequestCalmCreaturesApply();
                     ModLogger.Msg("Bird farm settings loaded.");
                 }
             }

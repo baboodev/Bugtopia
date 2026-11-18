@@ -478,6 +478,7 @@ namespace HeartopiaMod
             public bool insectPauseTeleportOnEatEnabled;
             public float insectRepairTeleportPauseSeconds;
             public float insectEatTeleportPauseSeconds;
+            public bool insectsIgnoreAlert;
 
             // Combined Farming (CombinedFarmFeature). Negative/empty = "not in this file yet", so an
             // older config loads the feature's own defaults instead of zeroing its windows.
@@ -652,6 +653,7 @@ namespace HeartopiaMod
         {
             public bool perfectPhotoEnabled = false;
             public bool spawnNearPlayerEnabled;
+            public bool ignoreAlertEnabled;
             public bool autoScareMaxPhotoEnabled = true;
             public int captureMode = 0;
             public float catchCooldown = 1.5f;

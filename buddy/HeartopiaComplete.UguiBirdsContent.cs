@@ -24,8 +24,8 @@ namespace HeartopiaMod
     //  - SAVE MODEL IS DIFFERENT FROM EVERY SIBLING: BirdNetFarm saves on a 2s DEBOUNCE
     //    (pendingSaveAt, flushed by BirdNetFarm.Update via host.SaveAllSettings — runs every
     //    frame regardless of menu state, BirdNetFarm.cs:562-566). The new setters arm that same
-    //    debounce internally, so this file calls NO Save method anywhere — no SaveKeybinds, no
-    //    SaveAllSettings.
+    //    debounce internally, so this file does not call SaveKeybinds or SaveAllSettings for
+    //    those controls. Ignore bird alert calls SaveAllSettings (Calm Creatures persistence).
     //  - Wiring is by STATIC display-position index (UguiShellResourceGatheringTabIndex = 1 +
     //    UguiShellBirdsSubIndex = 3, declared next to their siblings in UguiShellTabIndices.cs;
     //    Birds = autoFarmSubTab 3 per DrawAutoFarmTab's dispatcher, Farm.cs:132-135), never
@@ -85,6 +85,7 @@ namespace HeartopiaMod
             public Toggle PerfectPhotoToggle;
             public Toggle SpawnNearPlayerToggle;
             public Toggle BirdVacuumToggle;
+            public Toggle IgnoreAlertToggle;
 
             public Dropdown CaptureModeDropdown;
             public bool CaptureModeListenerWired;
@@ -248,12 +249,17 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiBirdsBirdVacuumToggled));
             PlaceUguiTopLeft(handle.BirdVacuumToggle.gameObject, 16f, 171f, 280f, 25f);
 
+            handle.IgnoreAlertToggle = this.CreateUguiCheckbox(scrollContent, "IgnoreAlertToggle",
+                this.L("Ignore bird alert"), BirdNetFarm.GetIgnoreAlertEnabled(),
+                new System.Action<bool>(this.OnUguiBirdsIgnoreAlertToggled));
+            PlaceUguiTopLeft(handle.IgnoreAlertToggle.gameObject, 16f, 201f, 280f, 25f);
+
             // BirdNetFarm.cs:495-505 — label mirrors UI_DrawSingleSelectDropdown's own bold-13
             // label row (drawn at rect.y-22, width = the control's 260); options pre-localized
             // like the IMGUI widget renders them (see file header).
             GameObject captureLabel = this.CreateUguiBodyLabel(scrollContent, "CaptureModeLabel",
                 this.L("Capture Mode"), 13f);
-            PlaceUguiTopLeft(captureLabel, 16f, 201f, 260f, 20f);
+            PlaceUguiTopLeft(captureLabel, 16f, 231f, 260f, 20f);
 
             string[] captureModeRaw = BirdNetFarm.GetCaptureModeOptions();
             string[] captureModeNames = new string[captureModeRaw.Length];
@@ -268,23 +274,23 @@ namespace HeartopiaMod
                 captureModeNames, captureInitial,
                 new System.Action<int>(this.OnUguiBirdsCaptureModePicked), out captureWired);
             handle.CaptureModeListenerWired = captureWired;
-            PlaceUguiTopLeft(handle.CaptureModeDropdown.gameObject, 16f, 223f, 260f, 28f);
+            PlaceUguiTopLeft(handle.CaptureModeDropdown.gameObject, 16f, 253f, 260f, 28f);
 
             // BirdNetFarm.cs:507-512 — safe to seed at build time (pure reads with their own
             // Idle/Unknown fallbacks). IMGUI `small` style = fontSize 12. Status/Tool wrap the
             // inner value in L() (double-localization, see file header); Birds passes plain ints.
             handle.StatusShown = this.LF("Status: {0}", this.L(BirdNetFarm.GetLastStatus()));
             handle.StatusLabel = this.CreateUguiBodyLabel(scrollContent, "StatusLabel", handle.StatusShown, 12f);
-            PlaceUguiTopLeft(handle.StatusLabel, 16f, 281f, 360f, 20f);
+            PlaceUguiTopLeft(handle.StatusLabel, 16f, 311f, 360f, 20f);
 
             handle.ToolShown = this.LF("Tool: {0}", this.L(BirdNetFarm.GetLastToolStatus()));
             handle.ToolLabel = this.CreateUguiBodyLabel(scrollContent, "ToolLabel", handle.ToolShown, 12f);
-            PlaceUguiTopLeft(handle.ToolLabel, 16f, 305f, 360f, 20f);
+            PlaceUguiTopLeft(handle.ToolLabel, 16f, 335f, 360f, 20f);
 
             handle.BirdsShown = this.LF("Birds: {0} caught | {1} scared",
                 BirdNetFarm.GetSessionCatchCount(), BirdNetFarm.GetSessionScaredCount());
             handle.BirdsLabel = this.CreateUguiBodyLabel(scrollContent, "BirdsLabel", handle.BirdsShown, 12f);
-            PlaceUguiTopLeft(handle.BirdsLabel, 16f, 329f, 360f, 20f);
+            PlaceUguiTopLeft(handle.BirdsLabel, 16f, 359f, 360f, 20f);
 
             // BirdNetFarm.cs:514-545 — the three slider blocks, one loop over the binding array.
             // The change closure captures the array element directly (not the handle, which is
@@ -292,7 +298,7 @@ namespace HeartopiaMod
             // so a stale closure after a shell rebuild behaves identically anyway.
             UguiBirdsSliderBinding[] bindings = BuildUguiBirdsSliderBindings();
             handle.SliderBindings = bindings;
-            float yCur = 353f;
+            float yCur = 383f;
             for (int i = 0; i < bindings.Length; i++)
             {
                 int indexCopy = i; // capture a copy for the change closure
@@ -312,7 +318,7 @@ namespace HeartopiaMod
                 yCur += 30f;
             }
 
-            // yCur = 509 here = DrawSection cursor + spawn-near and bird-vacuum rows with the dropdown closed.
+            // yCur = 539 here = DrawSection cursor + spawn-near, bird-vacuum, ignore-alert rows with the dropdown closed.
             this.SetUguiScrollContentHeight(scrollContent, yCur);
 
             handle.Root = block;
@@ -354,6 +360,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.PerfectPhotoToggle, BirdNetFarm.GetPerfectPhotoEnabled());
                 this.SyncUguiToggleFromField(handle.SpawnNearPlayerToggle, BirdNetFarm.GetSpawnNearPlayerEnabled());
                 this.SyncUguiToggleFromField(handle.BirdVacuumToggle, this.birdVacuumEnabled);
+                this.SyncUguiToggleFromField(handle.IgnoreAlertToggle, BirdNetFarm.GetIgnoreAlertEnabled());
 
                 // Dropdown external re-sync (the IMGUI twin or ApplyBirdFarmConfig moved the
                 // backend) — Settings→Main's approach: WithoutNotify + LastValue update.
@@ -410,8 +417,8 @@ namespace HeartopiaMod
 
         // ----------------------------------------------------------------------------------------
         // Change handlers — each mirrors its IMGUI block EXACTLY (same side effects, same order;
-        // no notifications anywhere — the source drawer never toasts — and NO direct saves
-        // anywhere: the Set*FromUi setters arm BirdNetFarm's 2s debounce themselves).
+        // no notifications anywhere — the source drawer never toasts). No direct saves for
+        // BirdNetFarm setters (2s debounce) except Ignore alert (SaveAllSettings).
         // ----------------------------------------------------------------------------------------
 
         // BirdNetFarm.cs:472-477.
@@ -455,6 +462,13 @@ namespace HeartopiaMod
         private void OnUguiBirdsBirdVacuumToggled(bool value)
         {
             this.birdVacuumEnabled = value;
+        }
+
+        private void OnUguiBirdsIgnoreAlertToggled(bool value)
+        {
+            BirdNetFarm.SetIgnoreAlertEnabled(value);
+            this.RequestCalmCreaturesApply();
+            this.SaveAllSettings();
         }
 
         // BirdNetFarm.cs:495-505 — shared by the wired listener AND the poll fallback (the

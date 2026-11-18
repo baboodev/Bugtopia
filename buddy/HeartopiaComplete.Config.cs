@@ -451,6 +451,7 @@ namespace HeartopiaMod
             data.insectPauseTeleportOnEatEnabled = InsectNetFarm.GetPauseTeleportOnEatEnabled();
             data.insectRepairTeleportPauseSeconds = InsectNetFarm.GetRepairTeleportPauseSeconds();
             data.insectEatTeleportPauseSeconds = InsectNetFarm.GetEatTeleportPauseSeconds();
+            data.insectsIgnoreAlert = this.insectsIgnoreAlert;
             data.combinedFarmEnabled = CombinedFarmFeature.GetCoordinationEnabled();
             data.combinedFarmRepairStowedTools = CombinedFarmFeature.GetRepairStowedToolsEnabled();
             data.combinedFarmPriorityOrder = CombinedFarmFeature.GetPriorityOrderKey();
@@ -976,6 +977,8 @@ namespace HeartopiaMod
             {
                 InsectNetFarm.SetEatTeleportPauseSeconds(data.insectEatTeleportPauseSeconds);
             }
+            this.insectsIgnoreAlert = data.insectsIgnoreAlert;
+            this.RequestCalmCreaturesApply();
             CombinedFarmFeature.SetCoordinationEnabled(data.combinedFarmEnabled);
             CombinedFarmFeature.SetRepairStowedToolsEnabled(data.combinedFarmRepairStowedTools);
             CombinedFarmFeature.SetPriorityOrderKey(data.combinedFarmPriorityOrder);

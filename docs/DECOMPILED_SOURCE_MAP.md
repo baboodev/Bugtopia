@@ -540,6 +540,11 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 - **Access:** **R**, **A**
 - **How:** `UpdateAllComponent` AuraMono on photo mode instance
 
+#### `BirdAIClientService`
+- **Dump:** `EcsSystem/ClientSystem/Bird/`
+- `BirdAIClientService.SetBirdIgnoreAlert(bool)` — Calm Creatures toggle (`CalmCreaturesFeature.cs`)
+- **Access:** **A** — AuraMono static invoke
+
 ---
 
 ### 3.6 Insects
@@ -560,6 +565,11 @@ Below: **only types the mod actually resolves or patches**. For each: dump path,
 - **Features:** Insect farm bug dictionary — `FindInRangeBugs`, `GetCatchingInsects`
 - **Access:** **R**, **A**
 - **File:** `HC`, `InsectNetFarm.cs`
+
+#### `InsectAIClientService`
+- **Dump:** `EcsSystem/ClientSystem/InsectCatching/`
+- `InsectAIClientService.SetInsectIgnoreAlert(bool)` — Calm Creatures toggle (`CalmCreaturesFeature.cs`)
+- **Access:** **A** — AuraMono static invoke
 
 ---
 

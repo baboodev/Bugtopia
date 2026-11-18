@@ -1420,6 +1420,7 @@ longer exposes start/stop, category lists, or custom-spot save controls — only
 - Optional **patrol teleport** through ~50 predefined world coordinates when no targets nearby.
 - Pause teleport during auto-repair / auto-eat (configurable).
 - Cooldown between catch attempts (default 1.5 s).
+- **Ignore insect alert** — when on, calls `InsectAIClientService.SetInsectIgnoreAlert(true)` so insects do not progress alert stages into escape. Local client flag only.
 - **Insect magnet** (default off) — active only while Auto Insect Farm is on. Mono `NativeDetour` on `InsectProtocolManager` spawn/move publishers rewrites the client-chosen `Vector3` to a point 3 m in front of the player, at body height (same placement as Bird Vacuum), and clears the habitat point id. The insect view otherwise ignores that vector and snaps onto the level object (`InsectComponent.GetTargetPos`). A non-empty radar insect filter rewrites only those species (`InsectStaticId`); an empty filter rewrites every insect. The same loaded-insect scan the farm uses (`GetComponents<InsectComponent>`) calls `InsectFly` once for each allowed insect farther than Scan Range, with the habitat point cleared. Fish shadows are unaffected. `BirdFly` (no position) is not hooked.
 
 ### Birds (`BirdNetFarm`)
@@ -1427,6 +1428,7 @@ longer exposes start/stop, category lists, or custom-spot save controls — only
 - Auto equips the bird scanner while enabled. Stopping leaves the scanner in hand. Multi-catch support (1–10, default 1).
 - Capture modes: **Safe Capture** vs **Spam Capture**.
 - Perfect photo / auto-scare options.
+- **Ignore bird alert** — when on, calls `BirdAIClientService.SetBirdIgnoreAlert(true)` so proximity/sound/photo/dog alert no longer frightens birds into escape. Local client flag only.
 - Safety stop after 90 s continuous run; 60 s re-enable cooldown.
 - Stationary throttling reduces multi-catch when player barely moves.
 - Pending server ACK tracking for burst catches.

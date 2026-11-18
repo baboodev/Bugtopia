@@ -439,6 +439,7 @@
     <Compile Include="PushPathClearFeature.cs" />
     <Compile Include="PushObstacleAheadFeature.cs" />
     <Compile Include="PetHeightLimitBypassFeature.cs" />
+    <Compile Include="CalmCreaturesFeature.cs" />
     <Compile Include="HeartopiaComplete.Config.cs" />
     <Compile Include="HeartopiaComplete.Gui.cs" />
     <Compile Include="HeartopiaComplete.Player.cs" />

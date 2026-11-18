@@ -809,6 +809,7 @@ namespace HeartopiaMod
             this.ProcessPushPathClearOnUpdate();
             this.ProcessPushObstacleAheadOnUpdate();
             this.ProcessPetHeightLimitBypassOnUpdate();
+            this.ProcessCalmCreaturesOnUpdate();
             this.ProcessFishingCameraHudOnUpdate();
             this.ProcessServerSideFishingOnUpdate();
             this.EnsureCollectColdRegistrations();
