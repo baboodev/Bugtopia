@@ -643,40 +643,6 @@ namespace HeartopiaMod
             // resolve to). Absent on old configs, which leaves the initializer and means "all".
             public List<int> insectSpeciesFilter = new List<int>();
             public List<int> birdSpeciesFilter = new List<int>();
-            // Per festival Dynamicbush staticId. Missing key means enabled. Legacy bools below
-            // are read once if an older file wrote them, then never written back.
-            public List<EventGatherRadarToggle> eventGatherRadarEnabled = new List<EventGatherRadarToggle>();
-            private int legacyShowHoneyMushroomRadar = -1;
-            private int legacyShowHollowTreeRadar = -1;
-
-            public int showHoneyMushroomRadar
-            {
-                get { return this.legacyShowHoneyMushroomRadar; }
-                set { this.legacyShowHoneyMushroomRadar = value; }
-            }
-
-            public int showHollowTreeRadar
-            {
-                get { return this.legacyShowHollowTreeRadar; }
-                set { this.legacyShowHollowTreeRadar = value; }
-            }
-
-            public bool ShouldSerializeshowHoneyMushroomRadar()
-            {
-                return false;
-            }
-
-            public bool ShouldSerializeshowHollowTreeRadar()
-            {
-                return false;
-            }
-        }
-
-        // One persisted Radar → Events toggle. StaticId is the Dynamicbush id.
-        public class EventGatherRadarToggle
-        {
-            public int StaticId;
-            public bool Enabled;
         }
 
         [Serializable]

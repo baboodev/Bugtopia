@@ -54,20 +54,6 @@ namespace HeartopiaMod
             data.priorityOakSlab = this.priorityOakSlab;
             data.insectSpeciesFilter = new List<int>(this.radarInsectSpeciesFilterList);
             data.birdSpeciesFilter = new List<int>(this.radarBirdSpeciesFilterList);
-            data.eventGatherRadarEnabled = new List<EventGatherRadarToggle>(this.eventGatherRadarEnabled.Count);
-            foreach (KeyValuePair<int, bool> pair in this.eventGatherRadarEnabled)
-            {
-                if (pair.Key <= 0)
-                {
-                    continue;
-                }
-
-                data.eventGatherRadarEnabled.Add(new EventGatherRadarToggle
-                {
-                    StaticId = pair.Key,
-                    Enabled = pair.Value
-                });
-            }
         }
 
         private void ApplyRadarConfig(RadarConfigData data)
@@ -105,31 +91,8 @@ namespace HeartopiaMod
             this.priorityOakSlab = data.priorityOakSlab;
             this.ReplaceRadarSpeciesFilter(data.insectSpeciesFilter, this.radarInsectSpeciesFilterList, this.radarInsectSpeciesFilter);
             this.ReplaceRadarSpeciesFilter(data.birdSpeciesFilter, this.radarBirdSpeciesFilterList, this.radarBirdSpeciesFilter);
-            this.eventGatherRadarEnabled.Clear();
-            // Legacy bools were never in the shipped schema. >= 0 means some file actually wrote them.
-            if (data.showHoneyMushroomRadar >= 0)
-            {
-                this.eventGatherRadarEnabled[130030] = data.showHoneyMushroomRadar != 0;
-            }
-
-            if (data.showHollowTreeRadar >= 0)
-            {
-                this.eventGatherRadarEnabled[130029] = data.showHollowTreeRadar != 0;
-            }
-
-            if (data.eventGatherRadarEnabled != null)
-            {
-                for (int i = 0; i < data.eventGatherRadarEnabled.Count; i++)
-                {
-                    EventGatherRadarToggle entry = data.eventGatherRadarEnabled[i];
-                    if (entry == null || entry.StaticId <= 0)
-                    {
-                        continue;
-                    }
-
-                    this.eventGatherRadarEnabled[entry.StaticId] = entry.Enabled;
-                }
-            }
+            // Event category toggles stay session-only (same as mushrooms / berries) — never load
+            // from config even if an older build wrote eventGatherRadarEnabled.
         }
 
         private string GetRadarSettingsPath()

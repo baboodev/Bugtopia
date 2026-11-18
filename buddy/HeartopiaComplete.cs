@@ -5015,7 +5015,8 @@ namespace HeartopiaMod
         private bool radarTreesDropdownOpen = false;
         private bool radarDailyDropdownOpen = false;
         private bool radarMiscDropdownOpen = false;
-        // Radar → Events toggles live in eventGatherRadarEnabled (HeartopiaComplete.EventGatherProvider.cs).
+        // Radar → Events toggles: session-only dict in HeartopiaComplete.EventGatherProvider.cs
+        // (not RadarConfigData — same as mushroom / berry category flags).
 
         // Underwater gatherables (2026-07-09 SeaWorld update, Fruit table 40601-40603):
         // Glasswort = p_gather_seaasparagus_00, Sea Grape = p_gather_seagrape_00,

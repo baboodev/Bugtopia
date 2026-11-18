@@ -134,8 +134,8 @@ namespace HeartopiaMod
                 return;
             }
 
+            // Session-only, like mushroom / berry category toggles — not in RadarConfigData.
             this.eventGatherRadarEnabled[staticId] = enabled;
-            this.QueueRadarSettingsSave();
         }
 
         private void SetAllEventGatherRadarEnabled(bool enabled)
@@ -148,8 +148,6 @@ namespace HeartopiaMod
                     this.eventGatherRadarEnabled[id] = enabled;
                 }
             }
-
-            this.QueueRadarSettingsSave();
         }
 
         private bool IsAnyEventGatherRadarEnabled()
