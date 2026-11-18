@@ -269,6 +269,7 @@ namespace HeartopiaMod
             data.farmNoRegrowthWait = this.farmNoRegrowthWait;
             data.skipCraftDyeAnimations = this.skipCraftDyeAnimations;
             data.autoLearnRecipes = this.autoLearnRecipes;
+            data.uiInputAutoFocus = this.uiInputAutoFocus;
             data.wildAnimalAutoClaimVisitGifts = this.wildAnimalAutoClaimVisitGifts;
             data.wildAnimalFeedSkipFiveStarFood = this.wildAnimalFeedSkipFiveStarFood;
             data.wildAnimalFeedSkipRareFood = this.wildAnimalFeedSkipRareFood;
@@ -737,6 +738,7 @@ namespace HeartopiaMod
             this.farmNoRegrowthWait = data.farmNoRegrowthWait;
             this.skipCraftDyeAnimations = data.skipCraftDyeAnimations;
             this.autoLearnRecipes = data.autoLearnRecipes;
+            this.uiInputAutoFocus = data.uiInputAutoFocus;
             this.wildAnimalAutoClaimVisitGifts = data.wildAnimalAutoClaimVisitGifts;
             this.wildAnimalFeedSkipFiveStarFood = data.wildAnimalFeedSkipFiveStarFood;
             this.wildAnimalFeedSkipRareFood = data.wildAnimalFeedSkipRareFood;
@@ -1243,6 +1245,7 @@ namespace HeartopiaMod
                         else if (line.Contains("hideModEspInPhotos")) this.hideModEspInPhotos = GetJsonInt(line, "\"hideModEspInPhotos\":") != 0;
                         else if (line.Contains("skipCraftDyeAnimations")) this.skipCraftDyeAnimations = GetJsonInt(line, "\"skipCraftDyeAnimations\":") != 0;
                         else if (line.Contains("autoLearnRecipes")) this.autoLearnRecipes = GetJsonInt(line, "\"autoLearnRecipes\":") != 0;
+                        else if (line.Contains("uiInputAutoFocus")) this.uiInputAutoFocus = GetJsonInt(line, "\"uiInputAutoFocus\":") != 0;
                         else if (line.Contains("autoLikeOwnHome")) this.autoLikeOwnHome = GetJsonInt(line, "\"autoLikeOwnHome\":") != 0;
                         else if (line.Contains("craftDirectSendEnabled")) this.craftDirectSendEnabled = GetJsonInt(line, "\"craftDirectSendEnabled\":") != 0;
                         else if (line.Contains("interactObstacleBypassEnabled")) this.interactObstacleBypassEnabled = GetJsonInt(line, "\"interactObstacleBypassEnabled\":") != 0;

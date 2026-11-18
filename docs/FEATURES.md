@@ -579,6 +579,15 @@ mode**, so the mod's Pad Confirm / Cancel / Rotate / Move / Delete only doubled 
   contents — whichever sweeps first wins.
 - Persisted; default off. Self → Main. Source: `buddy/AutoLearnRecipeFeature.cs`.
 
+### Self → Main
+
+- **Auto-focus UI text fields** (toggle, default **on**): when bag search (`SearchAndFilterPanel`),
+  Redeem/Nickname-style `AlertPanel` input, or `ChatRecordPanel` opens, focus the panel's
+  `InputField` so typing starts without an extra click. Does not touch the HUD chat field.
+  Bag search forces `SingleLine` and **Enter** clicks the Search button; chat **Enter** still
+  sends via the game's submit path, then the field is re-focused for the next message.
+  Source: `buddy/UiInputAutoFocusFeature.cs`.
+
 ### Auto-like Own Home
 
 - Sends the one daily "very nice" reaction to your own mailbox, without walking to it — the same

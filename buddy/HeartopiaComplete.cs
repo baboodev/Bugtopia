@@ -819,6 +819,7 @@ namespace HeartopiaMod
             this.ProcessMusicPlayerOnUpdate();
             Breadcrumbs.Phase("ou.eventhooks");
             this.ProcessGameEventHooksOnUpdate();
+            this.ProcessUiInputAutoFocusOnUpdate();
             // Daily Claims auto-claim drain — must run AFTER the hook drain so a red point that
             // arrived this frame is already queued (DailyClaimsAutoClaimFeature.cs).
             Breadcrumbs.Phase("ou.dailyclaims");
@@ -4858,6 +4859,7 @@ namespace HeartopiaMod
         private IntPtr cachedBirdRemoveMonoMethod = IntPtr.Zero;
         private int cachedBirdRemoveMonoMethodParamCount = 0;
         private bool birdFarmMaxPhotoHookRegistered = false;
+
         private bool warehouseBypassEnabled = false;
         internal bool WarehouseBypassEnabled => this.warehouseBypassEnabled;
         // Stranger Chat Bypass (detour machinery lives in HeartopiaComplete.SelfRoomChat.cs)

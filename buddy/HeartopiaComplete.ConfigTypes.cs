@@ -271,6 +271,8 @@ namespace HeartopiaMod
             public bool farmNoRegrowthWait;
             public bool skipCraftDyeAnimations;
             public bool autoLearnRecipes;
+            // Default on; XmlSerializer keeps the initializer for a missing element.
+            public bool uiInputAutoFocus = true;
             public bool wildAnimalAutoClaimVisitGifts;
             // Trough-feed food filters. Default on; absent from configs written before they were
             // persisted, and XmlSerializer keeps the initializer for a missing element.

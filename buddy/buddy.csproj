@@ -473,6 +473,7 @@
     <Compile Include="HomeLikeFeature.cs" />
     <Compile Include="ShowOffBypassFeature.cs" />
     <Compile Include="QuietPopupsFeature.cs" />
+    <Compile Include="UiInputAutoFocusFeature.cs" />
     <Compile Include="TutorialBlockFeature.cs" />
     <Compile Include="PartyAutoDeclineFeature.cs" />
     <Compile Include="ActivityEventAutoDeclineFeature.cs" />

@@ -146,6 +146,7 @@ namespace HeartopiaMod
             public Toggle PetHeightLimitToggle;
             public Toggle BlockTutorialsToggle;
             public Toggle AutoLearnRecipesToggle;
+            public Toggle UiInputAutoFocusToggle;
             public Toggle AutoLikeOwnHomeToggle;
             public Toggle FurnitureRepairToggle;
             public GameObject NoclipHelpLabel;  // trailing, only visible while Noclip is on
@@ -481,6 +482,9 @@ namespace HeartopiaMod
             handle.AutoLearnRecipesToggle = this.CreateUguiCheckbox(scrollContent, "AutoLearnRecipesToggle",
                 this.L("Auto-learn recipes"), this.autoLearnRecipes,
                 new System.Action<bool>(this.OnUguiSelfAutoLearnRecipesToggled));
+            handle.UiInputAutoFocusToggle = this.CreateUguiCheckbox(scrollContent, "UiInputAutoFocusToggle",
+                this.L("Auto-focus UI text fields"), this.uiInputAutoFocus,
+                new System.Action<bool>(this.OnUguiSelfUiInputAutoFocusToggled));
             handle.AutoLikeOwnHomeToggle = this.CreateUguiCheckbox(scrollContent, "AutoLikeOwnHomeToggle",
                 this.L("Auto-like own home (once a day)"), this.autoLikeOwnHome,
                 new System.Action<bool>(this.OnUguiSelfAutoLikeOwnHomeToggled));
@@ -869,6 +873,12 @@ namespace HeartopiaMod
             }
             yCur += 30f;
 
+            if (handle.UiInputAutoFocusToggle != null)
+            {
+                PlaceUguiTopLeft(handle.UiInputAutoFocusToggle.gameObject, rowX, yCur, rowW, 24f);
+            }
+            yCur += 30f;
+
             if (handle.AutoLikeOwnHomeToggle != null)
             {
                 PlaceUguiTopLeft(handle.AutoLikeOwnHomeToggle.gameObject, rowX, yCur, rowW, 24f);
@@ -963,6 +973,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.PetHeightLimitToggle, this.petHeightLimitBypassEnabled);
                 this.SyncUguiToggleFromField(handle.BlockTutorialsToggle, this.blockTutorials);
                 this.SyncUguiToggleFromField(handle.AutoLearnRecipesToggle, this.autoLearnRecipes);
+                this.SyncUguiToggleFromField(handle.UiInputAutoFocusToggle, this.uiInputAutoFocus);
                 this.SyncUguiToggleFromField(handle.AutoLikeOwnHomeToggle, this.autoLikeOwnHome);
                 this.SyncUguiToggleFromField(handle.FurnitureRepairToggle, this.autoFurnitureRepairEnabled);
 
@@ -1647,6 +1658,16 @@ namespace HeartopiaMod
                 return;
             }
             this.autoLearnRecipes = value;
+            try { this.SaveKeybinds(false); } catch { }
+        }
+
+        private void OnUguiSelfUiInputAutoFocusToggled(bool value)
+        {
+            if (value == this.uiInputAutoFocus)
+            {
+                return;
+            }
+            this.uiInputAutoFocus = value;
             try { this.SaveKeybinds(false); } catch { }
         }
 
