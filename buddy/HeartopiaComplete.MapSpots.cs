@@ -4316,6 +4316,14 @@ namespace HeartopiaMod
                 return targetId != 0 ? targetId : 1;
             }
 
+            // Insect/bird component markers have no scene GameObject. The netId (or farm position
+            // hash) in the marker name is stable across the 2s scan, so the map spot does not churn.
+            if (marker != null && this.TryParseCreatureRadarMarkerKey(marker.name, out uint creatureKey))
+            {
+                int stable = unchecked((int)creatureKey);
+                return stable != 0 ? stable : 1;
+            }
+
             int px = Mathf.RoundToInt(pos.x * 2f);
             int pz = Mathf.RoundToInt(pos.z * 2f);
             int hash;

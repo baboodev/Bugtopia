@@ -2007,7 +2007,9 @@ namespace HeartopiaMod
                         bool flag4 = gameObject.name.StartsWith("TrackedMarker_") || this.TryParseBubbleTrackedMarkerId(gameObject.name, out _)
                             || IsPetPoopTrackedMarkerName(gameObject.name)
                             || IsWildGiftAnimalTrackedMarkerName(gameObject.name)
-                            || IsRepairKitTrackedMarkerName(gameObject.name);
+                            || IsRepairKitTrackedMarkerName(gameObject.name)
+                            || IsInsectRadarMarkerName(gameObject.name)
+                            || IsBirdRadarMarkerName(gameObject.name);
                         bool flag5 = !flag4;
                         if (flag5)
                         {
@@ -2052,13 +2054,14 @@ namespace HeartopiaMod
             float radarDistanceLimit = Mathf.Max(25f, this.radarMaxDistance);
             // Land gatherables: LIVE scan, not the old hardcoded arrays. See ScanLandGatherables.
             this.ScanLandGatherables(position, material, material2, radarDistanceLimit);
-            // -- Throttled GameObject scan for bubble / bird-fallback / fish-shadow / meteor radars --
-            // FindObjectsOfType<GameObject>() is expensive. We throttle it to at most once every 2s
-            // inside RunRadar. We intentionally do NOT cache the result in a class field:
-            // storing IL2CPP native object references between frames causes native access-violation
-            // crashes when Unity destroys those objects while we still hold the C# wrapper.
-            bool needGOScan = this.showInsectRadar || this.showFishShadowRadar || this.showMeteorRadar
-                              || this.showBirdRadar || this.showOtherPlayersRadar;
+            // -- Throttled GameObject scan for fish-shadow / meteor / other-player radars --
+            // FindObjectsOfType<GameObject>() walks every scene object and was a ~2s hitch when insect
+            // or bird radar was on. Those two categories no longer force it: their markers come from
+            // Entities.GetComponents (SyncInsectRadarMarkers / SyncBirdRadarMarkers). The scene walk
+            // stays only for name-matched props that have no component query — fish shadows, meteors,
+            // and other-player skeletons. The result is not cached in a field: holding IL2CPP native
+            // object wrappers across frames access-violates once Unity destroys them.
+            bool needGOScan = this.showFishShadowRadar || this.showMeteorRadar || this.showOtherPlayersRadar;
             GameObject[] freshGOs = null;
             if (needGOScan && Time.unscaledTime - this._cachedRadarGameObjectsAt > RadarGOScanInterval)
             {
@@ -2109,55 +2112,29 @@ namespace HeartopiaMod
             }
 
 
-            // Match the older dedicated insect radar scan path from backup logic, but reuse the
-            // shared throttled scene scan so low-spec machines do not pay for a second full walk.
-            if (this.showInsectRadar && freshGOs != null)
+            // Insect markers: InsectComponent via GetComponents, not a scene walk. Showcase / vivarium
+            // props used to ride in because their GameObject names looked like wild insects.
+            if (this.showInsectRadar)
             {
-                this.radarCleanupTrackedIds.Clear();
-                foreach (KeyValuePair<int, GameObject> tracked in this.trackedObjectMarkers)
-                {
-                    if (tracked.Value == null)
-                    {
-                        this.radarCleanupTrackedIds.Add(tracked.Key);
-                    }
-                }
-                foreach (int trackedId in this.radarCleanupTrackedIds)
-                {
-                    this.trackedObjectMarkers.Remove(trackedId);
-                }
-
-                foreach (GameObject insectObject in freshGOs)
-                {
-                    if (insectObject == null || string.IsNullOrEmpty(insectObject.name))
-                    {
-                        continue;
-                    }
-
-                    // GameObject overload = name match + the display/aquarium exclusion
-                    // (IsDisplayInsectObject: vivarium components + aquarium/terrarium/decor
-                    // hierarchy). The old string overload tracked showcase insects too.
-                    if (!this.ShouldTrackInsectObject(insectObject))
-                    {
-                        continue;
-                    }
-
-                    if (!this.IsRadarInsectObjectAllowed(insectObject))
-                    {
-                        continue;
-                    }
-
-                    int insectInstanceId = insectObject.GetInstanceID();
-                    if (!this.trackedObjectMarkers.ContainsKey(insectInstanceId))
-                    {
-                        this.CreateMarker(insectObject.transform.position, "insect", material, material2, insectObject);
-                        this.RegisterTrackedMarkerForTarget(insectInstanceId, insectObject);
-                    }
-                }
+                this.SyncInsectRadarMarkers(position, material, material2);
+            }
+            else if (this.trackedInsectRadarMarkers.Count > 0)
+            {
+                this.ClearInsectRadarMarkers();
             }
 
+            // Bird markers: farm position cache when Auto Bird Farm already filled it, otherwise
+            // the same GetComponents classes as bird presence. Neither path walks the scene.
+            if (this.showBirdRadar)
+            {
+                this.SyncBirdRadarMarkers(position, material, material2);
+            }
+            else if (this.trackedBirdRadarMarkers.Count > 0)
+            {
+                this.ClearBirdRadarMarkers();
+            }
 
-            // Single combined scan for bubble / fish-shadow / meteor radar (GameObject name-matching).
-            // Birds are handled separately below via the farm's AuraMono position cache.
+            // Fish-shadow / meteor radar still name-matches the throttled scene snapshot.
             if ((this.showFishShadowRadar || this.showMeteorRadar) && freshGOs != null)
             {
                 Vector3 scanOrigin = position;
@@ -2189,36 +2166,6 @@ namespace HeartopiaMod
                         }
                     }
                     catch { /* destroyed native object - skip silently */ }
-                }
-            }
-
-            // -- Bird radar: NO Mono API calls here. ------------------------------------------
-            // When Auto Bird Farm is running, _auraMonoBirdRadarPositions is populated by
-            // the farm's entity scan (free -- no extra scan needed). We just read that list.
-            // When the farm is off we fall back to a fresh GO scan (same throttle as above).
-            if (this.showBirdRadar)
-            {
-                if (freshGOs != null)
-                {
-                    float maxBirdRange2 = Mathf.Max(25f, this.radarMaxDistance);
-                    foreach (GameObject candidate in freshGOs)
-                    {
-                        try
-                        {
-                            if (candidate == null || candidate.name == null) continue;
-                            if (!candidate.activeInHierarchy) continue;
-                            if (Vector3.Distance(position, candidate.transform.position) > maxBirdRange2) continue;
-                            if (!this.ShouldTrackBirdObject(candidate.name.ToLowerInvariant())) continue;
-                            if (!this.IsRadarBirdObjectAllowed(candidate)) continue;
-                            int instanceID = candidate.GetInstanceID();
-                            if (!this.trackedObjectMarkers.ContainsKey(instanceID))
-                            {
-                                this.CreateMarker(candidate.transform.position, "bird", material, material2, candidate);
-                                this.RegisterTrackedMarkerForTarget(instanceID, candidate);
-                            }
-                        }
-                        catch { /* destroyed native object - skip silently */ }
-                    }
                 }
             }
 
@@ -2871,6 +2818,762 @@ namespace HeartopiaMod
         }
 
         // Token: 0x06000018 RID: 24 RVA: 0x00005598 File Offset: 0x00003798
+        // Insect/bird radar markers. Keyed by entity netId (or a position hash when the only feed is
+        // the bird farm's position list). No IL2CPP GameObject is stored — those wrappers go stale
+        // across frames. The component scan itself is throttled to RadarGOScanInterval so RunRadar
+        // calls from the UI cannot GetComponents every time they fire.
+        private struct RadarCreatureSpot
+        {
+            public uint NetId;
+            public int ItemId;
+            public Vector3 Position;
+        }
+
+        private const string InsectRadarMarkerPrefix = "InsectRadarMarker_";
+        private const string BirdRadarMarkerPrefix = "BirdRadarMarker_";
+        private readonly Dictionary<uint, GameObject> trackedInsectRadarMarkers = new Dictionary<uint, GameObject>();
+        private readonly Dictionary<uint, int> insectRadarMarkerItemIds = new Dictionary<uint, int>();
+        private readonly Dictionary<uint, GameObject> trackedBirdRadarMarkers = new Dictionary<uint, GameObject>();
+        private readonly Dictionary<uint, int> birdRadarMarkerItemIds = new Dictionary<uint, int>();
+        private readonly List<RadarCreatureSpot> radarCreatureSpots = new List<RadarCreatureSpot>(64);
+        private readonly HashSet<uint> radarCreatureSeen = new HashSet<uint>();
+        private readonly List<uint> radarCreatureRemove = new List<uint>(32);
+        private readonly List<uint> radarCreaturePins = new List<uint>(64);
+        private readonly HashSet<uint> radarVivariumNetIds = new HashSet<uint>();
+        private float nextInsectRadarComponentScanAt = -999f;
+        private float nextBirdRadarComponentScanAt = -999f;
+
+        private void SyncInsectRadarMarkers(Vector3 origin, Material line, Material fill)
+        {
+            float now = Time.unscaledTime;
+            if (now < this.nextInsectRadarComponentScanAt)
+            {
+                return;
+            }
+
+            this.nextInsectRadarComponentScanAt = now + RadarGOScanInterval;
+            if (!this.TryCollectInsectRadarSpots(this.radarCreatureSpots))
+            {
+                return;
+            }
+
+            this.ApplyCreatureRadarSpots(this.radarCreatureSpots, this.trackedInsectRadarMarkers, this.insectRadarMarkerItemIds,
+                "insect", "Insect", InsectRadarMarkerPrefix, origin, line, fill);
+        }
+
+        private void SyncBirdRadarMarkers(Vector3 origin, Material line, Material fill)
+        {
+            // Auto Bird Farm already paid for a GetComponents (or photo-mode) scan and left positions
+            // in _auraMonoBirdRadarPositions. Reuse that list instead of scanning again. It has no
+            // netIds and no names, so a species allow-list still takes the component path below —
+            // IsRadarBirdObjectAllowed / IsBirdSpeciesAllowed need an id the position list does not carry.
+            if (BirdNetFarm.IsEnabled
+                && this.radarBirdSpeciesFilter.Count == 0
+                && this._auraMonoBirdRadarPositions.Count > 0)
+            {
+                this.SyncBirdRadarMarkersFromPositions(this._auraMonoBirdRadarPositions, origin, line, fill);
+                return;
+            }
+
+            float now = Time.unscaledTime;
+            if (now < this.nextBirdRadarComponentScanAt)
+            {
+                return;
+            }
+
+            this.nextBirdRadarComponentScanAt = now + RadarGOScanInterval;
+            if (!this.TryCollectBirdRadarSpots(this.radarCreatureSpots))
+            {
+                return;
+            }
+
+            this.ApplyCreatureRadarSpots(this.radarCreatureSpots, this.trackedBirdRadarMarkers, this.birdRadarMarkerItemIds,
+                "bird", "Bird", BirdRadarMarkerPrefix, origin, line, fill);
+        }
+
+        private void SyncBirdRadarMarkersFromPositions(List<Vector3> positions, Vector3 origin, Material line, Material fill)
+        {
+            this.radarCreatureSpots.Clear();
+            this.radarCreatureSeen.Clear();
+            for (int i = 0; i < positions.Count; i++)
+            {
+                Vector3 birdPosition = positions[i];
+                if (birdPosition == Vector3.zero)
+                {
+                    continue;
+                }
+
+                uint key = RadarPositionMarkerKey(birdPosition);
+                while (!this.radarCreatureSeen.Add(key))
+                {
+                    key++;
+                    if (key == 0U)
+                    {
+                        key = 1U;
+                    }
+                }
+
+                RadarCreatureSpot spot = new RadarCreatureSpot();
+                spot.NetId = key;
+                spot.ItemId = 0;
+                spot.Position = birdPosition;
+                this.radarCreatureSpots.Add(spot);
+            }
+
+            this.ApplyCreatureRadarSpots(this.radarCreatureSpots, this.trackedBirdRadarMarkers, this.birdRadarMarkerItemIds,
+                "bird", "Bird", BirdRadarMarkerPrefix, origin, line, fill);
+        }
+
+        // Same discovery as TryGetLoadedInsectTargetsViaGetComponents (InsectComponent via
+        // Entities.GetComponents, entity pinned for the field reads). Item id is read while the
+        // entity is still pinned so the species allow-list matches IsRadarInsectObjectAllowed /
+        // IsInsectNetIdAllowed without a second lookup. Returns false only when the query could
+        // not run; an empty world is a successful scan so stale markers are dropped.
+        private bool TryCollectInsectRadarSpots(List<RadarCreatureSpot> spots)
+        {
+            spots.Clear();
+            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                return false;
+            }
+
+            IntPtr insectClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Gameplay.Component.Insect.InsectComponent");
+            if (insectClass == IntPtr.Zero)
+            {
+                insectClass = this.FindAuraMonoClassByFullName("ScriptsRefactory.LevelAndEntity.Gameplay.Component.Insect.InsectComponent");
+            }
+
+            if (insectClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            this.CollectInsectVivariumNetIds(this.radarVivariumNetIds);
+            this.EnsureEntityResIdMethods();
+
+            FreeAuraMonoPins(this.radarCreaturePins);
+            bool queried = this.TryAuraMonoGetComponentObjects(insectClass, out List<IntPtr> components, out bool infrastructureOk, this.radarCreaturePins);
+            if (!infrastructureOk)
+            {
+                FreeAuraMonoPins(this.radarCreaturePins);
+                return false;
+            }
+
+            if (!queried || components == null)
+            {
+                FreeAuraMonoPins(this.radarCreaturePins);
+                return true;
+            }
+
+            bool filterSpecies = this.radarInsectSpeciesFilter.Count > 0;
+            this.radarCreatureSeen.Clear();
+            try
+            {
+                for (int i = 0; i < components.Count; i++)
+                {
+                    IntPtr componentObj = components[i];
+                    if (componentObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    IntPtr entityObj = IntPtr.Zero;
+                    if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                        && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                    {
+                        continue;
+                    }
+
+                    uint entityPin = AuraMonoPinNew(entityObj);
+                    try
+                    {
+                        if (!this.TryGetAuraMonoEntityNetId(entityObj, out uint netId) || netId == 0U || !this.radarCreatureSeen.Add(netId))
+                        {
+                            continue;
+                        }
+
+                        if (this.radarVivariumNetIds.Contains(netId))
+                        {
+                            continue;
+                        }
+
+                        string entityName = null;
+                        if (!this.TryGetMonoStringMember(entityObj, "name", out entityName))
+                        {
+                            this.TryGetMonoStringMember(entityObj, "_name", out entityName);
+                        }
+
+                        if (IsRadarInsectEntityNameDisplay(entityName))
+                        {
+                            continue;
+                        }
+
+                        if (!this.TryGetAuraMonoEntityPosition(entityObj, out Vector3 position) || position == Vector3.zero)
+                        {
+                            if (!this.TryGetEntityPositionByNetIdMono(netId, out position) && !this.TryGetEntityPositionByNetId(netId, out position))
+                            {
+                                continue;
+                            }
+                        }
+
+                        if (position == Vector3.zero)
+                        {
+                            continue;
+                        }
+
+                        int itemId = 0;
+                        this.TryGetCollectableStaticIdViaAura(entityObj, out itemId);
+                        if (itemId <= 0)
+                        {
+                            TryGetInsectItemIdFromPrefabName(entityName, out itemId);
+                        }
+
+                        // Same allow-list as IsRadarInsectObjectAllowed. An empty filter allows every id,
+                        // including 0 (name and res id both unread).
+                        if (filterSpecies && !this.IsInsectSpeciesAllowed(itemId))
+                        {
+                            continue;
+                        }
+
+                        RadarCreatureSpot spot = new RadarCreatureSpot();
+                        spot.NetId = netId;
+                        spot.ItemId = itemId;
+                        spot.Position = position;
+                        spots.Add(spot);
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(entityPin);
+                    }
+                }
+            }
+            catch
+            {
+                // A moved mono object mid-walk. Keep the spots already scalarized.
+            }
+            finally
+            {
+                FreeAuraMonoPins(this.radarCreaturePins);
+            }
+
+            return true;
+        }
+
+        // InsectInVivariumComponent is the display/aquarium insect the old GameObject filter rejected
+        // via GetComponent("InsectInVivariumComponent"). Wild InsectComponent entities are not in this set.
+        private void CollectInsectVivariumNetIds(HashSet<uint> netIds)
+        {
+            netIds.Clear();
+            IntPtr vivariumClass = this.FindAuraMonoClassByFullName("XDTLevelAndEntity.Gameplay.Component.Insect.InsectInVivariumComponent");
+            if (vivariumClass == IntPtr.Zero)
+            {
+                vivariumClass = this.FindAuraMonoClassByFullName("ScriptsRefactory.LevelAndEntity.Gameplay.Component.Insect.InsectInVivariumComponent");
+            }
+
+            if (vivariumClass == IntPtr.Zero)
+            {
+                return;
+            }
+
+            List<uint> pins = new List<uint>();
+            try
+            {
+                bool queried = this.TryAuraMonoGetComponentObjects(vivariumClass, out List<IntPtr> components, out bool infrastructureOk, pins);
+                if (!infrastructureOk || !queried || components == null)
+                {
+                    return;
+                }
+
+                for (int i = 0; i < components.Count; i++)
+                {
+                    IntPtr componentObj = components[i];
+                    if (componentObj == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    IntPtr entityObj = IntPtr.Zero;
+                    if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                        && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                    {
+                        continue;
+                    }
+
+                    uint entityPin = AuraMonoPinNew(entityObj);
+                    try
+                    {
+                        if (this.TryGetAuraMonoEntityNetId(entityObj, out uint netId) && netId != 0U)
+                        {
+                            netIds.Add(netId);
+                        }
+                    }
+                    finally
+                    {
+                        AuraMonoPinFree(entityPin);
+                    }
+                }
+            }
+            finally
+            {
+                FreeAuraMonoPins(pins);
+            }
+        }
+
+        // BirdComponent / BirdScannableComponent / PerchBirdComponent — the same classes
+        // TryFillBirdPresencePositions and TryCollectBirdFarmAuraBirdEntities query. Pins stay
+        // local to this call. Species filtering uses IsBirdSpeciesAllowed, which is the allow-list
+        // IsRadarBirdObjectAllowed applied through the prefab name on the old scene walk.
+        private bool TryCollectBirdRadarSpots(List<RadarCreatureSpot> spots)
+        {
+            spots.Clear();
+            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                return false;
+            }
+
+            this.TryResolveAuraMonoBirdComponentClasses(out IntPtr birdComponentClass, out IntPtr birdScannableClass, out IntPtr perchBirdComponentClass, out _, out _);
+            if (birdComponentClass == IntPtr.Zero && birdScannableClass == IntPtr.Zero && perchBirdComponentClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            bool committed = false;
+            bool filterSpecies = this.radarBirdSpeciesFilter.Count > 0;
+            this.radarCreatureSeen.Clear();
+            IntPtr[] classes = { birdComponentClass, birdScannableClass, perchBirdComponentClass };
+            try
+            {
+                for (int c = 0; c < classes.Length; c++)
+                {
+                    IntPtr cls = classes[c];
+                    if (cls == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    FreeAuraMonoPins(this.radarCreaturePins);
+                    bool queried = this.TryAuraMonoGetComponentObjects(cls, out List<IntPtr> components, out bool infrastructureOk, this.radarCreaturePins);
+                    if (infrastructureOk)
+                    {
+                        committed = true;
+                    }
+
+                    if (!queried || components == null)
+                    {
+                        continue;
+                    }
+
+                    for (int i = 0; i < components.Count; i++)
+                    {
+                        IntPtr componentObj = components[i];
+                        if (componentObj == IntPtr.Zero)
+                        {
+                            continue;
+                        }
+
+                        IntPtr entityObj = IntPtr.Zero;
+                        if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                            && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                        {
+                            continue;
+                        }
+
+                        uint entityPin = AuraMonoPinNew(entityObj);
+                        try
+                        {
+                            bool hasNetId = this.TryGetAuraMonoEntityNetId(entityObj, out uint netId) && netId != 0U;
+                            if (!hasNetId || this.radarCreatureSeen.Contains(netId))
+                            {
+                                continue;
+                            }
+
+                            string entityName = null;
+                            if (!this.TryGetMonoStringMember(entityObj, "name", out entityName))
+                            {
+                                this.TryGetMonoStringMember(entityObj, "_name", out entityName);
+                            }
+
+                            if (IsRadarBirdEntityNameRejected(entityName))
+                            {
+                                this.radarCreatureSeen.Add(netId);
+                                continue;
+                            }
+
+                            // Position miss does not consume the netId: another bird class on the
+                            // same entity may still resolve a position.
+                            if (!this.TryGetAuraMonoEntityPosition(entityObj, out Vector3 position) || position == Vector3.zero)
+                            {
+                                continue;
+                            }
+
+                            int itemId = this.TryReadBirdStaticIdViaAuraMonoObject(componentObj);
+                            if (itemId <= 0)
+                            {
+                                TryGetBirdItemIdFromPrefabName(entityName, out itemId);
+                            }
+
+                            if (itemId <= 0 && filterSpecies)
+                            {
+                                itemId = this.TryReadBirdStaticIdViaAuraMono(entityObj);
+                                if (itemId <= 0)
+                                {
+                                    itemId = this.TryGetEntityStaticId(netId);
+                                }
+                            }
+
+                            if (filterSpecies && !this.IsBirdSpeciesAllowed(itemId))
+                            {
+                                this.radarCreatureSeen.Add(netId);
+                                continue;
+                            }
+
+                            this.radarCreatureSeen.Add(netId);
+                            RadarCreatureSpot spot = new RadarCreatureSpot();
+                            spot.NetId = netId;
+                            spot.ItemId = itemId;
+                            spot.Position = position;
+                            spots.Add(spot);
+                        }
+                        finally
+                        {
+                            AuraMonoPinFree(entityPin);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // A moved mono object mid-walk. Keep the spots already scalarized.
+            }
+            finally
+            {
+                FreeAuraMonoPins(this.radarCreaturePins);
+            }
+
+            return committed;
+        }
+
+        private void ApplyCreatureRadarSpots(
+            List<RadarCreatureSpot> spots,
+            Dictionary<uint, GameObject> markers,
+            Dictionary<uint, int> itemIds,
+            string meshName,
+            string canonicalLabel,
+            string namePrefix,
+            Vector3 origin,
+            Material line,
+            Material fill)
+        {
+            this.radarCreatureSeen.Clear();
+            float maxRange = Mathf.Max(25f, this.radarMaxDistance);
+            float maxRangeSqr = maxRange * maxRange;
+            for (int i = 0; i < spots.Count; i++)
+            {
+                RadarCreatureSpot spot = spots[i];
+                if (spot.NetId == 0U || spot.Position == Vector3.zero)
+                {
+                    continue;
+                }
+
+                Vector3 delta = spot.Position - origin;
+                if (delta.sqrMagnitude > maxRangeSqr)
+                {
+                    continue;
+                }
+
+                if (!this.radarCreatureSeen.Add(spot.NetId))
+                {
+                    continue;
+                }
+
+                GameObject existing;
+                if (markers.TryGetValue(spot.NetId, out existing) && existing != null)
+                {
+                    existing.transform.position = spot.Position;
+                    if (spot.ItemId > 0)
+                    {
+                        itemIds[spot.NetId] = spot.ItemId;
+                        this.ApplyRadarCreatureMarkerIdentity(existing, canonicalLabel, spot.ItemId);
+                    }
+
+                    continue;
+                }
+
+                GameObject marker = this.CreateMarker(spot.Position, meshName, line, fill, null);
+                if (marker == null)
+                {
+                    continue;
+                }
+
+                marker.name = namePrefix + spot.NetId.ToString();
+                markers[spot.NetId] = marker;
+                itemIds[spot.NetId] = spot.ItemId;
+                this.ApplyRadarCreatureMarkerIdentity(marker, canonicalLabel, spot.ItemId);
+            }
+
+            this.radarCreatureRemove.Clear();
+            foreach (KeyValuePair<uint, GameObject> tracked in markers)
+            {
+                if (tracked.Value == null || !this.radarCreatureSeen.Contains(tracked.Key))
+                {
+                    this.radarCreatureRemove.Add(tracked.Key);
+                }
+            }
+
+            for (int i = 0; i < this.radarCreatureRemove.Count; i++)
+            {
+                uint key = this.radarCreatureRemove[i];
+                GameObject marker;
+                if (markers.TryGetValue(key, out marker) && marker != null)
+                {
+                    this.RemoveMarkerMetadata(marker);
+                    Object.Destroy(marker);
+                }
+
+                markers.Remove(key);
+                itemIds.Remove(key);
+            }
+        }
+
+        private void ApplyRadarCreatureMarkerIdentity(GameObject marker, string canonicalLabel, int itemId)
+        {
+            if (marker == null || itemId <= 0)
+            {
+                return;
+            }
+
+            RadarMarkerMetadata metadata = this.GetMarkerMetadata(marker);
+            if (metadata == null)
+            {
+                return;
+            }
+
+            metadata.MapSpeciesItemId = itemId;
+            if (this.TryGetRadarStaticIdIconKey(itemId, out string iconKey) && !string.IsNullOrWhiteSpace(iconKey))
+            {
+                metadata.SpecificIconKey = iconKey;
+                return;
+            }
+
+            EnsureRadarSpeciesIconKeys();
+            Dictionary<int, string> keys = string.Equals(canonicalLabel, "Insect", StringComparison.Ordinal)
+                ? radarInsectItemIconKeys
+                : radarBirdItemIconKeys;
+            string speciesKey;
+            if (keys != null && keys.TryGetValue(itemId, out speciesKey) && !string.IsNullOrWhiteSpace(speciesKey))
+            {
+                metadata.SpecificIconKey = speciesKey;
+            }
+        }
+
+        private void ClearInsectRadarMarkers()
+        {
+            this.ClearCreatureRadarMarkers(this.trackedInsectRadarMarkers, this.insectRadarMarkerItemIds);
+        }
+
+        private void ClearBirdRadarMarkers()
+        {
+            this.ClearCreatureRadarMarkers(this.trackedBirdRadarMarkers, this.birdRadarMarkerItemIds);
+        }
+
+        private void ClearCreatureRadarMarkers(Dictionary<uint, GameObject> markers, Dictionary<uint, int> itemIds)
+        {
+            foreach (KeyValuePair<uint, GameObject> entry in markers)
+            {
+                if (entry.Value != null)
+                {
+                    this.RemoveMarkerMetadata(entry.Value);
+                    Object.Destroy(entry.Value);
+                }
+            }
+
+            markers.Clear();
+            itemIds.Clear();
+        }
+
+        private void DestroyCreatureRadarMarker(GameObject marker)
+        {
+            if (marker == null)
+            {
+                return;
+            }
+
+            this.UntrackCreatureRadarMarker(marker);
+            this.RemoveMarkerMetadata(marker);
+            Object.Destroy(marker);
+        }
+
+        private void UntrackCreatureRadarMarker(GameObject marker)
+        {
+            this.UntrackCreatureRadarMarker(this.trackedInsectRadarMarkers, this.insectRadarMarkerItemIds, marker);
+            this.UntrackCreatureRadarMarker(this.trackedBirdRadarMarkers, this.birdRadarMarkerItemIds, marker);
+        }
+
+        private void UntrackCreatureRadarMarker(Dictionary<uint, GameObject> markers, Dictionary<uint, int> itemIds, GameObject marker)
+        {
+            if (marker == null || markers.Count == 0)
+            {
+                return;
+            }
+
+            uint removeKey = 0U;
+            bool found = false;
+            foreach (KeyValuePair<uint, GameObject> entry in markers)
+            {
+                if (entry.Value == marker)
+                {
+                    removeKey = entry.Key;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                return;
+            }
+
+            markers.Remove(removeKey);
+            itemIds.Remove(removeKey);
+        }
+
+        private void DropComponentRadarMarkersRejectedBySpeciesFilter(bool insects)
+        {
+            Dictionary<uint, GameObject> markers = insects ? this.trackedInsectRadarMarkers : this.trackedBirdRadarMarkers;
+            Dictionary<uint, int> itemIds = insects ? this.insectRadarMarkerItemIds : this.birdRadarMarkerItemIds;
+            if (markers.Count == 0)
+            {
+                return;
+            }
+
+            this.radarCreatureRemove.Clear();
+            foreach (KeyValuePair<uint, GameObject> entry in markers)
+            {
+                int itemId;
+                itemIds.TryGetValue(entry.Key, out itemId);
+                bool allowed = insects ? this.IsInsectSpeciesAllowed(itemId) : this.IsBirdSpeciesAllowed(itemId);
+                if (allowed)
+                {
+                    continue;
+                }
+
+                this.radarCreatureRemove.Add(entry.Key);
+            }
+
+            for (int i = 0; i < this.radarCreatureRemove.Count; i++)
+            {
+                uint key = this.radarCreatureRemove[i];
+                GameObject marker;
+                if (markers.TryGetValue(key, out marker) && marker != null)
+                {
+                    this.RemoveMarkerMetadata(marker);
+                    Object.Destroy(marker);
+                }
+
+                markers.Remove(key);
+                itemIds.Remove(key);
+            }
+
+            if (insects)
+            {
+                this.nextInsectRadarComponentScanAt = -999f;
+            }
+            else
+            {
+                this.nextBirdRadarComponentScanAt = -999f;
+            }
+        }
+
+        // Mono entity names are not Unity clone names. Only reject a string that already looks like
+        // the old scene-object filter (display keywords, or a clone that is not p_insect_insect).
+        private static bool IsRadarInsectEntityNameDisplay(string entityName)
+        {
+            if (string.IsNullOrEmpty(entityName))
+            {
+                return false;
+            }
+
+            string lower = entityName.ToLowerInvariant();
+            if (lower.Contains("vivarium") || lower.Contains("vivaruim") || lower.Contains("aquarium")
+                || lower.Contains("terrarium") || lower.Contains("insectarium") || lower.Contains("showcase"))
+            {
+                return true;
+            }
+
+            return lower.Contains("(clone)")
+                && lower.Contains("p_insect")
+                && !lower.Contains("p_insect_insect");
+        }
+
+        // Keeps ShouldTrackBirdObject's rejection of scanners and non-bird p_bird props when the
+        // entity name is a Unity clone name. A plain entity name is not rejected.
+        private static bool IsRadarBirdEntityNameRejected(string entityName)
+        {
+            if (string.IsNullOrEmpty(entityName))
+            {
+                return false;
+            }
+
+            string lower = entityName.ToLowerInvariant();
+            if (lower.Contains("birdscanner"))
+            {
+                return true;
+            }
+
+            return lower.Contains("(clone)")
+                && lower.Contains("p_bird")
+                && !lower.Contains("p_bird_bird");
+        }
+
+        private static uint RadarPositionMarkerKey(Vector3 position)
+        {
+            int x = Mathf.RoundToInt(position.x * 4f);
+            int y = Mathf.RoundToInt(position.y * 4f);
+            int z = Mathf.RoundToInt(position.z * 4f);
+            unchecked
+            {
+                uint key = (uint)(x * 73856093 ^ y * 19349663 ^ z * 83492791);
+                return key == 0U ? 1U : key;
+            }
+        }
+
+        private static bool IsInsectRadarMarkerName(string markerName)
+        {
+            return !string.IsNullOrEmpty(markerName)
+                && markerName.StartsWith(InsectRadarMarkerPrefix, StringComparison.Ordinal);
+        }
+
+        private static bool IsBirdRadarMarkerName(string markerName)
+        {
+            return !string.IsNullOrEmpty(markerName)
+                && markerName.StartsWith(BirdRadarMarkerPrefix, StringComparison.Ordinal);
+        }
+
+        private bool TryParseCreatureRadarMarkerKey(string markerName, out uint key)
+        {
+            key = 0U;
+            if (string.IsNullOrEmpty(markerName))
+            {
+                return false;
+            }
+
+            string rest;
+            if (markerName.StartsWith(InsectRadarMarkerPrefix, StringComparison.Ordinal))
+            {
+                rest = markerName.Substring(InsectRadarMarkerPrefix.Length);
+            }
+            else if (markerName.StartsWith(BirdRadarMarkerPrefix, StringComparison.Ordinal))
+            {
+                rest = markerName.Substring(BirdRadarMarkerPrefix.Length);
+            }
+            else
+            {
+                return false;
+            }
+
+            return uint.TryParse(rest, out key) && key != 0U;
+        }
+
         private GameObject CreateMarker(Vector3 pos, string meshName, Material xRay, Material bg, GameObject targetObject = null)
         {
             bool flag = meshName.Contains("step0") || meshName.Contains("_cooldown") || meshName == "blueberry_cooldown" || meshName == "raspberry_cooldown";
@@ -3430,6 +4133,23 @@ namespace HeartopiaMod
 
                             child.position = morphPos;
                         }
+                        else if (IsInsectRadarMarkerName(gameObject.name))
+                        {
+                            // No scene GameObject to follow. Position is written by the component scan.
+                            if (!this.showInsectRadar)
+                            {
+                                this.DestroyCreatureRadarMarker(gameObject);
+                                goto IL_505;
+                            }
+                        }
+                        else if (IsBirdRadarMarkerName(gameObject.name))
+                        {
+                            if (!this.showBirdRadar)
+                            {
+                                this.DestroyCreatureRadarMarker(gameObject);
+                                goto IL_505;
+                            }
+                        }
 
                         float num = Vector3.Distance(position, child.position);
                         float markerMaxDistance = isBubbleTrackedMarker
@@ -3438,6 +4158,11 @@ namespace HeartopiaMod
                         bool flag3 = num > markerMaxDistance;
                         if (flag3)
                         {
+                            if (IsInsectRadarMarkerName(gameObject.name) || IsBirdRadarMarkerName(gameObject.name))
+                            {
+                                this.UntrackCreatureRadarMarker(gameObject);
+                            }
+
                             this.RemoveMarkerMetadata(gameObject);
                             Object.Destroy(gameObject);
                             if (isBubbleTrackedMarker)

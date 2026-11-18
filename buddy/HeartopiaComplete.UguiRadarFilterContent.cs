@@ -326,6 +326,7 @@ namespace HeartopiaMod
 
         private void DropRadarMarkersRejectedBySpeciesFilter(bool insects)
         {
+            this.DropComponentRadarMarkersRejectedBySpeciesFilter(insects);
             if (this.trackedObjectMarkers.Count == 0)
             {
                 return;

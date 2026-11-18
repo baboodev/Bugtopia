@@ -831,8 +831,17 @@ namespace HeartopiaMod
                             Set = v =>
                             {
                                 this.showBirdRadar = v;
-                                if (!this.showBirdRadar)
+                                if (this.showBirdRadar)
                                 {
+                                    this.nextBirdRadarComponentScanAt = -999f;
+                                    if (this.isRadarActive)
+                                    {
+                                        this.RunRadar();
+                                    }
+                                }
+                                else
+                                {
+                                    this.ClearBirdRadarMarkers();
                                     this.RemoveTrackedMarkersByNameContains("p_bird_bird");
                                     this.RemoveTrackedMarkersByNameContains("p_bird_");
                                     this.RemoveTrackedMarkersByNameContains("bird");
@@ -849,6 +858,7 @@ namespace HeartopiaMod
                                 this.showInsectRadar = v;
                                 if (this.showInsectRadar)
                                 {
+                                    this.nextInsectRadarComponentScanAt = -999f;
                                     if (this.isRadarActive)
                                     {
                                         this.RunRadar();
@@ -856,6 +866,7 @@ namespace HeartopiaMod
                                 }
                                 else
                                 {
+                                    this.ClearInsectRadarMarkers();
                                     this.RemoveTrackedMarkersByNameContains("p_insect_insect");
                                     this.RemoveTrackedMarkersByNameContains("p_insect_");
                                     this.RemoveTrackedMarkersByNameContains("insect");
@@ -1336,6 +1347,8 @@ namespace HeartopiaMod
             this.showPetPoopRadar = true;
             this.showOtherPlayersRadar = true;
             this.CheckRadarAutoToggle();
+            this.nextInsectRadarComponentScanAt = -999f;
+            this.nextBirdRadarComponentScanAt = -999f;
             if (this.isRadarActive)
             {
                 this.RunRadar();
@@ -1404,6 +1417,8 @@ namespace HeartopiaMod
             {
                 return;
             }
+            this.nextInsectRadarComponentScanAt = -999f;
+            this.nextBirdRadarComponentScanAt = -999f;
             this.RunRadar();
         }
 

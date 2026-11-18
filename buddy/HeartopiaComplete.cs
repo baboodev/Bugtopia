@@ -3096,6 +3096,8 @@ namespace HeartopiaMod
             this.trackedWildGiftAnimalMarkers.Clear();
             this.trackedRepairKitMarkers.Clear();
             this.ClearHideAndSeekMorphMarkers();
+            this.ClearInsectRadarMarkers();
+            this.ClearBirdRadarMarkers();
             this.bubbleRadarTrackedPositions.Clear();
             this.bubbleRadarSnapshotPositions.Clear();
             this.bubbleRadarSceneTargets.Clear();

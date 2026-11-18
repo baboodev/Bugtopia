@@ -4554,26 +4554,24 @@ namespace HeartopiaMod
                 && !lowerName.Contains("birdscanner");
         }
 
-        // ── Tool-independent bird PRESENCE proxy (combined-farm census) ───────────────────────────
-        // The farm's real target list comes from GamePhotoMode._birdScannables, which the game only
-        // maintains while the bird scanner is actively ticking — with the rod or the net in hand it
-        // goes stale, so it cannot answer "are there birds here?" for an arbitration decision. The
-        // loaded-entity fallback is hard-disabled (birdFarmDisableAuraEntityScan). What is always
-        // available is the prefab name: the same `p_bird_bird*(Clone)` filter the bird radar uses.
+        // Tool-independent bird presence for the combined-farm census. GamePhotoMode._birdScannables
+        // is only maintained while the bird scanner is ticking, so it cannot answer "are there birds
+        // here?" with another tool in hand. The cache is a direct Entities.GetComponents query of
+        // BirdComponent / BirdScannableComponent / PerchBirdComponent — the same classes as
+        // TryCollectBirdFarmAuraBirdEntities — and never falls back to a scene-wide GameObject scan.
         //
-        // Presence + position is all the arbiter needs; netId/staticId resolution stays inside the
-        // bird slice where the scanner is out. Deliberately NOT built on GetTrackedBirdObjects(),
-        // which walks markerToTarget and therefore only works while the radar is on.
-        //
-        // Object lifetime: the scan reduces to Vector3 (a value type) inside the same frame and
-        // NEVER stores the GameObject references — holding IL2CPP wrappers across frames AVs when
-        // Unity destroys the object (the rule stated at HeartopiaComplete.Radar.cs:2126). The
-        // positions cache is range-independent, so every caller can filter with its own radius.
+        // Only Vector3 positions are stored. Component and entity mono objects are pinned for the
+        // read and released before this method returns. Species filtering uses
+        // IsBirdSpeciesAllowed(staticId), the same allow-list as the GetComponents bird scan, so a
+        // filtered-out species cannot pull Combined Farm onto the bird slice. The cache is
+        // range-independent; callers apply their own radius.
         private readonly List<Vector3> birdPresencePositions = new List<Vector3>(64);
+        private readonly HashSet<uint> birdPresenceSeenNetIds = new HashSet<uint>();
         private float nextBirdPresenceScanAt = -999f;
         private float lastBirdPresenceScanAt = -999f;
         private const float BirdPresenceScanInterval = 2f;
         private const float BirdPresenceEmptyScanInterval = 3f;
+        private const float BirdPresenceNotReadyRetry = 0.5f;
         private const int BirdPresenceMaxTracked = 256;
 
         public bool TryScanBirdObjectsNearby(float scanRange, out int inRangeCount, out Vector3 nearestPos, out float nearestDistance, out string status)
@@ -4645,44 +4643,151 @@ namespace HeartopiaMod
 
         private void RefreshBirdPresencePositions(float now)
         {
-            this.birdPresencePositions.Clear();
-
-            try
+            if (!this.TryFillBirdPresencePositions())
             {
-                GameObject[] sourceObjects = UnityEngine.Object.FindObjectsOfType<GameObject>();
-                for (int i = 0; i < sourceObjects.Length && this.birdPresencePositions.Count < BirdPresenceMaxTracked; i++)
-                {
-                    GameObject obj = sourceObjects[i];
-                    if (obj == null || obj.name == null || !obj.activeInHierarchy)
-                    {
-                        continue;
-                    }
-
-                    if (!this.ShouldTrackBirdObject(obj.name.ToLowerInvariant()))
-                    {
-                        continue;
-                    }
-
-                    // Same prefab-name allow-list the radar uses. The census only stores positions,
-                    // and an unfiltered count makes Combined Farm switch to the bird slice and equip
-                    // the scanner for species the filter rejected.
-                    if (!this.IsRadarBirdObjectAllowed(obj))
-                    {
-                        continue;
-                    }
-
-                    this.birdPresencePositions.Add(obj.transform.position);
-                }
-            }
-            catch
-            {
-                // A destroyed native object mid-walk — keep whatever was collected.
+                // GetComponents is not ready, or the bird classes are not loaded yet. Keep the
+                // previous positions and retry shortly. Do not walk the scene.
+                this.nextBirdPresenceScanAt = now + BirdPresenceNotReadyRetry;
+                return;
             }
 
             this.lastBirdPresenceScanAt = now;
             this.nextBirdPresenceScanAt = now + (this.birdPresencePositions.Count > 0
                 ? BirdPresenceScanInterval
                 : BirdPresenceEmptyScanInterval);
+        }
+
+        // Returns false only when the query could not run. An empty world is a successful scan
+        // (the caller then uses the longer empty interval). Pins are local to this call.
+        private bool TryFillBirdPresencePositions()
+        {
+            if (!this.TryHomelandFarmIsAuraMonoGetComponentsReady(out _))
+            {
+                return false;
+            }
+
+            this.TryResolveAuraMonoBirdComponentClasses(out IntPtr birdComponentClass, out IntPtr birdScannableClass, out IntPtr perchBirdComponentClass, out _, out _);
+            if (birdComponentClass == IntPtr.Zero && birdScannableClass == IntPtr.Zero && perchBirdComponentClass == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            bool committed = false;
+            bool filterSpecies = this.radarBirdSpeciesFilter.Count > 0;
+            IntPtr[] classes = { birdComponentClass, birdScannableClass, perchBirdComponentClass };
+            try
+            {
+                // Do not gate this loop on the previous cache size. A full cache must still be
+                // replaced, and the cap applies only after that cache has been cleared.
+                for (int c = 0; c < classes.Length; c++)
+                {
+                    if (committed && this.birdPresencePositions.Count >= BirdPresenceMaxTracked)
+                    {
+                        break;
+                    }
+
+                    IntPtr cls = classes[c];
+                    if (cls == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    List<uint> compPins = new List<uint>();
+                    try
+                    {
+                        bool queried = this.TryAuraMonoGetComponentObjects(cls, out List<IntPtr> components, out bool infrastructureOk, compPins);
+                        if (infrastructureOk && !committed)
+                        {
+                            this.birdPresencePositions.Clear();
+                            this.birdPresenceSeenNetIds.Clear();
+                            committed = true;
+                        }
+
+                        if (!queried || components == null)
+                        {
+                            continue;
+                        }
+
+                        for (int i = 0; i < components.Count && this.birdPresencePositions.Count < BirdPresenceMaxTracked; i++)
+                        {
+                            IntPtr componentObj = components[i];
+                            if (componentObj == IntPtr.Zero)
+                            {
+                                continue;
+                            }
+
+                            IntPtr entityObj = IntPtr.Zero;
+                            if ((!this.TryGetMonoObjectMember(componentObj, "entity", out entityObj) || entityObj == IntPtr.Zero)
+                                && (!this.TryGetMonoObjectMember(componentObj, "_entity", out entityObj) || entityObj == IntPtr.Zero))
+                            {
+                                continue;
+                            }
+
+                            uint entityPin = AuraMonoPinNew(entityObj);
+                            try
+                            {
+                                bool hasNetId = this.TryGetAuraMonoEntityNetId(entityObj, out uint netId) && netId != 0U;
+                                if (hasNetId && this.birdPresenceSeenNetIds.Contains(netId))
+                                {
+                                    continue;
+                                }
+
+                                if (!this.TryGetAuraMonoEntityPosition(entityObj, out Vector3 position) || position == Vector3.zero)
+                                {
+                                    continue;
+                                }
+
+                                if (filterSpecies)
+                                {
+                                    // The component is already pinned. Read its id before falling
+                                    // back to the entity-wide GetAllComponents walk.
+                                    int staticId = this.TryReadBirdStaticIdViaAuraMonoObject(componentObj);
+                                    if (staticId <= 0)
+                                    {
+                                        staticId = this.TryReadBirdStaticIdViaAuraMono(entityObj);
+                                    }
+
+                                    if (staticId <= 0 && hasNetId)
+                                    {
+                                        staticId = this.TryGetEntityStaticId(netId);
+                                    }
+
+                                    if (!this.IsBirdSpeciesAllowed(staticId))
+                                    {
+                                        if (hasNetId)
+                                        {
+                                            this.birdPresenceSeenNetIds.Add(netId);
+                                        }
+
+                                        continue;
+                                    }
+                                }
+
+                                if (hasNetId)
+                                {
+                                    this.birdPresenceSeenNetIds.Add(netId);
+                                }
+
+                                this.birdPresencePositions.Add(position);
+                            }
+                            finally
+                            {
+                                AuraMonoPinFree(entityPin);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        FreeAuraMonoPins(compPins);
+                    }
+                }
+            }
+            catch
+            {
+                // A moved or destroyed mono object mid-walk — keep whatever was collected.
+            }
+
+            return committed;
         }
 
         // Token: 0x06000020 RID: 32 RVA: 0x000061FC File Offset: 0x000043FC
