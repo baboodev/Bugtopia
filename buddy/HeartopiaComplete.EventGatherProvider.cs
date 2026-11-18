@@ -116,8 +116,8 @@ namespace HeartopiaMod
                 return enabled;
             }
 
-            // Newly seen festival ids appear already enabled.
-            return true;
+            // Session-only like mushrooms / berries: unknown ids start off until the user checks them.
+            return false;
         }
 
         internal void InvalidateEventGatherProvider()

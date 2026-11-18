@@ -1949,8 +1949,8 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
   the game clock. Tasks loaded for that window also stay up when their own `DuringPeriod` is still open:
   loot bushes (`CollectItem` joined to the gather prefab stem, puzzle `_dynamicBushType == 4` dropped)
   and the hollow-tree shape (`treehole` / `perch` plus a task description that mentions 空心 or 翻找).
-  When the window ends the row disappears and Aura Farm stops treating it as a bush. New ids default
-  to on for the session only — category toggles are not persisted (same as mushrooms / berries).
+  When the window ends the row disappears and Aura Farm stops treating it as a bush. Rows start
+  unchecked each session — category toggles are not persisted (same as mushrooms / berries).
   Honey Mushroom and Hollow Tree keep those English labels so foraging filters still match them.
   Implementation: `HeartopiaComplete.EventGatherProvider.cs`.
 - **Misc → Dog Poop** — pet droppings (Entity 7100). Not a prefab scan: markers come from the
