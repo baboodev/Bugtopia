@@ -1,4 +1,4 @@
-﻿﻿using HarmonyLib;
+﻿using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppInterop.Runtime.Runtime;
@@ -1285,26 +1285,45 @@ namespace HeartopiaMod
                 this.cachedAuraMonoEntitiesManagerClass = entitiesClass;
             }
 
-            IntPtr getEntityMethod = this.cachedAuraMonoEntitiesGetEntityMethod;
-            if (getEntityMethod == IntPtr.Zero)
+            if (this.cachedAuraMonoEntitiesGetEntityMethod == IntPtr.Zero)
             {
-                getEntityMethod = this.FindAuraMonoMethodOnHierarchy(entitiesClass, "GetEntity", 1);
-                if (getEntityMethod == IntPtr.Zero)
-                {
-                    getEntityMethod = this.FindAuraMonoMethodOnHierarchy(entitiesClass, "GetAnyEntity", 1);
-                }
-                if (getEntityMethod == IntPtr.Zero)
-                {
-                    return false;
-                }
+                this.cachedAuraMonoEntitiesGetEntityMethod = this.FindAuraMonoMethodOnHierarchy(entitiesClass, "GetEntity", 1);
+            }
 
-                this.cachedAuraMonoEntitiesGetEntityMethod = getEntityMethod;
+            if (this.cachedAuraMonoEntitiesGetAnyEntityMethod == IntPtr.Zero)
+            {
+                this.cachedAuraMonoEntitiesGetAnyEntityMethod = this.FindAuraMonoMethodOnHierarchy(entitiesClass, "GetAnyEntity", 1);
+            }
+
+            if (this.cachedAuraMonoEntitiesGetEntityMethod == IntPtr.Zero
+                && this.cachedAuraMonoEntitiesGetAnyEntityMethod == IntPtr.Zero)
+            {
+                return false;
             }
 
             IntPtr* args = stackalloc IntPtr[1];
             args[0] = (IntPtr)(&netId);
             IntPtr exc = IntPtr.Zero;
-            entityObj = auraMonoRuntimeInvoke(getEntityMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+
+            // Prefer GetEntity (level/world objects). Insects/birds are creature entities and only
+            // resolve through GetAnyEntity — a null GetEntity result is not a hard miss.
+            if (this.cachedAuraMonoEntitiesGetEntityMethod != IntPtr.Zero)
+            {
+                entityObj = auraMonoRuntimeInvoke(this.cachedAuraMonoEntitiesGetEntityMethod, IntPtr.Zero, (IntPtr)args, ref exc);
+                if (exc == IntPtr.Zero && entityObj != IntPtr.Zero)
+                {
+                    return true;
+                }
+            }
+
+            if (this.cachedAuraMonoEntitiesGetAnyEntityMethod == IntPtr.Zero)
+            {
+                entityObj = IntPtr.Zero;
+                return false;
+            }
+
+            exc = IntPtr.Zero;
+            entityObj = auraMonoRuntimeInvoke(this.cachedAuraMonoEntitiesGetAnyEntityMethod, IntPtr.Zero, (IntPtr)args, ref exc);
             return exc == IntPtr.Zero && entityObj != IntPtr.Zero;
         }
 
@@ -1545,27 +1564,8 @@ namespace HeartopiaMod
                 this.cachedAuraMonoEntitiesManagerClass = entitiesClass;
             }
 
-            IntPtr getEntityMethod = this.cachedAuraMonoEntitiesGetEntityMethod;
-            if (getEntityMethod == IntPtr.Zero)
-            {
-                getEntityMethod = this.FindAuraMonoMethodOnHierarchy(entitiesClass, "GetEntity", 1);
-                if (getEntityMethod == IntPtr.Zero)
-                {
-                    getEntityMethod = this.FindAuraMonoMethodOnHierarchy(entitiesClass, "GetAnyEntity", 1);
-                }
-                if (getEntityMethod == IntPtr.Zero)
-                {
-                    return false;
-                }
-
-                this.cachedAuraMonoEntitiesGetEntityMethod = getEntityMethod;
-            }
-
-            IntPtr* args = stackalloc IntPtr[1];
-            args[0] = (IntPtr)(&netId);
-            IntPtr exc = IntPtr.Zero;
-            IntPtr entityObj = auraMonoRuntimeInvoke(getEntityMethod, IntPtr.Zero, (IntPtr)args, ref exc);
-            if (exc != IntPtr.Zero || entityObj == IntPtr.Zero)
+            IntPtr entityObj;
+            if (!this.TryGetAuraMonoEntityObjectByNetId(netId, out entityObj) || entityObj == IntPtr.Zero)
             {
                 return false;
             }

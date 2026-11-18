@@ -205,6 +205,16 @@ namespace HeartopiaMod
             try
             {
                 this.TryGetCollectableStaticIdViaAura(entityObj, out itemId);
+                if (itemId <= 0)
+                {
+                    string entityName = null;
+                    if (!this.TryGetMonoStringMember(entityObj, "name", out entityName))
+                    {
+                        this.TryGetMonoStringMember(entityObj, "_name", out entityName);
+                    }
+
+                    TryGetInsectItemIdFromPrefabName(entityName, out itemId);
+                }
             }
             finally
             {

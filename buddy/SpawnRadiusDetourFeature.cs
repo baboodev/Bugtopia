@@ -43,6 +43,9 @@ namespace HeartopiaMod
         private static int spawnRadiusPendingInsectCount;
         private static int spawnRadiusPendingBirdCount;
         // One InsectFly per netId, fired from the loaded-insect scan, never from the detour.
+        // Independent of InsectNetFarm scan range: with scan at 200 m the old "farther than scan"
+        // gate never fired for map markers at 40-60 m, so habitat-snapped insects stayed remote.
+        private const float SpawnRadiusInsectPullNearMeters = 12f;
         private const float SpawnRadiusInsectPullInterval = 1f;
         private const int SpawnRadiusInsectPullsPerScan = 8;
         private static float spawnRadiusInsectPullAt;
@@ -443,8 +446,9 @@ namespace HeartopiaMod
         }
 
         // Same census the insect farm uses (Entities.GetComponents<InsectComponent>, then the radar
-        // species filter). Catch radius is InsectNetFarm scan range. Anything farther gets one
-        // InsectFly to the cached point with a zero habitat id, so GetTargetPos keeps the vector.
+        // species filter). Anything farther than SpawnRadiusInsectPullNearMeters gets one InsectFly
+        // to the cached point with a zero habitat id, so GetTargetPos keeps the vector (spawn rewrite
+        // alone is not enough — the view snaps onto the habitat level object).
         private void PullFarInsectsOnce(Vector3 anchor)
         {
             float now = Time.unscaledTime;
@@ -468,8 +472,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            float range = InsectNetFarm.GetScanRange();
-            float rangeSqr = range * range;
+            float nearSqr = SpawnRadiusInsectPullNearMeters * SpawnRadiusInsectPullNearMeters;
             int count = ids.Count < positions.Count ? ids.Count : positions.Count;
             int sent = 0;
             for (int i = 0; i < count && sent < SpawnRadiusInsectPullsPerScan; i++)
@@ -484,7 +487,7 @@ namespace HeartopiaMod
                 float dx = pos.x - anchor.x;
                 float dy = pos.y - anchor.y;
                 float dz = pos.z - anchor.z;
-                if (dx * dx + dy * dy + dz * dz <= rangeSqr)
+                if (dx * dx + dy * dy + dz * dz <= nearSqr)
                 {
                     continue;
                 }

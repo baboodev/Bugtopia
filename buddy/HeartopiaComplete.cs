@@ -4917,11 +4917,13 @@ namespace HeartopiaMod
         private IntPtr cachedBirdPhotoDetailInfoStandNetIdField = IntPtr.Zero;
         private bool cachedBirdPhotoDetailInfoFieldsResolved = false;
         private readonly Dictionary<AuraMonoMethodCacheKey, IntPtr> auraMonoMethodLookupCache = new Dictionary<AuraMonoMethodCacheKey, IntPtr>();
-        // Cached EntitiesManager class + GetEntity method so per-entity netId->object resolution
+        // Cached EntitiesManager class + GetEntity/GetAnyEntity so per-entity netId->object resolution
         // (TryGetAuraMonoEntityObjectByNetId) does not repeat FindAuraMonoImage / class-from-name
         // on every call. Mono class/method pointers are stable for the process lifetime.
+        // GetEntity misses insects/birds (creature entities); GetAnyEntity finds them.
         private IntPtr cachedAuraMonoEntitiesManagerClass = IntPtr.Zero;
         private IntPtr cachedAuraMonoEntitiesGetEntityMethod = IntPtr.Zero;
+        private IntPtr cachedAuraMonoEntitiesGetAnyEntityMethod = IntPtr.Zero;
         private readonly Dictionary<AuraMonoFieldCacheKey, IntPtr> auraMonoFieldLookupCache = new Dictionary<AuraMonoFieldCacheKey, IntPtr>();
         private readonly HashSet<uint> _birdFarmSeenNetIds = new HashSet<uint>();
         // Component verification cache: once we know a netId is (or is not) a real bird,
