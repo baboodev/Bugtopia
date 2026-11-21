@@ -119,6 +119,15 @@ namespace HeartopiaMod
         // case where 1003 is missing from that list.
         private const int DailyClaimsNewLifeLogActivityId = 1003;
 
+        // Friendship Fire / Little Pony Harmony Restored (GameActivity 1154). Commission + duo
+        // gift-box rewards are NOT ReceiveReward nodes — the panel sends
+        // ClaimFriendshipFireCommissionRewardNetworkCommand. Contribution milestones on the bottom
+        // bar ARE WaitClaim nodes and stay on the sign-in / activity sweep. Activity ids come from
+        // TableFriendshipFireConfigs; 1154 is the fallback when that table has not loaded yet.
+        private const int DailyClaimsFriendshipFireFallbackActivityId = 1154;
+        private readonly HashSet<int> dailyClaimsFriendshipFireActivityIds = new HashSet<int>();
+        private bool dailyClaimsFriendshipFireActivityIdsLoaded;
+
         // Every live puzzle-sign panel (Little Pony, Goat, Sanrio, Little Pony 2026, …) is
         // PuzzleSignActivity, registered under GameActivity(1041), with its own activityId.
         // LittlePonySignWidget.OnClickPuzzle sends UncoverPuzzle; the reward line is ReceiveReward,
@@ -1120,6 +1129,39 @@ namespace HeartopiaMod
             else
             {
                 lines.Add("activity mission scan failed: " + missionScanStatus);
+            }
+
+            // 2b. Friendship Fire commission / duo gifts (ChildActivity red point on activity 1154).
+            // Contribution milestones stay on ClaimSignInRewards / ReceiveReward above.
+            if (this.DailyClaimsEnsureFriendshipFireActivityIds(out string fireTableStatus))
+            {
+                int fireSent = 0;
+                foreach (int fireActivityId in this.dailyClaimsFriendshipFireActivityIds)
+                {
+                    if (!alive.Contains(fireActivityId))
+                    {
+                        continue;
+                    }
+
+                    if (this.TryClaimDailyClaimsFriendshipFireRewards(fireActivityId, out string fireStatus))
+                    {
+                        sent++;
+                        fireSent++;
+                        lines.Add("friendship fire activityId=" + fireActivityId + " (" + fireStatus + ")");
+                    }
+                    else
+                    {
+                        lines.Add("FAILED friendship fire activityId=" + fireActivityId + " (" + fireStatus + ")");
+                    }
+
+                    yield return ModWait.Realtime(DailyClaimsCommandSpacingSeconds);
+                }
+
+                lines.Add("friendship fire: " + fireTableStatus + ", claimedPasses=" + fireSent);
+            }
+            else
+            {
+                lines.Add("friendship fire table: " + fireTableStatus);
             }
 
             // 3. Sticker theme bonuses. StickerThemeBonus ships 1-2 tiers per theme, so both node
@@ -3938,6 +3980,92 @@ namespace HeartopiaMod
                 "ReceiveReward",
                 args,
                 out status);
+        }
+
+        // ==========================================================================================
+        // Friendship Fire (Little Pony Harmony Restored) — commission + duo gift boxes
+        //
+        // ActivityLittlePonyFriendShipFlamePanelLogic.ClaimReward sends
+        // ClaimFriendshipFireCommissionRewardNetworkCommand{ActivityId, IsDuoActionReward}. The UI
+        // only enables the gift when HasClaimableTaskReward is true (under daily sparkle cap AND
+        // commission/duo completed-but-unclaimed). Auto-claim uses the ChildActivity red point as
+        // that same gate, then sends both halves; the server rejects whichever is not owed.
+        // ==========================================================================================
+
+        private bool DailyClaimsEnsureFriendshipFireActivityIds(out string status)
+        {
+            if (this.dailyClaimsFriendshipFireActivityIdsLoaded
+                && this.dailyClaimsFriendshipFireActivityIds.Count > 0)
+            {
+                status = "cached " + this.dailyClaimsFriendshipFireActivityIds.Count;
+                return true;
+            }
+
+            this.dailyClaimsFriendshipFireActivityIds.Clear();
+            bool walked = this.DailyClaimsForEachTableRow("TableFriendshipFireConfigs", row =>
+            {
+                if (this.TryGetMonoInt32Member(row, "activityId", out int activityId) && activityId > 0)
+                {
+                    this.dailyClaimsFriendshipFireActivityIds.Add(activityId);
+                }
+            }, out status);
+
+            if (!walked || this.dailyClaimsFriendshipFireActivityIds.Count == 0)
+            {
+                this.dailyClaimsFriendshipFireActivityIds.Add(DailyClaimsFriendshipFireFallbackActivityId);
+                status = (walked ? status + "; " : string.Empty)
+                    + "fallback activityId=" + DailyClaimsFriendshipFireFallbackActivityId;
+            }
+
+            this.dailyClaimsFriendshipFireActivityIdsLoaded = true;
+            return true;
+        }
+
+        private bool DailyClaimsIsFriendshipFireActivity(int activityId)
+        {
+            if (activityId <= 0)
+            {
+                return false;
+            }
+
+            this.DailyClaimsEnsureFriendshipFireActivityIds(out _);
+            return this.dailyClaimsFriendshipFireActivityIds.Contains(activityId);
+        }
+
+        private bool TryClaimDailyClaimsFriendshipFireCommission(
+            int activityId, bool isDuoActionReward, out string status)
+        {
+            Dictionary<string, object> fields = new Dictionary<string, object>(2, StringComparer.Ordinal)
+            {
+                ["ActivityId"] = activityId,
+                ["IsDuoActionReward"] = isDuoActionReward
+            };
+
+            if (!this.TryAuraSendCommand(
+                    "XDT.Scene.Shared.Modules.OperationActivityCenter.ClaimFriendshipFireCommissionRewardNetworkCommand",
+                    fields,
+                    AuraChannelReliable,
+                    true,
+                    out status))
+            {
+                return false;
+            }
+
+            status = "AuraMono SendCommand ClaimFriendshipFireCommissionReward ok duo="
+                + isDuoActionReward;
+            return true;
+        }
+
+        // Both halves in one call. ChildActivity lit ⇒ under the daily cap and at least one half is
+        // owed; sending the other is rejected by the server and costs one command.
+        private bool TryClaimDailyClaimsFriendshipFireRewards(int activityId, out string status)
+        {
+            bool commission = this.TryClaimDailyClaimsFriendshipFireCommission(
+                activityId, false, out string commissionStatus);
+            bool duo = this.TryClaimDailyClaimsFriendshipFireCommission(
+                activityId, true, out string duoStatus);
+            status = "commission=" + commissionStatus + "; duo=" + duoStatus;
+            return commission || duo;
         }
 
         private bool TryClaimTownGuideNodeReward(int nodeId, out string status)

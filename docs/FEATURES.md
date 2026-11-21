@@ -2169,6 +2169,13 @@ and bit `index` of `PictureStatusBits` is clear. Piece count is the `TablePuzzle
 activity. The reward line is `ReceiveReward`, sent for `WaitClaim` nodes after the uncovers; auto-claim
 re-arms the sign-in sweep on `PuzzleCheckinChangedEvent` so those nodes are taken once the server writes them.
 
+**Friendship Fire** (Little Pony Harmony Restored panel `ActivityLittlePonyFriendShipFlamePanel`,
+activity 1154): commission + duo gift boxes on **Claim All Daily** and **Auto-Claim Rewards**. The panel
+sends `ClaimFriendshipFireCommissionRewardNetworkCommand{ActivityId, IsDuoActionReward}`; auto-claim
+arms on `DataUpdated`/`DataCreated` of `FriendshipFireActivityComponent` and walks lit
+`RedPointEnum.ChildActivity` nodes whose id is in `TableFriendshipFireConfigs`. Contribution milestones
+on the bottom bar stay on the normal `ReceiveReward` / WaitClaim activity sweep.
+
 Details and troubleshooting: [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#daily-quests-detail).
 
 ---

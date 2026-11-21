@@ -194,6 +194,15 @@ namespace HeartopiaMod
             "XDTDataAndProtocol.Events.PuzzleCheckinChangedEvent";
         private const int DailyClaimsPuzzleCheckinChangedEventBytes = 0;
 
+        // Friendship Fire component sync — closed generics bound at world-ready. Payload is the
+        // component alone (DataUpdated/DataCreated only carry Value); the pass does not read it,
+        // it only arms a lit-ChildActivity walk.
+        private const string DailyClaimsFriendshipFireDataUpdatedHookName =
+            "DataUpdated<FriendshipFireActivityComponent>";
+        private const string DailyClaimsFriendshipFireDataCreatedHookName =
+            "DataCreated<FriendshipFireActivityComponent>";
+        private const float DailyClaimsAutoFriendshipFireMinIntervalSeconds = 3f;
+
         private const string DailyClaimsAutoWorldReadyCallbackName = "DailyClaimsAutoClaim";
 
         // One send per tick at this spacing — the same "no burst the game never produces" rule the
@@ -255,6 +264,8 @@ namespace HeartopiaMod
         private float dailyClaimsAutoDreamNextAllowedAt;
         private bool dailyClaimsAutoPendingSticker;
         private float dailyClaimsAutoStickerNextAllowedAt;
+        private bool dailyClaimsAutoPendingFriendshipFire;
+        private float dailyClaimsAutoFriendshipFireNextAllowedAt;
         private bool dailyClaimsAutoPendingBattlePass;
         private float dailyClaimsAutoBattlePassNextAllowedAt;
         private bool dailyClaimsAutoPendingWhalefall;
@@ -374,16 +385,19 @@ namespace HeartopiaMod
                     DailyClaimsLoopTaskUpdateEventName,
                     DailyClaimsLoopTaskUpdateEventBytes,
                     this.OnDailyClaimsAutoLoopTaskUpdateEvent);
+                bool friendshipFire = this.TryRegisterDailyClaimsFriendshipFireHooks();
 
                 this.dailyClaimsAutoHooksRegistered =
                     redPoint || activityTasks || mail || dream || sticker || battlePass
-                    || taskUpdated || seaCycle || socialReport || loopTask || hobby || puzzle;
+                    || taskUpdated || seaCycle || socialReport || loopTask || hobby || puzzle
+                    || friendshipFire;
                 this.DailyClaimsLog("auto-claim hooks registered: redPoint=" + redPoint
                     + " activityTasks=" + activityTasks + " mail=" + mail + " dream=" + dream
                     + " sticker=" + sticker + " battlePass=" + battlePass
                     + " taskUpdated=" + taskUpdated + " seaCycle=" + seaCycle
                     + " socialReport=" + socialReport + " loopTask=" + loopTask
-                    + " hobby=" + hobby + " puzzle=" + puzzle);
+                    + " hobby=" + hobby + " puzzle=" + puzzle
+                    + " friendshipFire=" + friendshipFire);
 
                 if (!this.dailyClaimsAutoHooksRegistered)
                 {
@@ -423,6 +437,10 @@ namespace HeartopiaMod
             // Same reasoning for the sticker tiers: the theme node states sync during login, so the
             // refresh event has usually already fired by the time the hook exists.
             this.dailyClaimsAutoPendingSticker = true;
+
+            // Friendship Fire ChildActivity dots are computed from the component that syncs at
+            // login; DataUpdated has usually already fired before the closed-generic hook exists.
+            this.dailyClaimsAutoPendingFriendshipFire = true;
 
             // And for a hobby that was already sitting on enough exp when the session started.
             this.dailyClaimsAutoPendingHobby = true;
@@ -1035,6 +1053,11 @@ namespace HeartopiaMod
         private const int DailyClaimsRedPointEnumPartyOfficialTaskCanSubmit = 804;
         private const int DailyClaimsRedPointEnumActivityFreeReward = 20788;
 
+        // FriendshipFireActivity.RefreshTaskRedPoint lights ChildActivity with id=activityId when a
+        // commission or duo gift is claimable. Client-only — no RedPointEvent — so the auto pass
+        // walks lit nodes the same way sticker / dream do.
+        private const int DailyClaimsRedPointEnumChildActivity = 20772;
+
         // StickerActivityThemeReward: the node id is the sticker THEME, and the claim also needs the
         // activity that owns it plus the tier ordinal. RedPointUtility gives it no server type, so
         // like the Dream kinds it can only be reached from a node walk.
@@ -1180,6 +1203,121 @@ namespace HeartopiaMod
 
             return this.dailyClaimsDreamGameTaskByTask.TryGetValue(dreamTaskId, out gameTaskId)
                 && gameTaskId > 0;
+        }
+
+        // Closed-generic DataUpdated/DataCreated for FriendshipFireActivityComponent. Same bind
+        // recipe as SnowSculpture's DataUpdated<SnowMachineComponentData>: open Data* + arg class,
+        // measure payload, register under a stable log name. Handler only arms the pending flag.
+        private bool TryRegisterDailyClaimsFriendshipFireHooks()
+        {
+            if (!this.EnsureAuraMonoApiReady() || !this.AttachAuraMonoThread())
+            {
+                return false;
+            }
+
+            IntPtr arg = this.FindAuraMonoClassByFullName(
+                "XDT.Scene.Shared.Modules.OperationActivityCenter.FriendshipFireActivityComponent");
+            if (arg == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            if (!this.TryMeasureAuraMonoBlittableSize(arg, true, out int componentBytes)
+                || componentBytes <= 0
+                || componentBytes > EventPayloadCap)
+            {
+                return false;
+            }
+
+            bool updated = this.TryRegisterDailyClaimsClosedDataHook(
+                "ScriptsRefactory.DataAndProtocol.Events.DataUpdated`1",
+                arg,
+                componentBytes,
+                DailyClaimsFriendshipFireDataUpdatedHookName,
+                this.OnDailyClaimsAutoFriendshipFireStateEvent);
+            bool created = this.TryRegisterDailyClaimsClosedDataHook(
+                "ScriptsRefactory.DataAndProtocol.Events.DataCreated`1",
+                arg,
+                componentBytes,
+                DailyClaimsFriendshipFireDataCreatedHookName,
+                this.OnDailyClaimsAutoFriendshipFireStateEvent);
+            return updated || created;
+        }
+
+        private bool TryRegisterDailyClaimsClosedDataHook(
+            string openFullName,
+            IntPtr argClass,
+            int payloadBytes,
+            string logName,
+            Action<GameEventSnapshot> handler)
+        {
+            if (this.gameEventHooksByName.ContainsKey(logName))
+            {
+                return true;
+            }
+
+            IntPtr open = this.FindAuraMonoClassByFullName(openFullName);
+            if (open == IntPtr.Zero
+                || !this.TryBindAuraMonoGenericClass(open, new[] { argClass }, out IntPtr closed)
+                || closed == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            return this.RegisterGameEventHook(closed, logName, payloadBytes, handler);
+        }
+
+        private void OnDailyClaimsAutoFriendshipFireStateEvent(GameEventSnapshot e)
+        {
+            if (!this.dailyClaimsAutoClaimEnabled)
+            {
+                return;
+            }
+
+            this.dailyClaimsAutoPendingFriendshipFire = true;
+        }
+
+        // Lit ChildActivity dots whose id is a FriendshipFire activity. Same shape as the sticker
+        // pass: no server RedPointType, so the only signal is the component sync + the lit node.
+        private int DailyClaimsAutoClaimFriendshipFireNodes(out string status)
+        {
+            List<DailyClaimsRedPointNode> nodes = new List<DailyClaimsRedPointNode>();
+            if (!this.DailyClaimsCollectActiveRedPoints(nodes, out string collectStatus))
+            {
+                status = "collect failed: " + collectStatus;
+                return 0;
+            }
+
+            int sent = 0;
+            int lit = 0;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                if (nodes[i].EnumValue != DailyClaimsRedPointEnumChildActivity)
+                {
+                    continue;
+                }
+
+                if (!this.DailyClaimsIsFriendshipFireActivity(nodes[i].Id))
+                {
+                    continue;
+                }
+
+                lit++;
+                int serverType = this.DailyClaimsToRedPointType(nodes[i].EnumValue);
+                if (this.DailyClaimsTryClaimForRedPoint(
+                        nodes[i].EnumValue, serverType, nodes[i].Id, out string what, out string claimStatus))
+                {
+                    sent++;
+                    this.DailyClaimsLog("auto friendship fire: claimed " + what + " (" + claimStatus + ")");
+                }
+                else
+                {
+                    this.DailyClaimsLog("auto friendship fire: LEFT " + what + " (" + claimStatus + ")");
+                }
+            }
+
+            status = "lit=" + lit + " claimed=" + sent + " (" + collectStatus + ")";
+            return sent;
         }
 
         // Every lit sticker-theme dot. Same shape as the Dream pass and for the same reason:
@@ -1477,6 +1615,20 @@ namespace HeartopiaMod
                     // ReceiveActivityBPReward, which is the same command the activity sweep sends.
                     what = "activity free reward " + id;
                     return this.TryClaimDailyClaimsActivityBpReward(id, out status);
+
+                case DailyClaimsRedPointEnumChildActivity:
+                    // Shared by several child activities; only Friendship Fire's commission/duo
+                    // gifts use ClaimFriendshipFireCommissionReward. Other ChildActivity dots stay
+                    // LEFT so mark-read does not hide them (HasClaimMapping protects the enum).
+                    what = "child activity " + id;
+                    if (!this.DailyClaimsIsFriendshipFireActivity(id))
+                    {
+                        status = "not a FriendshipFire activity";
+                        return false;
+                    }
+
+                    what = "friendship fire " + id;
+                    return this.TryClaimDailyClaimsFriendshipFireRewards(id, out status);
             }
 
             what = "type " + serverType + " id " + id;
@@ -2336,6 +2488,18 @@ namespace HeartopiaMod
                 return true;
             }
 
+            if (this.dailyClaimsAutoPendingFriendshipFire
+                && Time.realtimeSinceStartup >= this.dailyClaimsAutoFriendshipFireNextAllowedAt)
+            {
+                this.dailyClaimsAutoPendingFriendshipFire = false;
+                this.dailyClaimsAutoFriendshipFireNextAllowedAt =
+                    Time.realtimeSinceStartup + DailyClaimsAutoFriendshipFireMinIntervalSeconds;
+                Breadcrumbs.Phase("dc.friendshipfire");
+                int fireSent = this.DailyClaimsAutoClaimFriendshipFireNodes(out string fireStatus);
+                this.DailyClaimsAutoReport(fireSent > 0, "friendship fire", fireStatus);
+                return true;
+            }
+
             if (this.dailyClaimsAutoPendingBattlePass
                 && Time.realtimeSinceStartup >= this.dailyClaimsAutoBattlePassNextAllowedAt)
             {
@@ -2539,6 +2703,12 @@ namespace HeartopiaMod
                 case DailyClaimsRedPointEnumPartyFestivalTaskCanSubmit:
                 case DailyClaimsRedPointEnumPartyOfficialTaskCanSubmit:
                 case DailyClaimsRedPointEnumActivityFreeReward:
+                    return true;
+
+                // Friendship Fire (and any other ChildActivity). Claim mapping filters to
+                // FriendshipFire inside TryClaimForRedPoint; keeping the enum here stops mark-read
+                // from clearing a gift that is still waiting.
+                case DailyClaimsRedPointEnumChildActivity:
                     return true;
 
                 // Not dispatched by the claim switch, but the task queue submits these on its own
