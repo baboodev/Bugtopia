@@ -7,6 +7,9 @@ ci/unified-ci-deps.zip
 ci/heartopia/
 buddy/bin
 buddy/obj
+# Device-pulled BepInEx Android refs (ci/pull-android-bepinex-refs.ps1). Must stay
+# local: MonoMod 25 there must not be committed or it pollutes PC assembly resolve.
+buddy/android-refs/
 .cache
 tools/bin
 tools/BugtopiaMcp/bin

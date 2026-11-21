@@ -74,12 +74,32 @@
     <DefineConstants>$(DefineConstants);LOADER_BEPINEX</DefineConstants>
   </PropertyGroup>
 
+  <!-- Device-pulled android-refs/ under this project carries MonoMod 25 (no public
+       NativeDetour). RAR would otherwise unify PC HintPath MonoMod 22 → that copy and
+       fail every desktop build with CS0234. Keep HintPath-only search for PC loaders;
+       BepInExAndroid uses its own HintPaths into android-refs and may need full search. -->
+  <PropertyGroup Condition="'$(Loader)' != 'BepInExAndroid'">
+    <AssemblySearchPaths>{HintPathFromItem};{TargetFrameworkDirectory};{RawFileName}</AssemblySearchPaths>
+    <AutoUnifyAssemblyReferences>false</AutoUnifyAssemblyReferences>
+  </PropertyGroup>
+
   <!-- FEATURE_TELEGRAM gates the Bugtopia News link: the URL constant, the OpenURL helper, the
        sidebar-footer link, the About button, the paper-plane icon and the one localized error
        string. Build without it: -p:Telegram=false -->
   <PropertyGroup Condition="'$(Telegram)' == 'true'">
     <DefineConstants>$(DefineConstants);FEATURE_TELEGRAM</DefineConstants>
   </PropertyGroup>
+
+  <!-- Belt-and-suspenders: never let loose android-refs DLLs enter CandidateAssemblyFiles
+       on a desktop loader build (folder may be renamed android-refs.bak etc.). -->
+  <Target Name="ExcludeAndroidRefsFromAssemblySearch"
+          BeforeTargets="ResolveAssemblyReferences"
+          Condition="'$(Loader)' != 'BepInExAndroid'">
+    <ItemGroup>
+      <CandidateAssemblyFiles Remove="@(CandidateAssemblyFiles)"
+                              Condition="$([System.String]::Copy('%(Identity)').Contains('android-refs'))" />
+    </ItemGroup>
+  </Target>
 
   <!-- BepInEx + shared deps + IL2CPP interop, from the BepInEx install. Used by the BepInEx build
        AND the Universal build (Universal adds only MelonLoader.dll below). No game assemblies:
