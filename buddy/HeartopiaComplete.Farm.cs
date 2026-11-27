@@ -1308,9 +1308,9 @@ namespace HeartopiaMod
         //   * Stealth Foraging engaged -> contamination -3m hosted / +4m point-anchored, every
         //     other resource -1.5m (StealthForagingFeature.cs). This return is first: the
         //     rare-tree stand-off below does not run while the hop is diving.
-        //   * Otherwise -> no move, except Rare Tree, whose wide trunk needs a
-        //     FarmWalkCollectStandoff landing beside the pivot. Other nodes, including
-        //     Apple Tree and Mandarin Tree, land on the pivot. Contamination used to take
+        //   * Otherwise -> no move, except Rare Tree, Apple Tree and Mandarin Tree, whose
+        //     pivot sits inside the trunk and needs a FarmWalkCollectStandoff landing beside
+        //     it. Every other node lands on the pivot. Contamination used to take
         //     the vanilla SeaCleanTeleportYOffset (+7m) lift here; that lift now lives only
         //     on the cleansing-coral hop (CorruptionCleanseFeature.cs), a different target.
 
@@ -1346,9 +1346,19 @@ namespace HeartopiaMod
         private const float RareTreeTrunkClearanceCap = 2.5f;
         private const float RareTreeTrunkTieEpsilon = 0.05f;
 
+        // Every chopped/shaken tree whose pivot sits inside its trunk. Landing on the pivot puts
+        // the body inside the trunk collider and the player gets stuck there.
         private static bool IsRareTreeTrunkStandoffLabel(string nodeLabel)
         {
-            return string.Equals(nodeLabel, "Rare Tree", StringComparison.Ordinal);
+            switch (nodeLabel)
+            {
+                case "Rare Tree":
+                case "Apple Tree":
+                case "Mandarin Tree":
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         // Horizontal direction from the tree toward the player. XZ only: a player above the
@@ -1427,7 +1437,7 @@ namespace HeartopiaMod
                 }
             }
 
-            this.AutoFarmLog("Rare tree stand-off " + nodeLabel
+            this.AutoFarmLog("Tree trunk stand-off " + nodeLabel
                 + " deg=" + bestDegrees
                 + " clearance=" + bestScore.ToString("0.00")
                 + " pivot=" + position
