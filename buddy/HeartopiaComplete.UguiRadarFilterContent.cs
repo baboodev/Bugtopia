@@ -85,6 +85,8 @@ namespace HeartopiaMod
 
         private void ToggleRadarSpeciesFilter(bool insects, int id)
         {
+            this.ClearRadarQuickLiveMode(insects);
+
             if (id <= 0)
             {
                 return;
@@ -122,8 +124,15 @@ namespace HeartopiaMod
         {
             HashSet<int> set = insects ? this.radarInsectSpeciesFilter : this.radarBirdSpeciesFilter;
             List<int> list = insects ? this.radarInsectSpeciesFilterList : this.radarBirdSpeciesFilterList;
+            bool hadLive = (insects ? this.radarInsectQuickLiveMode : this.radarBirdQuickLiveMode) != RadarQuickLiveMode.None;
+            this.ClearRadarQuickLiveMode(insects);
             if (set.Count == 0)
             {
+                if (hadLive)
+                {
+                    this.QueueRadarSettingsSave();
+                }
+
                 return;
             }
 
@@ -712,14 +721,17 @@ namespace HeartopiaMod
             HashSet<int> ids;
             if (which == 0)
             {
+                this.ClearRadarQuickLiveMode(insects);
                 ids = insects ? this.radarInsectQuickUnopened : this.radarBirdQuickUnopened;
             }
             else if (which == 1)
             {
+                this.SetRadarQuickLiveMode(insects, RadarQuickLiveMode.Below5);
                 ids = insects ? this.radarInsectQuickBelow5 : this.radarBirdQuickBelow5;
             }
             else
             {
+                this.SetRadarQuickLiveMode(insects, RadarQuickLiveMode.NotMaster);
                 ids = insects ? this.radarInsectQuickNotMaster : this.radarBirdQuickNotMaster;
             }
 
@@ -980,14 +992,18 @@ namespace HeartopiaMod
 
             HashSet<int> currentSet = handle.ShowingInsects ? this.radarInsectSpeciesFilter : this.radarBirdSpeciesFilter;
             HashSet<int> unopened = handle.ShowingInsects ? this.radarInsectQuickUnopened : this.radarBirdQuickUnopened;
-            HashSet<int> below5 = handle.ShowingInsects ? this.radarInsectQuickBelow5 : this.radarBirdQuickBelow5;
-            HashSet<int> notMaster = handle.ShowingInsects ? this.radarInsectQuickNotMaster : this.radarBirdQuickNotMaster;
+            RadarQuickLiveMode live = handle.ShowingInsects
+                ? this.radarInsectQuickLiveMode
+                : this.radarBirdQuickLiveMode;
             this.ApplyUguiRadarFilterQuickButton(handle.QuickUnopenedButton,
-                ref handle.QuickUnopenedShown, this.radarCollectionFilterReady && this.RadarSpeciesFilterEqualsQuick(currentSet, unopened));
+                ref handle.QuickUnopenedShown,
+                this.radarCollectionFilterReady && this.RadarSpeciesFilterEqualsQuick(currentSet, unopened));
             this.ApplyUguiRadarFilterQuickButton(handle.QuickBelow5Button,
-                ref handle.QuickBelow5Shown, this.radarCollectionFilterReady && this.RadarSpeciesFilterEqualsQuick(currentSet, below5));
+                ref handle.QuickBelow5Shown,
+                this.radarCollectionFilterReady && live == RadarQuickLiveMode.Below5);
             this.ApplyUguiRadarFilterQuickButton(handle.QuickNotMasterButton,
-                ref handle.QuickNotMasterShown, this.radarCollectionFilterReady && this.RadarSpeciesFilterEqualsQuick(currentSet, notMaster));
+                ref handle.QuickNotMasterShown,
+                this.radarCollectionFilterReady && live == RadarQuickLiveMode.NotMaster);
             bool empty = handle.Visible.Count == 0;
             SetUguiGoActive(handle.EmptyLabel, empty);
             SetUguiGoActive(handle.Grid != null ? handle.Grid.Root : null, !empty);
@@ -1174,6 +1190,23 @@ namespace HeartopiaMod
             }
         }
 
+        private void ProcessRadarQuickLiveOnUpdate()
+        {
+            this.EnsureRadarCollectionFilterHooks();
+            if (this.radarInsectQuickLiveMode == RadarQuickLiveMode.None
+                && this.radarBirdQuickLiveMode == RadarQuickLiveMode.None)
+            {
+                return;
+            }
+
+            if (!this.radarCollectionFilterDirty && this.radarCollectionFilterReady)
+            {
+                return;
+            }
+
+            this.TryApplyActiveRadarQuickLiveModes();
+        }
+
         private void ProcessUguiShellRadarFilterOnUpdate()
         {
             UguiRadarFilterHandle handle = this.uguiRadarFilter;
@@ -1222,19 +1255,28 @@ namespace HeartopiaMod
 
                 if (this.radarCollectionFilterDirty)
                 {
-                    this.radarCollectionFilterDirty = false;
-                    if (this.TryRebuildRadarCollectionQuickSets())
+                    bool anyLive = this.radarInsectQuickLiveMode != RadarQuickLiveMode.None
+                        || this.radarBirdQuickLiveMode != RadarQuickLiveMode.None;
+                    if (anyLive)
                     {
-                        // The scan just re-read the per-entry event-window verdict; re-apply
-                        // it to the visible list (plan 11.4).
-                        this.RebuildUguiRadarFilterVisible(handle, false);
-                        // The table batch may have logged this world's spawn-gate line before
-                        // any event verdict existed (scan ordering); after the first successful
-                        // scan of the epoch re-emit the corrected verification line once.
-                        if (this.radarSpawnGateLoggedEpoch == AuraMonoWorldEpoch)
+                        this.TryApplyActiveRadarQuickLiveModes();
+                    }
+                    else
+                    {
+                        this.radarCollectionFilterDirty = false;
+                        if (this.TryRebuildRadarCollectionQuickSets())
                         {
-                            this.radarSpawnGateLoggedEpoch = -1;
-                            this.LogRadarSpawnGateOnce();
+                            // The scan just re-read the per-entry event-window verdict; re-apply
+                            // it to the visible list (plan 11.4).
+                            this.RebuildUguiRadarFilterVisible(handle, false);
+                            // The table batch may have logged this world's spawn-gate line before
+                            // any event verdict existed (scan ordering); after the first successful
+                            // scan of the epoch re-emit the corrected verification line once.
+                            if (this.radarSpawnGateLoggedEpoch == AuraMonoWorldEpoch)
+                            {
+                                this.radarSpawnGateLoggedEpoch = -1;
+                                this.LogRadarSpawnGateOnce();
+                            }
                         }
                     }
                 }

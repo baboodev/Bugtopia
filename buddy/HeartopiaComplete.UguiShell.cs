@@ -237,6 +237,8 @@ namespace HeartopiaMod
             this.ProcessUguiShellFeaturesAutoBuyOnUpdate();
             this.ProcessUguiShellFeaturesAutoSellOnUpdate();
             this.ProcessUguiShellFeaturesMassCookOnUpdate();
+            this.ObserveNetCookCollectionStarRadarDirtyEdge();
+            this.ProcessRadarQuickLiveOnUpdate();
             this.ProcessUguiShellFeaturesPuzzleOnUpdate();
             this.ProcessUguiShellFeaturesPetCareOnUpdate();
             this.ProcessUguiShellRadarMainOnUpdate();

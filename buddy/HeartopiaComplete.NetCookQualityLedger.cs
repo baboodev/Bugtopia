@@ -83,21 +83,17 @@ namespace HeartopiaMod
             this.netCookCollectionStarDirty = true;
         }
 
-        // Consumes the dirty flag with a minimum interval (plan §2.1 coalescing rule). Returns true
-        // only when a full scan replaced the cache. A failed scan logs once and keeps the previous
-        // cache — the grid never blanks out mid-session.
-        private bool TryRefreshNetCookCollectionStars()
+        // Piggyback on the radar's pictorial hooks rather than registering a fourth, fifth and
+        // sixth handler of the same three events — but on the radar flag's RISING EDGE, through
+        // our own consumed-marker (review 2026-11-01, finding 7). Level-matching the radar flag
+        // turned every picker frame into an arm: the flag initializes true and is cleared only
+        // by radar rebuilds, so a world where the radar UI was never opened rescanned every
+        // minimum-interval while the picker was open. Edge-matching arms once per radar dirty
+        // burst; the epoch branch below still arms the first scan of a world without the radar
+        // ever having been opened. Called every shell frame before live quick apply so a burst is
+        // not erased before Mass Cook samples the flag while the recipe dropdown is closed.
+        private void ObserveNetCookCollectionStarRadarDirtyEdge()
         {
-            this.EnsureNetCookQualityHooks();
-
-            // Piggyback on the radar's pictorial hooks rather than registering a fourth, fifth and
-            // sixth handler of the same three events — but on the radar flag's RISING EDGE, through
-            // our own consumed-marker (review 2026-11-01, finding 7). Level-matching the radar flag
-            // turned every picker frame into an arm: the flag initializes true and is cleared only
-            // by radar rebuilds, so a world where the radar UI was never opened rescanned every
-            // minimum-interval while the picker was open. Edge-matching arms once per radar dirty
-            // burst; the epoch branch below still arms the first scan of a world without the radar
-            // ever having been opened.
             if (this.radarCollectionFilterDirty)
             {
                 if (!this.netCookCollectionStarRadarEdgeConsumed)
@@ -110,6 +106,16 @@ namespace HeartopiaMod
             {
                 this.netCookCollectionStarRadarEdgeConsumed = false; // radar consumed its burst — re-arm on the next one
             }
+        }
+
+        // Consumes the dirty flag with a minimum interval (plan §2.1 coalescing rule). Returns true
+        // only when a full scan replaced the cache. A failed scan logs once and keeps the previous
+        // cache — the grid never blanks out mid-session.
+        private bool TryRefreshNetCookCollectionStars()
+        {
+            this.EnsureNetCookQualityHooks();
+
+            this.ObserveNetCookCollectionStarRadarDirtyEdge();
 
             if (this.netCookCollectionStarEpoch != AuraMonoWorldEpoch)
             {

@@ -2011,6 +2011,13 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
   Hidden book ids 51305, 51406, 51503 and 63001 are excluded from the quick sets. A predicate
   that matches nothing is stored as the sentinel id 1 in the existing list, so the allow-list
   stays restrictive and the summary shows `0 selected`.
+  **Under 5 Stars** and **Not Catching Master** / **Not Photo Master** stay live after a click:
+  each pictorial change triggers a full re-sync of that tab's allow-list (adds and removes species)
+  until the user hits Clear, **Unopened**, or toggles an individual species card — those actions
+  drop live mode. The active mode is persisted in `RadarConfigData` and resumes on restart without
+  another click; the matching quick button stays lit. **Unopened** remains one-shot (no live mode).
+  An empty live re-sync keeps the sentinel id 1 and `0 selected`. Main-tab Insect/Bird radar
+  toggles are never auto-cleared by live mode.
   Species whose **spawn window is currently closed** do not appear in the grid: the calendar
   month mask (`appearMonth`) and the festival window — read as the game's own verdict
   (`PictorialBase` season type: not-open / past / resurface-weeks via the encyclopedia unlock

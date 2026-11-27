@@ -680,6 +680,9 @@ namespace HeartopiaMod
             // resolve to). Absent on old configs, which leaves the initializer and means "all".
             public List<int> insectSpeciesFilter = new List<int>();
             public List<int> birdSpeciesFilter = new List<int>();
+            // 0=None, 1=Below5, 2=NotMaster. Absent on old configs → 0 (None).
+            public int insectQuickLiveMode;
+            public int birdQuickLiveMode;
         }
 
         [Serializable]

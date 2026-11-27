@@ -38,6 +38,88 @@ namespace HeartopiaMod
         private readonly HashSet<int> radarBirdQuickBelow5 = new HashSet<int>();
         private readonly HashSet<int> radarBirdQuickNotMaster = new HashSet<int>();
 
+        private enum RadarQuickLiveMode
+        {
+            None = 0,
+            Below5 = 1,
+            NotMaster = 2,
+        }
+
+        private RadarQuickLiveMode radarInsectQuickLiveMode = RadarQuickLiveMode.None;
+        private RadarQuickLiveMode radarBirdQuickLiveMode = RadarQuickLiveMode.None;
+
+        private static RadarQuickLiveMode NormalizeRadarQuickLiveMode(int raw)
+        {
+            if (raw == (int)RadarQuickLiveMode.Below5 || raw == (int)RadarQuickLiveMode.NotMaster)
+            {
+                return (RadarQuickLiveMode)raw;
+            }
+
+            return RadarQuickLiveMode.None;
+        }
+
+        private void SetRadarQuickLiveMode(bool insects, RadarQuickLiveMode mode)
+        {
+            if (insects)
+            {
+                this.radarInsectQuickLiveMode = mode;
+            }
+            else
+            {
+                this.radarBirdQuickLiveMode = mode;
+            }
+        }
+
+        private void ClearRadarQuickLiveMode(bool insects)
+        {
+            this.SetRadarQuickLiveMode(insects, RadarQuickLiveMode.None);
+        }
+
+        // Rebuilds quick sets when dirty/not ready, then re-applies each category whose mode != None.
+        // Clears radarCollectionFilterDirty only after a successful rebuild + apply. Returns false when
+        // a rebuild was required and failed (dirty left true for retry).
+        private bool TryApplyActiveRadarQuickLiveModes()
+        {
+            bool anyLive = this.radarInsectQuickLiveMode != RadarQuickLiveMode.None
+                || this.radarBirdQuickLiveMode != RadarQuickLiveMode.None;
+            if (!anyLive)
+            {
+                return true;
+            }
+
+            bool needRebuild = this.radarCollectionFilterDirty || !this.radarCollectionFilterReady;
+            if (needRebuild && !this.TryRebuildRadarCollectionQuickSets())
+            {
+                return false;
+            }
+
+            this.TryApplyRadarQuickLiveModeForCategory(true);
+            this.TryApplyRadarQuickLiveModeForCategory(false);
+            this.radarCollectionFilterDirty = false;
+            return true;
+        }
+
+        private void TryApplyRadarQuickLiveModeForCategory(bool insects)
+        {
+            RadarQuickLiveMode mode = insects ? this.radarInsectQuickLiveMode : this.radarBirdQuickLiveMode;
+            if (mode == RadarQuickLiveMode.None)
+            {
+                return;
+            }
+
+            HashSet<int> ids;
+            if (mode == RadarQuickLiveMode.Below5)
+            {
+                ids = insects ? this.radarInsectQuickBelow5 : this.radarBirdQuickBelow5;
+            }
+            else
+            {
+                ids = insects ? this.radarInsectQuickNotMaster : this.radarBirdQuickNotMaster;
+            }
+
+            this.ApplyRadarSpeciesFilter(insects, this.FilterRadarSpeciesToSpawnWindow(ids, insects));
+        }
+
         private IntPtr radarPictorialTryGetMethod = IntPtr.Zero;
         private int radarCollectionFilterEpoch = -1;
         private bool radarCollectionFilterReady;
@@ -496,6 +578,15 @@ namespace HeartopiaMod
         private bool OnRadarCollectionFilterWorldReady()
         {
             this.radarCollectionFilterDirty = true;
+            if (this.radarInsectQuickLiveMode != RadarQuickLiveMode.None
+                || this.radarBirdQuickLiveMode != RadarQuickLiveMode.None)
+            {
+                if (!this.TryApplyActiveRadarQuickLiveModes())
+                {
+                    this.radarCollectionFilterDirty = true;
+                }
+            }
+
             return true;
         }
     }

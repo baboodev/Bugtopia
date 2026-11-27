@@ -95,6 +95,8 @@ namespace HeartopiaMod
 
             data.insectSpeciesFilter = new List<int>(this.radarInsectSpeciesFilterList);
             data.birdSpeciesFilter = new List<int>(this.radarBirdSpeciesFilterList);
+            data.insectQuickLiveMode = (int)this.radarInsectQuickLiveMode;
+            data.birdQuickLiveMode = (int)this.radarBirdQuickLiveMode;
         }
 
         private void ApplyRadarConfig(RadarConfigData data)
@@ -177,6 +179,13 @@ namespace HeartopiaMod
 
             this.ReplaceRadarSpeciesFilter(data.insectSpeciesFilter, this.radarInsectSpeciesFilterList, this.radarInsectSpeciesFilter);
             this.ReplaceRadarSpeciesFilter(data.birdSpeciesFilter, this.radarBirdSpeciesFilterList, this.radarBirdSpeciesFilter);
+            this.radarInsectQuickLiveMode = NormalizeRadarQuickLiveMode(data.insectQuickLiveMode);
+            this.radarBirdQuickLiveMode = NormalizeRadarQuickLiveMode(data.birdQuickLiveMode);
+            if (this.radarInsectQuickLiveMode != RadarQuickLiveMode.None
+                || this.radarBirdQuickLiveMode != RadarQuickLiveMode.None)
+            {
+                this.radarCollectionFilterDirty = true;
+            }
         }
 
         private string GetRadarSettingsPath()
