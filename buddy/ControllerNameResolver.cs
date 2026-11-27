@@ -7,10 +7,14 @@ namespace HeartopiaMod
     // CONTROLLER SHORT NAME — resolved by NAME at runtime, never hard-coded.
     //
     // ── WHY THIS EXISTS ─────────────────────────────────────────────────────────────────────────
-    // An animation controller is picked by a packed id, (charType << 24) | (poseType << 14) |
-    // (override << 9) | shortName, and `shortName` is a ControllerShortName enum value. That enum
-    // declares ONE explicit value and lets every other name take its position as its number — so
-    // when an update inserts entries anywhere above a name, that name's number changes.
+    // An animation controller is picked by a packed id. ControllerFullNameId.ToUInt is
+    // (charType << 25) | (poseType << 15) | (override << 10) | shortName, and shortName is a
+    // 10-bit ControllerShortName (mask 0x3FF). The previous pack used 9 bits
+    // ((charType << 24) | (poseType << 14) | (override << 9) | shortName). Once lumbering
+    // passed 511 that pack kept only the low 9 bits, so 517 arrived as pose (5), the swing
+    // clip never resolved, and the cast still returned ActionErrorCode 0.
+    // The enum declares ONE explicit value and lets every other name take its position as its
+    // number — so when an update inserts entries anywhere above a name, that name's number changes.
     //
     // It has moved twice already, and both times it broke the swings SILENTLY: the cast is still
     // accepted (ActionErrorCode 0) and the animator is simply asked for a family that no longer
@@ -46,6 +50,14 @@ namespace HeartopiaMod
         private readonly Dictionary<string, int> controllerShortNameCache = new Dictionary<string, int>(StringComparer.Ordinal);
         private IntPtr controllerShortNameMethod;
         private float controllerShortNameRetryAt;
+
+        /// player + stand + the live tool override + a ControllerShortName, packed the way
+        /// ControllerFullNameId.ToUInt packs them. Action Panel swings and the witness
+        /// animation both call this; packing at the call site is how the 9-bit layout survived.
+        internal static int PackPlayerStandController(int overrideType, int shortName)
+        {
+            return (1 << 25) | (1 << 15) | (overrideType << 10) | shortName;
+        }
 
         /// Ordinal of a ControllerShortName, resolved through the game's own converter and cached.
         /// Returns `fallback` when the lookup cannot be made — a stale number still renders the

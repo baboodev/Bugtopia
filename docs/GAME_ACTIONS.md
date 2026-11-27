@@ -42,7 +42,7 @@ before it will drive the animator. Three gates cover the whole catalogue:
 | Field | Why | Fill with |
 |---|---|---|
 | `maxComboTime` | 0 means "no swings" — the clip sets its trigger and cancels in the same tick | the swing count (3) |
-| `controllerFullName` | names the clip family; with none, no asset resolves and nothing renders | `(charType << 24) \| (poseType << 14) \| (override << 9) \| shortName` |
+| `controllerFullName` | names the clip family; with none, no asset resolves and nothing renders | `(charType << 25) \| (poseType << 15) \| (override << 10) \| shortName` (`ControllerFullNameId.ToUInt`; short name is 10 bits) |
 | `socialType` | which social clip | 1 for the plain wave |
 
 `controllerFullName` needs the **tool currently in hand**: the swing controller is
@@ -52,7 +52,7 @@ the cast succeeds and nothing renders. Read the override live with
 `ToolSystem.SetHandhold(int toolId)`, which is a **server round trip** (~1 s), so take the tool once
 per run, never per action.
 
-`ControllerShortName` ordinals seen so far: stand 1, lumbering 159, mining 160, gardening 278.
+`ControllerShortName` is resolved by name (`AnimEnumConvert.ToControllerShortName`). The short-name field is 10 bits. A 9-bit pack folds any ordinal above 511 into a different name (`lumbering` 517 becomes `pose` 5) and the swing renders nothing.
 
 ### Vector3 fields are places, and an empty one is under the map
 

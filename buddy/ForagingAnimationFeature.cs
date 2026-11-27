@@ -615,7 +615,8 @@ namespace HeartopiaMod
                         tree ? ForagingAnimShortLumbering : ForagingAnimShortMining,
                         tree ? ForagingAnimShortLumberingFallback : ForagingAnimShortMiningFallback);
                     this.SetForagingAnimInt(argObj, argClass, "controllerFullName",
-                        ForagingAnimControllerId(this.ReadForagingAnimOverride(playerClass, players[0]), shortName));
+                        PackPlayerStandController(
+                            this.ReadForagingAnimOverride(playerClass, players[0]), shortName));
                     this.SetForagingAnimVector2(argObj, argClass, "faceDirection", face);
                 }
 
@@ -637,12 +638,6 @@ namespace HeartopiaMod
             {
                 FreeAuraMonoPins(pins);
             }
-        }
-
-        // (charType << 24) | (poseType << 14) | (override << 9) | shortName — player=1, stand=1.
-        private static int ForagingAnimControllerId(int overrideType, int shortName)
-        {
-            return (1 << 24) | (1 << 14) | (overrideType << 9) | shortName;
         }
 
         private int ReadForagingAnimOverride(IntPtr playerClass, IntPtr player)

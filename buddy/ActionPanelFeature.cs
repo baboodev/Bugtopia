@@ -292,9 +292,8 @@ namespace HeartopiaMod
                     {
                         int shortName = this.ResolveControllerShortName(row.ControllerShortName,
                                                                         row.ControllerShortNameFallback);
-                        controllerSent = (1 << 24) | (1 << 14) | (overrideType << 9) | shortName;
-                        // (charType << 24) | (poseType << 14) | (override << 9) | shortName, with the
-                        // override read live so whatever is actually in hand is honoured.
+                        // Override is read live so whatever is actually in hand is honoured.
+                        controllerSent = PackPlayerStandController(overrideType, shortName);
                         this.SetActionPanelInt(argObj, argClass, name, controllerSent);
                     }
                     else if (havePos
