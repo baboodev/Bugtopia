@@ -5,8 +5,12 @@ Directory.Build.Props
 ci/melonloader-ci-deps.zip
 ci/unified-ci-deps.zip
 ci/heartopia/
+ci/android-auth/
 buddy/bin
 buddy/obj
+buddy/msbuild.log
+buddy/Generated/
+buddy/ResolveAssemblyReferences
 # Device-pulled BepInEx Android refs (ci/pull-android-bepinex-refs.ps1). Must stay
 # local: MonoMod 25 there must not be committed or it pollutes PC assembly resolve.
 buddy/android-refs/
@@ -35,6 +39,7 @@ docs/superpowers
 docs/plans
 .cursor
 .claude
+.superpowers
 ilspy-dumps*
 gameassembly-dumps*
 scratch
@@ -80,3 +85,4 @@ cn-version/
 
 # Local internal plugins. Separate projects, never compiled into bugtopia.dll, never published.
 internal-plugins/
+out/
