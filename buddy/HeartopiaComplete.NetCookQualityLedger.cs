@@ -630,7 +630,9 @@ namespace HeartopiaMod
                 ModLogger.Msg("[NetCookQuality] collect outcome: recipe=" + job.RecipeId + " " + deltas
                     + " outcome=" + outcomeStar + " stove=" + job.LevelObjectNetId
                     + " confirmed=" + job.Confirmed + " ageSec=" + age);
-                this.SaveKeybinds();
+                // Silent: this persists the quality ledger once per collected dish. SaveKeybinds()
+                // toasted "Keybinds saved" on every dish during a Mass Cook run.
+                this.SaveAllSettings();
             }
             else
             {
@@ -821,7 +823,7 @@ namespace HeartopiaMod
                 + " credited=" + stats.Credited);
             if (stats.Credited > 0)
             {
-                this.SaveKeybinds();
+                this.SaveAllSettings();
             }
 
             return true;
