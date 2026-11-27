@@ -641,6 +641,40 @@ namespace HeartopiaMod
             public int resourceVisualEspMaxMarkers = 120;
             public bool priorityCapybaraSlab;
             public bool priorityOakSlab;
+            public bool showMushroomRadar;
+            public bool showOysterMushroomRadar;
+            public bool showButtonMushroomRadar;
+            public bool showPennyBunRadar;
+            public bool showShiitakeRadar;
+            public bool showTruffleRadar;
+            public bool showBlueberryRadar;
+            public bool showRaspberryRadar;
+            public bool showGlasswortRadar;
+            public bool showSeaGrapeRadar;
+            public bool showWakameRadar;
+            public bool showContaminatedRadar;
+            public bool showStoneRadar;
+            public bool showOreRadar;
+            public bool showBranchRadar;
+            public bool showTreeRadar;
+            public bool showRareTreeRadar;
+            public bool showAppleTreeRadar;
+            public bool showOrangeTreeRadar;
+            public bool showBambooRadar;
+            public bool showOakOakRadar;
+            public bool showFluoriteRadar;
+            public bool showWildGiftAnimalRadar;
+            public bool showBubbleRadar;
+            public bool showBirdRadar;
+            public bool showInsectRadar;
+            public bool showFishShadowRadar;
+            public bool showMeteorRadar;
+            public bool showRepairKitRadar;
+            public bool showRepairKitAuraRadius;
+            public bool showPetPoopRadar;
+            public bool showOtherPlayersRadar;
+            // Enabled festival gather static ids (empty = none). Absent on old configs.
+            public List<int> eventGatherRadarEnabledIds = new List<int>();
             // Species allow-lists for Radar → Filter. Empty = no restriction. Values are insect
             // item ids and bird entity ids (the same ids the insect / bird prefab-tail maps
             // resolve to). Absent on old configs, which leaves the initializer and means "all".

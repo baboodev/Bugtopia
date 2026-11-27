@@ -116,7 +116,7 @@ namespace HeartopiaMod
                 return enabled;
             }
 
-            // Session-only like mushrooms / berries: unknown ids start off until the user checks them.
+            // Unknown ids default off until loaded from RadarConfigData or toggled in the UI.
             return false;
         }
 
@@ -134,7 +134,7 @@ namespace HeartopiaMod
                 return;
             }
 
-            // Session-only, like mushroom / berry category toggles — not in RadarConfigData.
+            // Runtime dictionary; persisted via RadarConfigData.eventGatherRadarEnabledIds on save.
             this.eventGatherRadarEnabled[staticId] = enabled;
         }
 

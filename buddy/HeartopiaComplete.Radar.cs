@@ -52,6 +52,47 @@ namespace HeartopiaMod
             data.resourceVisualEspMaxMarkers = this.resourceVisualEspMaxMarkers;
             data.priorityCapybaraSlab = this.priorityCapybaraSlab;
             data.priorityOakSlab = this.priorityOakSlab;
+            data.showMushroomRadar = this.showMushroomRadar;
+            data.showOysterMushroomRadar = this.showOysterMushroomRadar;
+            data.showButtonMushroomRadar = this.showButtonMushroomRadar;
+            data.showPennyBunRadar = this.showPennyBunRadar;
+            data.showShiitakeRadar = this.showShiitakeRadar;
+            data.showTruffleRadar = this.showTruffleRadar;
+            data.showBlueberryRadar = this.showBlueberryRadar;
+            data.showRaspberryRadar = this.showRaspberryRadar;
+            data.showGlasswortRadar = this.showGlasswortRadar;
+            data.showSeaGrapeRadar = this.showSeaGrapeRadar;
+            data.showWakameRadar = this.showWakameRadar;
+            data.showContaminatedRadar = this.showContaminatedRadar;
+            data.showStoneRadar = this.showStoneRadar;
+            data.showOreRadar = this.showOreRadar;
+            data.showBranchRadar = this.showBranchRadar;
+            data.showTreeRadar = this.showTreeRadar;
+            data.showRareTreeRadar = this.showRareTreeRadar;
+            data.showAppleTreeRadar = this.showAppleTreeRadar;
+            data.showOrangeTreeRadar = this.showOrangeTreeRadar;
+            data.showBambooRadar = this.showBambooRadar;
+            data.showOakOakRadar = this.showOakOakRadar;
+            data.showFluoriteRadar = this.showFluoriteRadar;
+            data.showWildGiftAnimalRadar = this.showWildGiftAnimalRadar;
+            data.showBubbleRadar = this.showBubbleRadar;
+            data.showBirdRadar = this.showBirdRadar;
+            data.showInsectRadar = this.showInsectRadar;
+            data.showFishShadowRadar = this.showFishShadowRadar;
+            data.showMeteorRadar = this.showMeteorRadar;
+            data.showRepairKitRadar = this.showRepairKitRadar;
+            data.showRepairKitAuraRadius = this.showRepairKitAuraRadius;
+            data.showPetPoopRadar = this.showPetPoopRadar;
+            data.showOtherPlayersRadar = this.showOtherPlayersRadar;
+            data.eventGatherRadarEnabledIds = new List<int>();
+            foreach (KeyValuePair<int, bool> entry in this.eventGatherRadarEnabled)
+            {
+                if (entry.Key > 0 && entry.Value)
+                {
+                    data.eventGatherRadarEnabledIds.Add(entry.Key);
+                }
+            }
+
             data.insectSpeciesFilter = new List<int>(this.radarInsectSpeciesFilterList);
             data.birdSpeciesFilter = new List<int>(this.radarBirdSpeciesFilterList);
         }
@@ -89,10 +130,53 @@ namespace HeartopiaMod
             this.resourceVisualEspMaxMarkers = Mathf.Clamp(data.resourceVisualEspMaxMarkers <= 0 ? 120 : data.resourceVisualEspMaxMarkers, 20, 200);
             this.priorityCapybaraSlab = data.priorityCapybaraSlab;
             this.priorityOakSlab = data.priorityOakSlab;
+            this.showMushroomRadar = data.showMushroomRadar;
+            this.showOysterMushroomRadar = data.showOysterMushroomRadar;
+            this.showButtonMushroomRadar = data.showButtonMushroomRadar;
+            this.showPennyBunRadar = data.showPennyBunRadar;
+            this.showShiitakeRadar = data.showShiitakeRadar;
+            this.showTruffleRadar = data.showTruffleRadar;
+            this.showBlueberryRadar = data.showBlueberryRadar;
+            this.showRaspberryRadar = data.showRaspberryRadar;
+            this.showGlasswortRadar = data.showGlasswortRadar;
+            this.showSeaGrapeRadar = data.showSeaGrapeRadar;
+            this.showWakameRadar = data.showWakameRadar;
+            this.showContaminatedRadar = data.showContaminatedRadar;
+            this.showStoneRadar = data.showStoneRadar;
+            this.showOreRadar = data.showOreRadar;
+            this.showBranchRadar = data.showBranchRadar;
+            this.showTreeRadar = data.showTreeRadar;
+            this.showRareTreeRadar = data.showRareTreeRadar;
+            this.showAppleTreeRadar = data.showAppleTreeRadar;
+            this.showOrangeTreeRadar = data.showOrangeTreeRadar;
+            this.showBambooRadar = data.showBambooRadar;
+            this.showOakOakRadar = data.showOakOakRadar;
+            this.showFluoriteRadar = data.showFluoriteRadar;
+            this.showWildGiftAnimalRadar = data.showWildGiftAnimalRadar;
+            this.showBubbleRadar = data.showBubbleRadar;
+            this.showBirdRadar = data.showBirdRadar;
+            this.showInsectRadar = data.showInsectRadar;
+            this.showFishShadowRadar = data.showFishShadowRadar;
+            this.showMeteorRadar = data.showMeteorRadar;
+            this.showRepairKitRadar = data.showRepairKitRadar;
+            this.showRepairKitAuraRadius = data.showRepairKitAuraRadius;
+            this.showPetPoopRadar = data.showPetPoopRadar;
+            this.showOtherPlayersRadar = data.showOtherPlayersRadar;
+            this.eventGatherRadarEnabled.Clear();
+            if (data.eventGatherRadarEnabledIds != null)
+            {
+                for (int i = 0; i < data.eventGatherRadarEnabledIds.Count; i++)
+                {
+                    int id = data.eventGatherRadarEnabledIds[i];
+                    if (id > 0)
+                    {
+                        this.eventGatherRadarEnabled[id] = true;
+                    }
+                }
+            }
+
             this.ReplaceRadarSpeciesFilter(data.insectSpeciesFilter, this.radarInsectSpeciesFilterList, this.radarInsectSpeciesFilter);
             this.ReplaceRadarSpeciesFilter(data.birdSpeciesFilter, this.radarBirdSpeciesFilterList, this.radarBirdSpeciesFilter);
-            // Event category toggles stay session-only (same as mushrooms / berries) — never load
-            // from config even if an older build wrote eventGatherRadarEnabled.
         }
 
         private string GetRadarSettingsPath()

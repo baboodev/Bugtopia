@@ -648,7 +648,7 @@ Despite the `.xml` extension, serialization uses `System.Xml.Serialization.XmlSe
 |-------|------|----------|
 | `Keybinds` | `KeybindConfigData` | All key codes + gameplay tuning floats |
 | `UiTheme` | `UiThemeConfigData` | RGB + alpha for UI layers, scale |
-| `Radar` | `RadarConfigData` | Marker style, distance, ESP options, priorities |
+| `Radar` | `RadarConfigData` | Marker style, distance, ESP options, priorities, main-tab category toggles (`show*Radar`), `eventGatherRadarEnabledIds`, species filters |
 | `BirdFarm` | `BirdFarmConfigData` | Photo modes, cooldown, scan range, multi-catch |
 | `Patrol` | `PatrolData` | Foraging teleport patrol points |
 | `TreeFarmPatrol` | `TreeFarmPatrolData` | Chop/mine patrol with rotation |

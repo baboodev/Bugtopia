@@ -91,10 +91,9 @@ namespace HeartopiaMod
     //    the GetActivePriorityLocation-footer precedent); forced to run immediately after any
     //    of our own changes or a layout change so a click never shows a stale summary.
     //
-    // Saves: Settings controls call this.QueueRadarSettingsSave() exactly where the source does;
-    // the debounced queue is flushed by OnUpdate (HeartopiaComplete.cs:730) independent of any
-    // menu, so no new flush mechanism. The main tab's toggles save NOTHING (source parity — the
-    // show*Radar flags are session state there too).
+    // Saves: Settings, Filter, and main-tab category toggles call QueueRadarSettingsSave(); the
+    // debounced queue is flushed by OnUpdate (HeartopiaComplete.cs:730) independent of any menu.
+    // ENABLE/DISABLE RADAR (isRadarActive) stays a manual session switch and is not persisted.
     // ============================================================================================
     public partial class HeartopiaComplete
     {
@@ -459,6 +458,8 @@ namespace HeartopiaMod
             {
                 this.RunRadar();
             }
+
+            this.QueueRadarSettingsSave();
         }
 
         // Mushrooms only (Radar.cs:1443-1451): the master flag re-derives from the 5 individuals
@@ -1354,6 +1355,8 @@ namespace HeartopiaMod
                 this.RunRadar();
             }
 
+            this.QueueRadarSettingsSave();
+
             UguiShellRadarMainHandle handle = this.uguiShellRadarMain;
             if (handle != null)
             {
@@ -1401,6 +1404,8 @@ namespace HeartopiaMod
             this.showOtherPlayersRadar = false;
             this.CheckRadarAutoToggle();
             this.Cleanup();
+
+            this.QueueRadarSettingsSave();
 
             UguiShellRadarMainHandle handle = this.uguiShellRadarMain;
             if (handle != null)

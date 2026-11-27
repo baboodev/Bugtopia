@@ -1949,8 +1949,8 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
   the game clock. Tasks loaded for that window also stay up when their own `DuringPeriod` is still open:
   loot bushes (`CollectItem` joined to the gather prefab stem, puzzle `_dynamicBushType == 4` dropped)
   and the hollow-tree shape (`treehole` / `perch` plus a task description that mentions 空心 or 翻找).
-  When the window ends the row disappears and Aura Farm stops treating it as a bush. Rows start
-  unchecked each session — category toggles are not persisted (same as mushrooms / berries).
+  When the window ends the row disappears and Aura Farm stops treating it as a bush. Enabled rows
+  are saved in `RadarConfigData.eventGatherRadarEnabledIds` and restored on launch.
   Honey Mushroom and Hollow Tree keep those English labels so foraging filters still match them.
   Implementation: `HeartopiaComplete.EventGatherProvider.cs`.
 - **Misc → Dog Poop** — pet droppings (Entity 7100). Not a prefab scan: markers come from the
@@ -1965,14 +1965,14 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
   `NativeDetour` drops the marker as soon as the server removes the entity (no extra
   EventCenter hook for despawn). Markers are keyed by netId (`RepairKitMarker_<netId>`).
   ESP label **Repair Kit** (code RK, cyan); on the game map each kit is a **Furniture**-route
-  track with that kit's **staticId** (NormalItem icon). **Session-only** toggle (like other
-  Misc categories — not saved to `RadarConfigData`). **Stream-limited** — only kits loaded
+  track with that kit's **staticId** (NormalItem icon). Saved in `RadarConfigData.showRepairKitRadar`.
+  **Stream-limited** — only kits loaded
   around the player appear. Source: `RepairKitRadarFeature.cs`.
 - **Misc → Repair Kit Aura** (`showRepairKitAuraRadius`) — world **`LineRenderer`** ground ring
   at **r = 5 m** (matches in-game **Tool Restore** buff range, ids **701–706** /
   `BuffConfig.range`). Independent of radar **Markers** and of the resource-farm **Ground
   Ring**; can stay on without **Repair Kits** (the snapshot scan still runs while either
-  toggle is on). Session-only. Source: `RepairKitRadarFeature.cs`.
+  toggle is on). Saved in `RadarConfigData.showRepairKitAuraRadius`. Source: `RepairKitRadarFeature.cs`.
 - **Daily** group — **Oak-Oak** and **Flawless Fluorite**, the two daily-roaming advanced
   collectables (their own group: single objects that move every game day at 06:00, not a resource
   family). The server picks the spot and the client has no data that predicts it, so they are found
@@ -1989,7 +1989,8 @@ See [BACKPACK_AND_ITEMS.md](./BACKPACK_AND_ITEMS.md#pet-feed-detail).
   (Map atlas): on the game map a `TrackType.Animal` (23) track draws it natively (big map via the
   `IsSameType` widening), and the ESP tag (code GA, pink) crops it out of the loaded `SpriteAtlas`
   (`TryGetRadarIconFromSpriteAtlas`). Only animals streamed in around the player can be seen.
-- Toggle per category; select all / clear all.
+- Toggle per category; select all / clear all. Main-tab category checkboxes (all `show*Radar` flags)
+  persist in `RadarConfigData` through the same debounced save as Settings / Filter.
 - **Filter** sub-tab — icon grids of known insects and birds. An empty selection shows and
   collects every species. A selection is an allow-list: Radar markers for that category, and
   Insect Farm / Bird Farm (including Combined Farm), keep only those species. A pendant prefab
