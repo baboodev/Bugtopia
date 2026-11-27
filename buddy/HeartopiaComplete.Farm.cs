@@ -1346,6 +1346,25 @@ namespace HeartopiaMod
         private const float RareTreeTrunkClearanceCap = 2.5f;
         private const float RareTreeTrunkTieEpsilon = 0.05f;
 
+        // Apple Tree and Mandarin Tree have a much thinner trunk than Rare Tree: the 1.1 m
+        // FarmWalkCollectStandoff left the player visibly far from them. 0.25 m lands right next
+        // to the thin trunk instead of on the pivot inside it. This is inside the 0.5 m
+        // RareTreeTrunkSelfRadius, which is fine: that radius is measured from the pivot to pick
+        // out the tree's own scan entry in ScoreRareTreeTrunkClearance, not from the landing.
+        private const float FruitTreeTrunkStandoff = 0.25f;
+
+        private static float ResolveTreeTrunkStandoffDistance(string nodeLabel)
+        {
+            switch (nodeLabel)
+            {
+                case "Apple Tree":
+                case "Mandarin Tree":
+                    return FruitTreeTrunkStandoff;
+                default:
+                    return FarmWalkCollectStandoff;
+            }
+        }
+
         // Every chopped/shaken tree whose pivot sits inside its trunk. Landing on the pivot puts
         // the body inside the trunk collider and the player gets stuck there.
         private static bool IsRareTreeTrunkStandoffLabel(string nodeLabel)
@@ -1408,12 +1427,14 @@ namespace HeartopiaMod
         }
 
         // Eight landings around the trunk, fanning out from the approach side. The stand-off is
-        // FarmWalkCollectStandoff itself: that value must stay above the 0.5 m self-radius and
-        // inside the 1.5 m aura (FarmWalkAuraReach). A learned narrower distance would put the
+        // per tree kind (ResolveTreeTrunkStandoffDistance): FarmWalkCollectStandoff for Rare Tree,
+        // FruitTreeTrunkStandoff (0.25 m) for Apple/Mandarin. Each must clear its own trunk and
+        // stay inside the 1.5 m aura (FarmWalkAuraReach). A learned narrower distance would put the
         // body back in the trunk, so this does not call ResolveFarmWalkCollectStandoff.
         private Vector3 ApplyRareTreeTrunkStandoff(Vector3 position, string nodeLabel)
         {
             Vector3 approach = this.ResolveRareTreeApproachDirection(position);
+            float standoff = ResolveTreeTrunkStandoffDistance(nodeLabel);
             float bestScore = -1f;
             int bestDegrees = 0;
             Vector3 bestLanding = position;
@@ -1426,7 +1447,7 @@ namespace HeartopiaMod
                     degrees = -degrees;
                 }
 
-                Vector3 landing = position + (Quaternion.Euler(0f, degrees, 0f) * approach * FarmWalkCollectStandoff);
+                Vector3 landing = position + (Quaternion.Euler(0f, degrees, 0f) * approach * standoff);
                 landing.y = position.y + RareTreeTrunkLift;
                 float score = this.ScoreRareTreeTrunkClearance(position, landing);
                 if (score > bestScore + RareTreeTrunkTieEpsilon)
@@ -1438,6 +1459,7 @@ namespace HeartopiaMod
             }
 
             this.AutoFarmLog("Tree trunk stand-off " + nodeLabel
+                + " dist=" + standoff.ToString("0.00")
                 + " deg=" + bestDegrees
                 + " clearance=" + bestScore.ToString("0.00")
                 + " pivot=" + position

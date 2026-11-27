@@ -1166,7 +1166,8 @@ While engaged:
   (temporary, spawned at a sub-area point and floating in open water — diving under one of those
   is what pushed the player back to the surface). Unknown class falls back to the hosted dive.
   **With Stealth Foraging off, only a tree hop moves** (Rare Tree, Apple Tree, Mandarin Tree):
-  **1.1 m** beside the trunk and **0.3 m** above the pivot (Tree-trunk landing, below). Every other
+  beside the trunk (**1.1 m** Rare Tree, **0.25 m** Apple/Mandarin) and **0.3 m** above the pivot
+  (Tree-trunk landing, below). Every other
   node lands on the pivot.
   Contamination used to take a +7 m lift on the node hop; that lift is only the cleansing-coral hop.
   **Area/zone arrivals dive too** (−1.5 m,
@@ -1190,11 +1191,13 @@ by `ApplyForagingNodeTeleportOffset`.
 
 With Stealth Foraging off, a **Rare Tree**, **Apple Tree** or **Mandarin Tree** hop does not land on
 the entity pivot. That pivot sits inside the trunk, and landing on it leaves the player stuck in the
-trunk collider. The teleport argument is moved **1.1 m** out horizontally
-(`FarmWalkCollectStandoff`, inside the 1.5 m aura) and **0.3 m** above the pivot. Eight candidates fan
+trunk collider. The teleport argument is moved out horizontally — **1.1 m** for Rare Tree
+(`FarmWalkCollectStandoff`), **0.25 m** for the thinner Apple/Mandarin trunk (`FruitTreeTrunkStandoff`),
+both inside the 1.5 m aura — and **0.3 m** above the pivot. Eight candidates fan
 from the side the player is approaching; the first side that is clearly clearer of other scanned
-gatherables wins, and a tie within 0.05 m stays on the approach side. 0.5 m is the radius of the tree's
-own scan point, not the landing distance. Every other node keeps the pivot landing. `lastNodePosition`, marker matching, cooldown stamping, and the collect wait keep the
+gatherables wins, and a tie within 0.05 m stays on the approach side. 0.5 m is the radius, measured from the pivot, that
+picks out the tree's own scan point; it is not the landing distance, so the 0.25 m fruit-tree landing
+sitting inside it does not affect the score. Every other node keeps the pivot landing. `lastNodePosition`, marker matching, cooldown stamping, and the collect wait keep the
 true tree position. Stealth Foraging does not use this offset; that hop still dives under the node.
 
 #### Stealth Block
