@@ -315,3 +315,32 @@ jobs:
             --title "${{ github.ref_name }}" `
             --notes $notes `
             @assets
+
+      # After the GitHub release exists. Same tag gate as Publish: a workflow_dispatch build
+      # does not publish, so it does not post. TOKEN_CI / CHANNEL_CI are repository secrets;
+      # the token stays in the request URL and is masked in the log.
+      - name: Notify Telegram
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          TOKEN_CI: ${{ secrets.TOKEN_CI }}
+          CHANNEL_CI: ${{ secrets.CHANNEL_CI }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:TOKEN_CI) -or [string]::IsNullOrWhiteSpace($env:CHANNEL_CI)) {
+            throw "Repository secrets TOKEN_CI and CHANNEL_CI are required."
+          }
+          $text = @"
+          Bugtopia $($env:RELEASE_TAG) released!
+          Update should be available automatically via online launcher.
+          #ci #update
+          "@.Trim()
+          $payload = @{ chat_id = $env:CHANNEL_CI; text = $text } | ConvertTo-Json -Compress
+          $response = Invoke-RestMethod `
+            -Method Post `
+            -Uri "https://api.telegram.org/bot$($env:TOKEN_CI)/sendMessage" `
+            -ContentType "application/json; charset=utf-8" `
+            -Body $payload
+          if (-not $response.ok) { throw "Telegram sendMessage returned ok=false." }
+          Write-Host "Posted Telegram message $($response.result.message_id)."
