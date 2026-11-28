@@ -141,6 +141,11 @@ namespace HeartopiaMod
         }
 
         private bool petCareTrainLoopEnabled = false;
+        // Session-only, not saved. While on, the loop keeps starting sessions until the energy-snack
+        // scan finds nothing. Turning it off latches WaitSession so the headless session finishes
+        // and the next one is not armed; Delay/FeedPrepare/Feeding stop the loop immediately.
+        private bool petCareTrainKeepWhileEnergyFood = false;
+        private bool petCareTrainLoopStopAfterSession = false;
         private PetCareTrainLoopPhase petCareTrainLoopPhase = PetCareTrainLoopPhase.Idle;
         private uint petCareTrainLoopNetId = 0U;
         private bool petCareTrainLoopIsDog = false;
@@ -1298,9 +1303,11 @@ namespace HeartopiaMod
 
             this.TryLoadPetCareStats(entry);
 
-            // Train-until-learned mode: the loop handles hungry/low-energy itself (feeds the energy
-            // item) and repeats sessions until every unlocked action is learned.
-            if (this.petCareTrainLoopEnabled)
+            // Either checkbox runs the loop. "Train until all learned" stops when every unlocked
+            // action is learned. "Keep training while energy food remains" keeps that same loop
+            // going until the energy-snack scan finds nothing. Play is what arms it; the checkbox
+            // alone does not start a session.
+            if (this.petCareTrainLoopEnabled || this.petCareTrainKeepWhileEnergyFood)
             {
                 this.ArmPetCareTrainLoop(entry);
                 this.SetPetCareMessage(entry.NetId, "Train loop: starting...");
@@ -1509,6 +1516,7 @@ namespace HeartopiaMod
             this.petCareTrainLoopZeroSessions = 0;
             this.petCareTrainLoopForceFeed = false;
             this.petCareTrainLoopPendingReject = false;
+            this.petCareTrainLoopStopAfterSession = false;
             this.petCareTrainLoopLastTipId = 0;
             this.petCareTrainLoopLastVitality = entry.Vitality;
             this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
@@ -1582,6 +1590,7 @@ namespace HeartopiaMod
 
         private void StopPetCareTrainLoop(string message)
         {
+            this.petCareTrainLoopStopAfterSession = false;
             if (this.petCareTrainLoopPhase == PetCareTrainLoopPhase.Idle)
             {
                 return;
@@ -1597,12 +1606,48 @@ namespace HeartopiaMod
             this.PetPlayLog("Train loop: " + message);
         }
 
+        // False edge of "Keep training while energy food remains". Does not cancel the headless
+        // cat or dog session (no EndTease / CancelTease). WaitSession finishes on the server;
+        // any phase that has not started a session stops the loop so the next one is not armed.
+        private void OnPetCareTrainKeepWhileEnergyFoodTurnedOff()
+        {
+            if (this.petCareTrainLoopPhase == PetCareTrainLoopPhase.WaitSession)
+            {
+                this.petCareTrainLoopStopAfterSession = true;
+                this.PetPlayLog("Train loop: keep-training off - finishing the current session, then stopping.");
+                return;
+            }
+
+            if (this.petCareTrainLoopPhase == PetCareTrainLoopPhase.Delay
+                || this.petCareTrainLoopPhase == PetCareTrainLoopPhase.FeedPrepare
+                || this.petCareTrainLoopPhase == PetCareTrainLoopPhase.Feeding)
+            {
+                this.StopPetCareTrainLoop("Train loop stopped: keep-training switched off.");
+            }
+        }
+
+        private void ReschedulePetCareTrainLoopDecide(float delaySeconds, string reason)
+        {
+            this.petCareTrainLoopPendingReject = false;
+            this.petCareTrainLoopPhase = PetCareTrainLoopPhase.Delay;
+            this.petCareTrainLoopNextActionAt = Time.unscaledTime + delaySeconds;
+            this.PetPlayLog("Train loop: " + reason);
+        }
+
         // Called from the cat/dog session Finish paths so the loop can schedule the next step.
         private void OnPetCareTrainLoopSessionFinished(uint netId, int answersInSession)
         {
             if (this.petCareTrainLoopPhase != PetCareTrainLoopPhase.WaitSession
                 || netId != this.petCareTrainLoopNetId)
             {
+                return;
+            }
+
+            // Checkbox went off during this session: the headless run already reached its server
+            // end. Stop here so Decide never arms another one.
+            if (this.petCareTrainLoopStopAfterSession)
+            {
+                this.StopPetCareTrainLoop("Train loop stopped: keep-training switched off.");
                 return;
             }
 
@@ -1636,18 +1681,33 @@ namespace HeartopiaMod
                 switch (tip)
                 {
                     case MeowTipAllLearned:
+                        if (this.petCareTrainKeepWhileEnergyFood)
+                        {
+                            this.ReschedulePetCareTrainLoopDecide(2.5f, "cat learned every action - energy food remains, continuing.");
+                            return;
+                        }
                         this.StopPetCareTrainLoop("Train loop DONE: cat has learned every available action.");
                         return;
                     case MeowTipOwnerStamina:
+                        if (this.petCareTrainKeepWhileEnergyFood)
+                        {
+                            this.ReschedulePetCareTrainLoopDecide(5f, "stamina low - energy food remains, retrying.");
+                            return;
+                        }
                         this.StopPetCareTrainLoop("Train loop stopped: your stamina is too low - rest first.");
                         return;
                     case MeowTipHungry:
+                        if (this.petCareTrainKeepWhileEnergyFood)
+                        {
+                            this.ReschedulePetCareTrainLoopDecide(2f, "cat hungry - energy food remains, feeding one snack.");
+                            return;
+                        }
                         this.StopPetCareTrainLoop("Train loop stopped: cat is hungry - feed it normal food first.");
                         return;
                     case MeowTipOccupied:
                     case MeowTipOtherTeasing:
                         // Temporarily busy — just wait and retry, no feeding.
-                        if (this.petCareTrainLoopZeroSessions >= 8)
+                        if (this.petCareTrainLoopZeroSessions >= 8 && !this.petCareTrainKeepWhileEnergyFood)
                         {
                             this.StopPetCareTrainLoop("Train loop stopped: cat stays busy.");
                             return;
@@ -1660,7 +1720,7 @@ namespace HeartopiaMod
                     default:
                         // Low energy (or no tip captured) — feed the energy item and retry. The
                         // feedAttempts guard stops if energy is already maxed (real cause is elsewhere).
-                        if (this.petCareTrainLoopZeroSessions >= 8)
+                        if (this.petCareTrainLoopZeroSessions >= 8 && !this.petCareTrainKeepWhileEnergyFood)
                         {
                             this.StopPetCareTrainLoop("Train loop stopped: cat won't start even after feeding.");
                             return;
@@ -1682,20 +1742,35 @@ namespace HeartopiaMod
             switch (dogTip)
             {
                 case DogTipHungry:
+                    if (this.petCareTrainKeepWhileEnergyFood)
+                    {
+                        this.ReschedulePetCareTrainLoopDecide(2f, "dog hungry - energy food remains, feeding one snack.");
+                        return;
+                    }
                     this.StopPetCareTrainLoop("Train loop stopped: dog is hungry - feed it normal food first.");
                     return;
                 case MeowTipOwnerStamina: // 11033 NoStamina (player)
+                    if (this.petCareTrainKeepWhileEnergyFood)
+                    {
+                        this.ReschedulePetCareTrainLoopDecide(5f, "stamina low - energy food remains, retrying.");
+                        return;
+                    }
                     this.StopPetCareTrainLoop("Train loop stopped: your stamina is too low - rest first.");
                     return;
                 case DogTipInvalid:
                 case DogTipFeatureNotOpen:
+                    if (this.petCareTrainKeepWhileEnergyFood)
+                    {
+                        this.ReschedulePetCareTrainLoopDecide(5f, "dog train rejected (tip " + dogTip + ") - energy food remains, retrying.");
+                        return;
+                    }
                     this.StopPetCareTrainLoop("Train loop stopped: dog can't train (tip " + dogTip + ").");
                     return;
                 case DogTipPetOccupied:
                 case DogTipPlayerOccupied:
                     // Busy (still finishing the eating animation) — NOT a real failure. Retry with a
                     // progressive delay so we don't spam prepare while the animation plays out.
-                    if (this.petCareTrainLoopZeroSessions >= 12)
+                    if (this.petCareTrainLoopZeroSessions >= 12 && !this.petCareTrainKeepWhileEnergyFood)
                     {
                         this.StopPetCareTrainLoop("Train loop stopped: dog stays busy.");
                         return;
@@ -1709,7 +1784,7 @@ namespace HeartopiaMod
                 default:
                     // Low energy (or no tip captured) — the pre-check usually catches dog energy, but
                     // fall back to feeding on a run of failures; the feedAttempts guard bounds it.
-                    if (this.petCareTrainLoopZeroSessions >= 6)
+                    if (this.petCareTrainLoopZeroSessions >= 6 && !this.petCareTrainKeepWhileEnergyFood)
                     {
                         this.StopPetCareTrainLoop("Train loop stopped: sessions keep failing (busy, or nothing left to learn).");
                         return;
@@ -1819,7 +1894,8 @@ namespace HeartopiaMod
                 return;
             }
 
-            if (entry.MotionsTotal >= 0 && entry.MotionsUnlocked >= 0 && entry.MotionsLearned >= entry.MotionsUnlocked)
+            if (!this.petCareTrainKeepWhileEnergyFood
+                && entry.MotionsTotal >= 0 && entry.MotionsUnlocked >= 0 && entry.MotionsLearned >= entry.MotionsUnlocked)
             {
                 this.StopPetCareTrainLoop("Train loop DONE: all " + entry.MotionsUnlocked + " unlocked actions learned (sessions=" + this.petCareTrainLoopSessions + ").");
                 return;
@@ -1834,7 +1910,7 @@ namespace HeartopiaMod
             if (lowEnergy || hungry || this.petCareTrainLoopForceFeed)
             {
                 this.petCareTrainLoopForceFeed = false;
-                if (this.petCareTrainLoopFeedAttempts >= 3)
+                if (this.petCareTrainLoopFeedAttempts >= 3 && !this.petCareTrainKeepWhileEnergyFood)
                 {
                     this.StopPetCareTrainLoop("Train loop stopped: feeding did not restore energy (attempts=" + this.petCareTrainLoopFeedAttempts + ").");
                     return;
@@ -1842,7 +1918,9 @@ namespace HeartopiaMod
 
                 if (!this.TryFindPetEnergyFood(entry.IsDog, out uint toolNetId, out string foodName, out int foodVitality, out string findStatus))
                 {
-                    this.StopPetCareTrainLoop("Train loop stopped: no energy food in bag (" + findStatus + ").");
+                    this.StopPetCareTrainLoop(this.petCareTrainKeepWhileEnergyFood
+                        ? ("Train loop stopped: energy food used up (" + findStatus + ").")
+                        : ("Train loop stopped: no energy food in bag (" + findStatus + ")."));
                     return;
                 }
 
@@ -1871,6 +1949,17 @@ namespace HeartopiaMod
             {
                 this.petCareTrainLoopNextActionAt = now + 2f;
                 return;
+            }
+
+            if (this.petCareTrainKeepWhileEnergyFood)
+            {
+                if (!this.TryFindPetEnergyFood(entry.IsDog, out uint sessionToolNetId, out string sessionFoodName, out int sessionVitality, out string sessionFindStatus))
+                {
+                    this.StopPetCareTrainLoop("Train loop stopped: energy food used up (" + sessionFindStatus + ").");
+                    return;
+                }
+
+                this.PetPlayLog("Train loop: energy food remains ('" + sessionFoodName + "' +" + sessionVitality + ", netId=" + sessionToolNetId + ").");
             }
 
             this.petCareTrainLoopSessions++;

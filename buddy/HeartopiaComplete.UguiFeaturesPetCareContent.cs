@@ -74,11 +74,14 @@ namespace HeartopiaMod
     //    the four feeding-card strings the source itself wraps in L (see below).
     //  - MY PETS card (:270-377) — DYNAMIC HEIGHT, the exact source formula reproduced:
     //    petCareRowCount = petCareListVisible ? petCareEntries.Count : 0;
-    //    height = 116 + rowCount*72 + (listVisible && rowCount==0 ? 22 : 0). Live status label
+    //    height = 144 + rowCount*72 + (listVisible && rowCount==0 ? 22 : 0). Live status label
     //    (petCareListStatus) beside the title; "Refresh"/"Show My Pets" button (label swaps on
     //    petCareListVisible) → petCareListVisible = true + RefreshPetCareList(); "Train until
     //    all learned (+energy food)" toggle → on DISABLE only, StopPetCareTrainLoop("Train loop
-    //    switched off.") — no save either direction.
+    //    switched off.") — no save either direction. "Keep training while energy food remains"
+    //    sits one row under it (y=102, session-only, default off, not saved). Turning that
+    //    checkbox off during WaitSession finishes the headless session and does not arm the
+    //    next one; during Delay/FeedPrepare/Feeding it stops the loop before a session starts.
     //  - The visible-list block (:307-377): TickPetCareAutoStatsRefresh() once per gated frame
     //    while visible (the source's own per-repaint refresh tick, self-throttled); empty-state
     //    label "No owned pets found nearby." when the entry count is 0; else pooled 72px rows.
@@ -239,6 +242,7 @@ namespace HeartopiaMod
             public GameObject RefreshButton;      // "Refresh"/"Show My Pets" caption swap
             public string RefreshShown;
             public Toggle TrainLoopToggle;
+            public Toggle KeepTrainingToggle;
             public GameObject PetsEmptyLabel;     // "No owned pets found nearby."
             public readonly List<UguiPetCarePetRowHandle> PetRows = new List<UguiPetCarePetRowHandle>();
 
@@ -288,7 +292,7 @@ namespace HeartopiaMod
         // 8: header 8 (+42) → TRAINING card 50 (160 tall, +174) → MY PETS card 224. Everything
         // from 224 down is owned by the relayout (three of the four remaining blocks resize).
         private const float UguiPetCareConditionalTopY = 224f;
-        private const float UguiPetCarePetRowsTopY = 110f;    // :334 — rows at petsRect.y + 110
+        private const float UguiPetCarePetRowsTopY = 138f;    // one checkbox row under TrainLoopToggle
         private const float UguiPetCarePetRowStep = 104f;     // 72px source row + a food-type button
         private const float UguiPetCareFoodRowStep = 36f;     // :383 petFoodOptionHeight
         private const float UguiPetCareFoodPanelHeight = 300f; // ≈ source :454 (34 + 7*36 + 14)
@@ -462,9 +466,14 @@ namespace HeartopiaMod
                 new System.Action<bool>(this.OnUguiFeaturesPetCareTrainLoopToggled));
             PlaceUguiTopLeft(handle.TrainLoopToggle.gameObject, 16f, 74f, rowW - 32f, 28f); // :294-297
 
+            handle.KeepTrainingToggle = this.CreateUguiCheckbox(handle.PetsCard.transform, "KeepTrainingToggle",
+                this.L("Keep training while energy food remains"), this.petCareTrainKeepWhileEnergyFood,
+                new System.Action<bool>(this.OnUguiFeaturesPetCareKeepTrainingToggled));
+            PlaceUguiTopLeft(handle.KeepTrainingToggle.gameObject, 16f, 102f, rowW - 32f, 28f);
+
             handle.PetsEmptyLabel = this.CreateUguiLabel(handle.PetsCard.transform, "EmptyLabel",
                 this.L("No owned pets found nearby."), 11f, textColor, false);
-            PlaceUguiTopLeft(handle.PetsEmptyLabel, 16f, 110f, rowW - 32f, 18f); // :322
+            PlaceUguiTopLeft(handle.PetsEmptyLabel, 16f, 138f, rowW - 32f, 18f); // :322
             handle.PetsEmptyLabel.SetActive(false);
 
             // -------- PET FOOD card (:379-588 — dynamic height via relayout) --------
@@ -685,9 +694,9 @@ namespace HeartopiaMod
             float rowW = handle.ContentWidth - 16f;
             float yCur = UguiPetCareConditionalTopY;
 
-            // :278-279 — the EXACT source height formula.
+            // Source height was 116; +28 for the keep-training checkbox under TrainLoopToggle.
             int petRowCount = this.petCareListVisible ? this.petCareEntries.Count : 0;
-            float petsCardHeight = 116f + petRowCount * UguiPetCarePetRowStep
+            float petsCardHeight = 144f + petRowCount * UguiPetCarePetRowStep
                 + (this.petCareListVisible && petRowCount == 0 ? 22f : 0f);
             PlaceUguiTopLeft(handle.PetsCard, rowX, yCur, rowW, petsCardHeight);
             SetUguiGoActive(handle.PetsEmptyLabel, this.petCareListVisible && petRowCount == 0); // :320-323
@@ -1324,6 +1333,7 @@ namespace HeartopiaMod
                 this.SyncUguiToggleFromField(handle.AutoDogToggle, this.petPlayAutoDogEnabled);
                 this.SyncUguiToggleFromField(handle.AutoWashToggle, this.petPlayAutoWashEnabled);
                 this.SyncUguiToggleFromField(handle.TrainLoopToggle, this.petCareTrainLoopEnabled);
+                this.SyncUguiToggleFromField(handle.KeepTrainingToggle, this.petCareTrainKeepWhileEnergyFood);
                 this.SyncUguiToggleFromField(handle.SkipFiveStarToggle, this.petFeedSkipFiveStarFood);
                 this.SyncUguiToggleFromField(handle.SkipRareToggle, this.petFeedSkipRareFood);
 
@@ -1499,6 +1509,33 @@ namespace HeartopiaMod
                 {
                     ModLogger.Msg("[UguiShell] Pet Care train loop stop error: " + ex.Message);
                 }
+            }
+        }
+
+        // Session-only. Turning it on does not start a session; Play arms the loop while this
+        // flag is on. Turning it off finishes a headless session already in WaitSession and
+        // stops the loop before any other phase starts one.
+        private void OnUguiFeaturesPetCareKeepTrainingToggled(bool value)
+        {
+            if (value == this.petCareTrainKeepWhileEnergyFood)
+            {
+                return;
+            }
+
+            this.petCareTrainKeepWhileEnergyFood = value;
+            if (value)
+            {
+                this.petCareTrainLoopStopAfterSession = false;
+                return;
+            }
+
+            try
+            {
+                this.OnPetCareTrainKeepWhileEnergyFoodTurnedOff();
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Msg("[UguiShell] Pet Care keep-training stop error: " + ex.Message);
             }
         }
 
